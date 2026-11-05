@@ -1175,6 +1175,18 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
         }
         Msg::Sessions { pane, sessions } => {
             let live = &mut m.live.panes_logic;
+            // The mod names the session outright; the transcript hunt is for
+            // the agents that have none. Its answer is not even claimed.
+            let bridged = live
+                .machines
+                .get(&pane)
+                .is_none_or(|machine| machine.bridged);
+            if bridged {
+                if let Some(watch) = live.watches.get_mut(&pane) {
+                    watch.skip_round(now);
+                }
+                return Task::none();
+            }
             let Some(found) = live
                 .watches
                 .get_mut(&pane)
@@ -1182,12 +1194,6 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
             else {
                 return Task::none();
             };
-            // The mod names the session outright; the transcript hunt is for
-            // the agents that have none.
-            let bridged = live
-                .machines
-                .get(&pane)
-                .is_none_or(|machine| machine.bridged);
             match (bridged, inputs(m, &pane, now)) {
                 (false, Some((info, _))) => {
                     run_effects(m, &info, vec![Effect::CaptureSession(found)])
@@ -1313,16 +1319,25 @@ fn slow(st: &mut State, m: &mut Model, sv: &Services, now: EpochMs) -> Task<Mess
         .collect();
     for pane in due {
         let live = &mut m.live.panes_logic;
+        // A bridged pane's session is named by the mod: no listing at all.
+        let bridged = live
+            .machines
+            .get(&pane)
+            .is_none_or(|machine| machine.bridged);
         let Some(watch) = live.watches.get_mut(&pane) else {
             continue;
         };
+        if bridged {
+            watch.skip_round(now);
+            continue;
+        }
         if !watch.begin_round(now) {
             continue;
         }
         let cwd = watch.cwd.clone();
         tasks.push(Task::perform(
             async move {
-                tokio::task::spawn_blocking(move || hangar_core::sessions::list_sessions(cwd))
+                tokio::task::spawn_blocking(move || session_watch::hunt_listing(cwd))
                     .await
                     .ok()
             },

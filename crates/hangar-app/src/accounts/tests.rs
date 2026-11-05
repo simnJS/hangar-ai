@@ -967,3 +967,86 @@ fn what_fills_a_placeholder_is_never_touched() {
         format!("Retirer «{NNBSP}Perso : 2 ?{NNBSP}»{NNBSP}?")
     );
 }
+
+// ── ACC-01: an agent that ended is not running ────────────────────────
+
+#[test]
+fn an_agent_that_ended_is_not_asked_about_or_restarted() {
+    let mut h = Harness::new(Locale::En, "graphite");
+    h.model.live.accounts.launched.note("p1", Some("main"));
+    assert_eq!(running_in(&h.model, &ws("w1"), SwitchScope::Workspace), 1);
+    // What P5 does when the pane's shell exits or the pane is closed.
+    assert!(h.model.live.accounts.launched.note("p1", None));
+    assert_eq!(running_in(&h.model, &ws("w1"), SwitchScope::Workspace), 0);
+    assert_eq!(running_in(&h.model, &ws("w1"), SwitchScope::Default), 0);
+    let workspace = h.model.workspace(&ws("w1")).expect("w1 exists");
+    assert!(
+        switch_workspace(workspace, &h.model.live.accounts)
+            .panes
+            .iter()
+            .all(|pane| !pane.running)
+    );
+}
+
+// ── ACC-02: Enter while a request is in flight sends nothing ──────────
+
+#[test]
+fn a_second_enter_while_busy_sends_nothing() {
+    let h = Harness::new(Locale::En, "graphite");
+    let mut page = Page::default();
+    page.name = "Work".into();
+    assert_eq!(
+        settings_page::begin_add(&mut page, &h.model),
+        Some("Work".to_string())
+    );
+    // The same Enter again, before `account_add` answered.
+    assert_eq!(settings_page::begin_add(&mut page, &h.model), None);
+
+    page.renaming = Some(("perso".into(), "Personal".into()));
+    assert_eq!(begin_rename_for_test(&mut page, &h), None);
+    assert!(!settings_page::begin_remove(&mut page, "perso"));
+}
+
+// ── ACC-03: an older list, an early save ──────────────────────────────
+
+fn named(id: &str) -> ClaudeAccount {
+    ClaudeAccount {
+        id: id.into(),
+        label: id.into(),
+        is_main: id == MAIN_ACCOUNT,
+        logged_in: true,
+        email: None,
+        plan: None,
+    }
+}
+
+#[test]
+fn an_older_list_that_answers_last_does_not_win() {
+    let mut h = Harness::new(Locale::En, "graphite");
+    let mut st = State::default();
+    listed(&mut st, &mut h.model, 2, vec![named("main"), named("new")]);
+    listed(&mut st, &mut h.model, 1, vec![named("main")]);
+    let ids: Vec<_> = h
+        .model
+        .live
+        .accounts
+        .accounts
+        .as_ref()
+        .unwrap()
+        .iter()
+        .map(|account| account.id.as_str())
+        .collect();
+    assert_eq!(ids, ["main", "new"]);
+}
+
+#[test]
+fn usage_is_not_saved_before_the_file_was_read() {
+    let mut h = Harness::new(Locale::En, "graphite");
+    let mut st = State::default();
+    // A bridge report lands before the file is read.
+    assert!(!may_save(&mut st));
+    // Reading it releases the save that was held back, once.
+    assert!(usage_arrived(&mut st, &mut h.model, Usage::default()));
+    assert!(may_save(&mut st));
+    assert!(!usage_arrived(&mut st, &mut h.model, Usage::default()));
+}

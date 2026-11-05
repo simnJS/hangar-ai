@@ -244,5 +244,5 @@ pub use keys::{KeyEventKind, KeyOptions, KeyPress, encode_key};
 pub use links::is_web_link;
 pub use palette::{Palette, xterm_indexed};
 pub use search::{MAX_MATCHES, SearchDirection, SearchError, SearchOptions, SearchStatus};
-pub use terminal::Terminal;
+pub use terminal::{MAX_SCROLLBACK, Terminal};
 pub use widget::{Binding, BindingKey, Bindings, TerminalView, terminal_view};

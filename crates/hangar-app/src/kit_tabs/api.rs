@@ -575,6 +575,11 @@ impl PageHost {
         if self.closed || window != self.window {
             return None;
         }
+        // A native tab's message is held to 4 MB; so is a page's, before
+        // anything parses it.
+        if body.len() > hangar_webview::MAX_IPC_BODY_BYTES {
+            return None;
+        }
         if !kit_relay::is_kit_document(uri, self.api.cx.kit_id()) {
             return None;
         }

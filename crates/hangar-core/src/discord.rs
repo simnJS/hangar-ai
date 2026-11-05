@@ -12,8 +12,10 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use discord_rich_presence::{activity, DiscordIpc, DiscordIpcClient};
+use discord_rich_presence::error::Error as IpcError;
+use discord_rich_presence::{activity, DiscordIpc};
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 
 /// Discord throttles a client that updates faster than roughly five times per
 /// twenty seconds. Coalescing to one update every few seconds stays well under
@@ -35,6 +37,16 @@ const SHUTDOWN_GRACE: Duration = Duration::from_millis(400);
 
 /// Discord rejects a field longer than this instead of trimming it.
 const MAX_FIELD: usize = 128;
+
+/// How long a reply from Discord may take. A Discord that hangs would
+/// otherwise hold the worker on a read that never returns, and with it every
+/// later update and the quit's tidy path.
+#[cfg_attr(windows, allow(dead_code))]
+const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The IPC frame opcodes this module reads (Discord's RPC protocol).
+const OP_FRAME: u32 = 1;
+const OP_CLOSE: u32 = 2;
 
 /// What the frontend wants Discord to show. Compared as a whole to decide
 /// whether an update is worth sending, so every field takes part.
@@ -121,9 +133,179 @@ impl Shared {
     }
 }
 
+#[cfg(unix)]
+type Stream = std::os::unix::net::UnixStream;
+#[cfg(windows)]
+type Stream = std::fs::File;
+
+/// The pipe to Discord, in place of the library's `DiscordIpcClient`: that one
+/// keeps its socket private, so it cannot be given a read timeout, and its
+/// handshake reads Discord's answer only to throw it away — a rejected app id
+/// read as a working link. Implementing the library's trait keeps its framing
+/// and its activity payloads.
+struct Pipe {
+    client_id: String,
+    socket: Option<Stream>,
+}
+
+impl Pipe {
+    fn new(client_id: &str) -> Self {
+        Self {
+            client_id: client_id.to_string(),
+            socket: None,
+        }
+    }
+
+    /// Opens the pipe and handshakes, which only counts once Discord has
+    /// answered `READY`.
+    fn open(client_id: &str) -> Result<Self, String> {
+        let mut pipe = Self::new(client_id);
+        pipe.connect_ipc().map_err(|err| err.to_string())?;
+        pipe.handshake()?;
+        Ok(pipe)
+    }
+
+    fn handshake(&mut self) -> Result<(), String> {
+        self.send(json!({ "v": 1, "client_id": self.client_id }), 0)
+            .map_err(|err| err.to_string())?;
+        let (op, reply) = self.recv().map_err(|err| err.to_string())?;
+        answer(op, &reply)?;
+        if reply.get("evt").and_then(Value::as_str) != Some("READY") {
+            return Err(format!("Discord did not accept the handshake: {reply}"));
+        }
+        Ok(())
+    }
+
+    /// Sends the presence and reads Discord's answer to it. Reading it is not
+    /// optional: left unread, those frames fill the pipe buffer, and the write
+    /// that finally overflows it would block this thread for good.
+    fn push(&mut self, want: &Presence) -> Result<(), String> {
+        self.set_activity(build(want))
+            .map_err(|err| err.to_string())?;
+        let (op, reply) = self.recv().map_err(|err| err.to_string())?;
+        answer(op, &reply)
+    }
+
+    #[cfg(unix)]
+    fn find_pipe() -> Option<std::path::PathBuf> {
+        // Where the Linux and macOS clients put it, Flatpak and Snap builds
+        // included (the same places the library looks).
+        const ENV_KEYS: [&str; 4] = ["XDG_RUNTIME_DIR", "TMPDIR", "TMP", "TEMP"];
+        const SUBPATHS: [&str; 7] = [
+            "",
+            "app/com.discordapp.Discord/",
+            "app/dev.vencord.Vesktop/",
+            ".flatpak/com.discordapp.Discord/xdg-run/",
+            ".flatpak/dev.vencord.Vesktop/xdg-run/",
+            "snap.discord-canary/",
+            "snap.discord/",
+        ];
+        let snap = std::env::var_os("SNAP").is_some();
+        for key in ENV_KEYS {
+            let Some(value) = std::env::var_os(key) else {
+                continue;
+            };
+            let mut base = std::path::PathBuf::from(value);
+            if snap && key == ENV_KEYS[0] {
+                base.pop();
+            }
+            if !base.is_dir() {
+                continue;
+            }
+            for index in 0..10 {
+                for subpath in SUBPATHS {
+                    let path = base.join(subpath).join(format!("discord-ipc-{index}"));
+                    if path.exists() {
+                        return Some(path);
+                    }
+                }
+            }
+        }
+        None
+    }
+}
+
+/// What Discord's reply to a command means: a close frame (a bad app id,
+/// mostly) or an `ERROR` event is a failure, whatever the write said.
+fn answer(op: u32, reply: &Value) -> Result<(), String> {
+    let message = || {
+        reply
+            .get("message")
+            .or_else(|| reply.get("data").and_then(|data| data.get("message")))
+            .and_then(Value::as_str)
+            .unwrap_or("no reason given")
+            .to_string()
+    };
+    if op == OP_CLOSE {
+        return Err(format!("Discord closed the connection: {}", message()));
+    }
+    if op != OP_FRAME {
+        return Err(format!("unexpected frame from Discord (op {op})"));
+    }
+    if reply.get("evt").and_then(Value::as_str) == Some("ERROR") {
+        return Err(format!("Discord refused the presence: {}", message()));
+    }
+    Ok(())
+}
+
+impl DiscordIpc for Pipe {
+    fn get_client_id(&self) -> &str {
+        &self.client_id
+    }
+
+    #[cfg(unix)]
+    fn connect_ipc(&mut self) -> Result<(), IpcError> {
+        let path = Self::find_pipe().ok_or(IpcError::IPCNotFound)?;
+        let socket = Stream::connect(path).map_err(|_| IpcError::IPCConnectionFailed)?;
+        socket
+            .set_read_timeout(Some(REPLY_TIMEOUT))
+            .and_then(|()| socket.set_write_timeout(Some(REPLY_TIMEOUT)))
+            .map_err(|_| IpcError::IPCConnectionFailed)?;
+        self.socket = Some(socket);
+        Ok(())
+    }
+
+    /// A named pipe opened as a file has no timeout to set: Windows keeps the
+    /// library's blocking behaviour here.
+    #[cfg(windows)]
+    fn connect_ipc(&mut self) -> Result<(), IpcError> {
+        use std::os::windows::fs::OpenOptionsExt;
+        for index in 0..10 {
+            let path = format!(r"\\?\pipe\discord-ipc-{index}");
+            if let Ok(handle) = std::fs::OpenOptions::new().access_mode(0x3).open(path) {
+                self.socket = Some(handle);
+                return Ok(());
+            }
+        }
+        Err(IpcError::IPCConnectionFailed)
+    }
+
+    fn write(&mut self, data: &[u8]) -> Result<(), IpcError> {
+        use std::io::Write;
+        let socket = self.socket.as_mut().ok_or(IpcError::NotConnected)?;
+        socket.write_all(data).map_err(IpcError::WriteError)
+    }
+
+    fn read(&mut self, buffer: &mut [u8]) -> Result<(), IpcError> {
+        use std::io::Read;
+        let socket = self.socket.as_mut().ok_or(IpcError::NotConnected)?;
+        socket.read_exact(buffer).map_err(IpcError::ReadError)
+    }
+
+    fn close(&mut self) -> Result<(), IpcError> {
+        use std::io::Write;
+        let _ = self.send(json!({}), OP_CLOSE as u8);
+        let socket = self.socket.as_mut().ok_or(IpcError::NotConnected)?;
+        socket.flush().map_err(IpcError::FlushError)?;
+        #[cfg(unix)]
+        let _ = socket.shutdown(std::net::Shutdown::Both);
+        Ok(())
+    }
+}
+
 /// One live connection to Discord, and what it last managed to send.
 struct Link {
-    client: DiscordIpcClient,
+    client: Pipe,
     app_id: String,
     sent: Option<Presence>,
     /// Earliest moment the next update may go out.
@@ -132,10 +314,8 @@ struct Link {
 
 impl Link {
     fn open(app_id: &str) -> Result<Self, String> {
-        let mut client = DiscordIpcClient::new(app_id);
-        client.connect().map_err(|err| err.to_string())?;
         Ok(Self {
-            client,
+            client: Pipe::open(app_id)?,
             app_id: app_id.to_string(),
             sent: None,
             next_send: Instant::now(),
@@ -143,13 +323,7 @@ impl Link {
     }
 
     fn push(&mut self, want: &Presence) -> Result<(), String> {
-        self.client
-            .set_activity(build(want))
-            .map_err(|err| err.to_string())?;
-        // Discord answers every command. Those frames are of no use here, but
-        // left unread they fill the pipe buffer, and the write that finally
-        // overflows it blocks this thread for good.
-        self.client.recv().map_err(|err| err.to_string())?;
+        self.client.push(want)?;
         self.sent = Some(want.clone());
         self.next_send = Instant::now() + MIN_INTERVAL;
         Ok(())
@@ -372,4 +546,131 @@ pub fn discord_presence_set(presence: &DiscordPresence, wanted: Option<Presence>
 
 pub fn discord_presence_status(presence: &DiscordPresence) -> Status {
     presence.status()
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+
+    /// Discord's end of the pipe, played by the test.
+    struct Discord(Stream);
+
+    impl Discord {
+        fn pair(client_id: &str) -> (Pipe, Discord) {
+            let (ours, theirs) = Stream::pair().unwrap();
+            ours.set_read_timeout(Some(Duration::from_millis(300)))
+                .unwrap();
+            let mut pipe = Pipe::new(client_id);
+            pipe.socket = Some(ours);
+            (pipe, Discord(theirs))
+        }
+
+        fn read_frame(&mut self) -> (u32, Value) {
+            let mut header = [0u8; 8];
+            self.0.read_exact(&mut header).unwrap();
+            let op = u32::from_le_bytes(header[..4].try_into().unwrap());
+            let len = u32::from_le_bytes(header[4..].try_into().unwrap());
+            let mut body = vec![0u8; len as usize];
+            self.0.read_exact(&mut body).unwrap();
+            (op, serde_json::from_slice(&body).unwrap())
+        }
+
+        fn reply(&mut self, op: u32, body: Value) {
+            let body = body.to_string();
+            self.0.write_all(&op.to_le_bytes()).unwrap();
+            self.0
+                .write_all(&(body.len() as u32).to_le_bytes())
+                .unwrap();
+            self.0.write_all(body.as_bytes()).unwrap();
+        }
+    }
+
+    fn presence() -> Presence {
+        Presence {
+            app_id: "123".into(),
+            details: "Working".into(),
+            state: "on hangar".into(),
+            large_image: "logo".into(),
+            large_text: "Hangar".into(),
+            large_url: None,
+            small_image: None,
+            small_text: None,
+            started_at: None,
+            button_label: None,
+            button_url: None,
+        }
+    }
+
+    #[test]
+    fn the_handshake_waits_for_ready() {
+        let (mut pipe, mut discord) = Discord::pair("123");
+        let server = std::thread::spawn(move || {
+            let (op, hello) = discord.read_frame();
+            assert_eq!(op, 0);
+            assert_eq!(hello["client_id"], "123");
+            discord.reply(OP_FRAME, json!({ "cmd": "DISPATCH", "evt": "READY" }));
+            discord
+        });
+        pipe.handshake().unwrap();
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn a_rejected_app_id_is_not_a_connection() {
+        let (mut pipe, mut discord) = Discord::pair("bad");
+        let server = std::thread::spawn(move || {
+            discord.read_frame();
+            discord.reply(
+                OP_CLOSE,
+                json!({ "code": 4000, "message": "Invalid Client ID" }),
+            );
+            discord
+        });
+        let err = pipe.handshake().unwrap_err();
+        assert!(err.contains("Invalid Client ID"), "{err}");
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn an_error_answer_to_set_activity_is_a_failure() {
+        let (mut pipe, mut discord) = Discord::pair("123");
+        let server = std::thread::spawn(move || {
+            let (op, command) = discord.read_frame();
+            assert_eq!(op, 1);
+            assert_eq!(command["cmd"], "SET_ACTIVITY");
+            discord.reply(
+                OP_FRAME,
+                json!({ "cmd": "SET_ACTIVITY", "evt": "ERROR", "data": { "code": 4000, "message": "child \"activity\" fails" } }),
+            );
+            discord
+        });
+        let err = pipe.push(&presence()).unwrap_err();
+        assert!(err.contains("refused"), "{err}");
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn an_accepted_activity_is_a_success() {
+        let (mut pipe, mut discord) = Discord::pair("123");
+        let server = std::thread::spawn(move || {
+            discord.read_frame();
+            discord.reply(
+                OP_FRAME,
+                json!({ "cmd": "SET_ACTIVITY", "evt": null, "data": {} }),
+            );
+            discord
+        });
+        pipe.push(&presence()).unwrap();
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn a_discord_that_never_answers_does_not_hold_the_worker() {
+        let (mut pipe, discord) = Discord::pair("123");
+        let started = Instant::now();
+        assert!(pipe.handshake().is_err());
+        assert!(started.elapsed() < Duration::from_secs(3));
+        drop(discord);
+    }
 }

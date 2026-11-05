@@ -21,8 +21,9 @@ use std::fs;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::sync::{Mutex, OnceLock};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use chrono::{Local, Offset, TimeZone};
 use serde::{Deserialize, Serialize};
@@ -35,11 +36,16 @@ use parse::Digest;
 /// Bumped whenever a digest would come out differently for the same file —
 /// a parser fix — so the caches written before it are dropped, not trusted.
 /// 3: digests no longer name an agent, and Codex's are gone with it.
-const CACHE_VERSION: u32 = 3;
+/// 4: prompts carry their message's key, so a copied history counts once.
+const CACHE_VERSION: u32 = 4;
 const CACHE_FILE: &str = "usage-stats-cache.json";
 /// Bytes hashed at the head of a file to tell an appended one from a
 /// rewritten one.
 const HEAD_BYTES: usize = 4096;
+/// The longest the cache on disk may lag behind the one in memory while
+/// sessions keep writing: a scan right after another one leaves the write
+/// to a later scan. It is only a cache; a crash loses at most this much.
+const SAVE_EVERY: Duration = Duration::from_secs(30);
 
 // ---------------------------------------------------------------------------
 // Finding the transcripts
@@ -214,17 +220,61 @@ fn read_file(found: &Found, previous: Option<&Entry>) -> std::io::Result<Entry> 
 // The cache
 // ---------------------------------------------------------------------------
 
+/// An entry shared between the cache and a snapshot of it being written, so
+/// taking the snapshot copies pointers, not digests.
+#[derive(Debug, Clone, PartialEq)]
+struct Shared(Arc<Entry>);
+
+impl std::ops::Deref for Shared {
+    type Target = Entry;
+    fn deref(&self) -> &Entry {
+        &self.0
+    }
+}
+
+impl Serialize for Shared {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Shared {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Entry::deserialize(deserializer).map(|entry| Shared(Arc::new(entry)))
+    }
+}
+
 #[derive(Default, Serialize, Deserialize)]
 struct DiskCache {
     version: u32,
-    files: HashMap<String, Entry>,
+    files: HashMap<String, Shared>,
 }
 
 #[derive(Default)]
 struct Cache {
     /// Read from disk yet, or found missing.
     loaded: bool,
-    files: HashMap<String, Entry>,
+    files: HashMap<String, Shared>,
+    /// Memory holds something the disk does not.
+    unsaved: bool,
+    last_saved: Option<Instant>,
+}
+
+impl Cache {
+    /// What to write now, if anything: the changes are not on disk yet and
+    /// the last write was long enough ago. Taking it counts as saved; a
+    /// failed write puts it back with `mark_unsaved`.
+    fn take_snapshot(&mut self, now: Instant) -> Option<HashMap<String, Shared>> {
+        let due = self
+            .last_saved
+            .is_none_or(|at| now.duration_since(at) >= SAVE_EVERY);
+        if !self.unsaved || !due {
+            return None;
+        }
+        self.unsaved = false;
+        self.last_saved = Some(now);
+        Some(self.files.clone())
+    }
 }
 
 fn cache() -> &'static Mutex<Cache> {
@@ -239,7 +289,7 @@ fn scanning() -> &'static Mutex<()> {
     SCANNING.get_or_init(|| Mutex::new(()))
 }
 
-fn load_disk(path: &Path) -> HashMap<String, Entry> {
+fn load_disk(path: &Path) -> HashMap<String, Shared> {
     let Ok(file) = fs::File::open(path) else {
         return HashMap::new();
     };
@@ -251,11 +301,11 @@ fn load_disk(path: &Path) -> HashMap<String, Entry> {
     }
 }
 
-fn save_disk(path: &Path, files: &HashMap<String, Entry>) -> std::io::Result<()> {
+fn save_disk(path: &Path, files: &HashMap<String, Shared>) -> std::io::Result<()> {
     #[derive(Serialize)]
     struct Borrowed<'a> {
         version: u32,
-        files: &'a HashMap<String, Entry>,
+        files: &'a HashMap<String, Shared>,
     }
     let tmp = path.with_extension("json.tmp");
     {
@@ -318,7 +368,7 @@ fn refresh(roots: &Roots, disk: Option<&Path>) -> (ScanInfo, Vec<Source>) {
     let (todo, reused, gone) = {
         let mut cache = cache().lock().unwrap_or_else(|e| e.into_inner());
         ensure_loaded(&mut cache, disk);
-        let mut todo: Vec<(Found, Option<Entry>)> = Vec::new();
+        let mut todo: Vec<(Found, Option<Shared>)> = Vec::new();
         let mut reused = 0;
         for file in found.iter() {
             let key = file.path.to_string_lossy().into_owned();
@@ -364,7 +414,7 @@ fn refresh(roots: &Roots, disk: Option<&Path>) -> (ScanInfo, Vec<Source>) {
                 let Some((file, previous)) = todo.get(at) else {
                     break;
                 };
-                let entry = read_file(file, previous.as_ref());
+                let entry = read_file(file, previous.as_deref());
                 let key = file.path.to_string_lossy().into_owned();
                 results
                     .lock()
@@ -376,12 +426,12 @@ fn refresh(roots: &Roots, disk: Option<&Path>) -> (ScanInfo, Vec<Source>) {
 
     let parsed = todo.len();
     let mut failed = 0;
-    let changed = {
+    let snapshot = {
         let mut cache = cache().lock().unwrap_or_else(|e| e.into_inner());
         for (key, entry) in results.into_inner().unwrap_or_else(|e| e.into_inner()) {
             match entry {
                 Ok(entry) => {
-                    cache.files.insert(key, entry);
+                    cache.files.insert(key, Shared(Arc::new(entry)));
                 }
                 // Locked by another process for a moment, say: what the last
                 // read found stays until a read works.
@@ -391,14 +441,18 @@ fn refresh(roots: &Roots, disk: Option<&Path>) -> (ScanInfo, Vec<Source>) {
         for key in &gone {
             cache.files.remove(key);
         }
-        parsed > failed || !gone.is_empty()
+        if parsed > failed || !gone.is_empty() {
+            cache.unsaved = true;
+        }
+        // Only pointers are copied under the lock; the JSON is built and
+        // written after it is released, so a cached-only answer never waits
+        // for the disk. `scanning` keeps a second writer out.
+        disk.and_then(|_| cache.take_snapshot(Instant::now()))
     };
-    if changed {
-        if let Some(path) = disk {
-            let cache = cache().lock().unwrap_or_else(|e| e.into_inner());
-            if let Err(err) = save_disk(path, &cache.files) {
-                eprintln!("usage stats: could not write the cache: {err}");
-            }
+    if let (Some(path), Some(snapshot)) = (disk, snapshot) {
+        if let Err(err) = save_disk(path, &snapshot) {
+            eprintln!("usage stats: could not write the cache: {err}");
+            cache().lock().unwrap_or_else(|e| e.into_inner()).unsaved = true;
         }
     }
 
@@ -585,6 +639,48 @@ mod tests {
             transcript,
             root,
         }
+    }
+
+    #[test]
+    fn the_cache_is_written_only_when_it_changed_and_not_too_often() {
+        let mut cache = Cache::default();
+        let start = Instant::now();
+        // Nothing moved: nothing to write.
+        assert!(cache.take_snapshot(start).is_none());
+        // The first change goes straight out.
+        cache.unsaved = true;
+        assert!(cache.take_snapshot(start).is_some());
+        assert!(!cache.unsaved);
+        // A change right after waits, and stays pending...
+        cache.unsaved = true;
+        assert!(cache
+            .take_snapshot(start + Duration::from_secs(1))
+            .is_none());
+        assert!(cache.unsaved);
+        // ... until a later scan finds it due.
+        assert!(cache.take_snapshot(start + SAVE_EVERY).is_some());
+        assert!(cache.take_snapshot(start + SAVE_EVERY * 3).is_none());
+    }
+
+    #[test]
+    fn a_scan_right_after_another_leaves_the_write_to_a_later_one() {
+        let _turn = serial();
+        reset_cache();
+        let f = fixture("throttle");
+        usage_stats_at(&f.roots, Some(&f.disk), Window::default(), false);
+        let written = fs::read(&f.disk).unwrap();
+        let mut file = fs::OpenOptions::new()
+            .append(true)
+            .open(&f.transcript)
+            .unwrap();
+        writeln!(file, "{}", assistant("m2", "2026-10-01T11:00:00Z", 50)).unwrap();
+        drop(file);
+        let second = usage_stats_at(&f.roots, Some(&f.disk), Window::default(), false);
+        // The answer has the new call; the disk does not yet.
+        assert_eq!(total_output(&second), 150);
+        assert_eq!(fs::read(&f.disk).unwrap(), written);
+        assert!(cache().lock().unwrap().unsaved);
+        let _ = fs::remove_dir_all(&f.root);
     }
 
     #[test]

@@ -8,13 +8,15 @@
 //!
 //! The list is computed when the query changes and when the user steps. While
 //! output keeps arriving the lines move under it, so it is recomputed again,
-//! but not more often than [`REFRESH`], since a full scan of a long history is
-//! the one expensive thing the terminal does.
+//! since a full scan of a long history is the one expensive thing the terminal
+//! does: never while output is fed (that is the thread reading the process,
+//! holding the terminal the window draws), only when the widget ticks, and
+//! not more often than [`REFRESH`] or than [`SCAN_SHARE`] of the time allows.
 
 use std::time::{Duration, Instant};
 
 use alacritty_terminal::grid::Dimensions;
-use alacritty_terminal::index::{Boundary, Column, Direction, Line, Point};
+use alacritty_terminal::index::{Column, Direction, Line, Point};
 use alacritty_terminal::term::search::{Match, RegexIter, RegexSearch};
 
 use crate::terminal::Terminal;
@@ -27,6 +29,11 @@ pub const MAX_MATCHES: usize = 1000;
 /// The shortest time between two recomputations of the match list while
 /// output is arriving.
 const REFRESH: Duration = Duration::from_millis(250);
+
+/// While output streams, a refresh waits this many times as long as the last
+/// scan took, so that scanning a long history takes at most about a tenth of
+/// the time of the thread that does it.
+const SCAN_SHARE: u32 = 10;
 
 /// How the query is read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -79,12 +86,15 @@ pub(crate) struct Search {
     /// Output arrived since the list was computed.
     stale: bool,
     computed_at: Instant,
+    /// How long the last recomputation took.
+    scan_took: Duration,
 }
 
 impl Search {
     /// When the list is next due for a refresh, if it is out of date.
     pub(crate) fn refresh_due(&self) -> Option<Instant> {
-        self.stale.then(|| self.computed_at + REFRESH)
+        let wait = REFRESH.max(self.scan_took * SCAN_SHARE);
+        self.stale.then(|| self.computed_at + wait)
     }
 
     pub(crate) fn mark_stale(&mut self) {
@@ -145,6 +155,7 @@ impl Terminal {
             truncated: false,
             stale: false,
             computed_at: Instant::now(),
+            scan_took: Duration::ZERO,
         });
         self.recompute_matches();
 
@@ -155,6 +166,9 @@ impl Terminal {
         let at_or_above = search.matches.iter().rposition(|m| *m.start() <= bottom);
         search.current = at_or_above.or(search.matches.len().checked_sub(1));
         self.reveal_current_match();
+        // The app calls this outside `perform`: a jump must mark the rows
+        // changed itself, or the old ones stay drawn under the highlights.
+        self.sync_damage();
         Ok(self.search_status())
     }
 
@@ -189,6 +203,7 @@ impl Terminal {
         };
         search.current = Some(next);
         self.reveal_current_match();
+        self.sync_damage();
         self.search_status()
     }
 
@@ -253,6 +268,7 @@ impl Terminal {
         let Some(search) = self.search.as_mut() else {
             return;
         };
+        let started = Instant::now();
         let previous = search
             .current
             .and_then(|i| search.matches.get(i))
@@ -282,6 +298,7 @@ impl Terminal {
         search.truncated = truncated;
         search.stale = false;
         search.computed_at = Instant::now();
+        search.scan_took = search.computed_at - started;
     }
 
     /// The bottom-right of what is on screen.
@@ -313,12 +330,6 @@ impl Terminal {
         let target = (-line.0 + self.rows as i32 / 2).max(0) as usize;
         let target = target.min(self.term.history_size());
         self.set_display_offset(target);
-    }
-
-    /// Clamps a point to the grid, as used for a search origin.
-    #[allow(dead_code)]
-    pub(crate) fn clamp_point(&self, point: Point) -> Point {
-        point.grid_clamp(&self.term, Boundary::Grid)
     }
 }
 
@@ -439,6 +450,57 @@ mod tests {
             term.search("", SearchOptions::default()).unwrap(),
             SearchStatus::default()
         );
+    }
+
+    #[test]
+    fn output_does_not_rescan_the_history_until_the_tick() {
+        // Feeding runs on the thread that reads the process, holding the
+        // terminal the window draws: the scan waits for the widget's tick.
+        let mut term = terminal_with(&lines(30), 40, 5);
+        assert_eq!(
+            term.search("needle", SearchOptions::default())
+                .unwrap()
+                .count,
+            30
+        );
+        let later = Instant::now() + Duration::from_secs(5);
+        term.feed(lines(10).as_bytes());
+        assert_eq!(term.search_status().count, 30, "not rescanned by the feed");
+        let due = term.deadline().expect("a refresh is due");
+        assert!(due <= Instant::now() + REFRESH);
+        term.tick(later);
+        assert_eq!(term.search_status().count, 40);
+        assert!(term.deadline().is_none());
+    }
+
+    #[test]
+    fn a_slow_scan_waits_longer_before_the_next() {
+        let mut term = terminal_with(&lines(10), 40, 5);
+        term.search("needle", SearchOptions::default()).unwrap();
+        let search = term.search.as_mut().unwrap();
+        search.scan_took = Duration::from_millis(100);
+        search.mark_stale();
+        let due = search.refresh_due().unwrap();
+        assert_eq!(due - search.computed_at, Duration::from_secs(1));
+    }
+
+    #[test]
+    fn a_search_jump_marks_the_rows_changed() {
+        let mut term = terminal_with(&lines(40), 40, 5);
+        let before: Vec<u64> = (0..5).map(|r| term.row_generation(r)).collect();
+        term.search("line 3 ", SearchOptions::default()).unwrap();
+        assert!(term.display_offset() > 0);
+        let after: Vec<u64> = (0..5).map(|r| term.row_generation(r)).collect();
+        assert!(
+            before.iter().zip(&after).all(|(b, a)| a > b),
+            "{before:?} {after:?}"
+        );
+        // Stepping to a match further up moves again, and marks again.
+        term.search("line 30 ", SearchOptions::default()).unwrap();
+        let back = (0..5).map(|r| term.row_generation(r)).collect::<Vec<_>>();
+        term.search_step(SearchDirection::Forward);
+        let stepped: Vec<u64> = (0..5).map(|r| term.row_generation(r)).collect();
+        assert!(back.iter().zip(&stepped).all(|(b, a)| a >= b));
     }
 
     #[test]

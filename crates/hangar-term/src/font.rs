@@ -119,11 +119,12 @@ impl Font {
         ((self.size * self.line_height * scale).round().max(1.0)) / scale
     }
 
-    /// The `iced` font for a style, with the family resolved against what is
-    /// installed.
-    pub(crate) fn resolve(&self, bold: bool, italic: bool) -> iced::Font {
+    /// The `iced` font for a style in a family resolved against what is
+    /// installed with [`family`](Self::family), which scans the font system
+    /// and is best asked once for the four styles.
+    pub(crate) fn resolve_with(family: Family, bold: bool, italic: bool) -> iced::Font {
         iced::Font {
-            family: self.family(),
+            family,
             weight: if bold { Weight::Bold } else { Weight::Normal },
             style: if italic { Style::Italic } else { Style::Normal },
             ..iced::Font::DEFAULT

@@ -108,3 +108,61 @@ fn a_silent_check_failure_leaves_no_error_behind() {
     assert_eq!(st.stage(), Phase::Idle);
     assert_eq!(st.error, None);
 }
+
+#[test]
+fn a_restart_that_fails_says_why_and_can_be_tried_again() {
+    let mut st = State::default();
+    st.take(&Updater::Ready(release()));
+    assert!(st.begin_restart());
+    assert!(
+        !st.begin_restart(),
+        "a restart under way is not started twice"
+    );
+
+    // pkexec dismissed: the updater reports the install error, then the
+    // restart's own result arrives.
+    st.take(&Updater::Installing(release()));
+    st.take(&Updater::Error {
+        stage: Stage::Install,
+        message: "administrator rights were not granted".into(),
+    });
+    st.restart_failed("install failed: administrator rights were not granted".into());
+    assert_eq!(st.stage(), Phase::Failed);
+    assert!(!st.restarting, "the failure unsticks the button");
+    assert_eq!(
+        st.error.as_deref(),
+        Some("install failed: administrator rights were not granted")
+    );
+
+    // Retry, the download again, and Restart is live once more.
+    st.retry();
+    assert_eq!(st.stage(), Phase::Available);
+    st.take(&Updater::Downloading {
+        release: release(),
+        bytes: 0,
+        total: Some(10),
+    });
+    st.take(&Updater::Ready(release()));
+    assert_eq!(st.stage(), Phase::Ready);
+    assert!(st.begin_restart());
+}
+
+#[test]
+fn a_relaunch_that_fails_after_the_install_is_shown_too() {
+    // The updater is at Installed, which reads as ready; only the restart's
+    // result says it went wrong.
+    let mut st = State::default();
+    st.take(&Updater::Ready(release()));
+    assert!(st.begin_restart());
+    st.take(&Updater::Installed(release()));
+    st.restart_failed("starting the new version: no such file".into());
+    assert_eq!(st.stage(), Phase::Failed);
+    assert!(!st.restarting);
+
+    st.retry();
+    // The download that follows has nothing to do and reports the state it
+    // found, Installed, which offers Restart again.
+    st.take(&Updater::Installed(release()));
+    assert_eq!(st.stage(), Phase::Ready);
+    assert!(st.begin_restart());
+}

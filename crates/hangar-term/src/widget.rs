@@ -18,6 +18,7 @@
 //! top and never touch the plans.
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::time::{Duration, Instant};
 
@@ -313,10 +314,7 @@ impl Fonts {
         // One family lookup for all four: it asks the font system, which is
         // not free.
         let family = font.family();
-        let make = |bold, italic| iced::Font {
-            family,
-            ..font.resolve(bold, italic)
-        };
+        let make = |bold, italic| Font::resolve_with(family, bold, italic);
         Self {
             regular: make(false, false),
             bold: make(true, false),
@@ -368,11 +366,38 @@ impl RowCache {
     }
 }
 
+/// The drawing of each shape character at the current metrics.
+///
+/// A shape is a few rectangles, but building it allocates, and a bordered
+/// TUI has hundreds of them on screen, drawn again every frame. The shapes
+/// depend only on the character and the metrics, and there are a few hundred
+/// characters at most, so they are kept until the metrics change.
+#[derive(Default)]
+struct ShapeCache {
+    metrics: Option<[u32; 5]>,
+    shapes: HashMap<char, Option<Shape>>,
+}
+
+impl ShapeCache {
+    fn get(&mut self, glyph: char, metrics: shapes::Metrics) -> Option<&Shape> {
+        let key = metrics.key();
+        if self.metrics != Some(key) {
+            self.metrics = Some(key);
+            self.shapes.clear();
+        }
+        self.shapes
+            .entry(glyph)
+            .or_insert_with(|| shapes::shape(glyph, metrics))
+            .as_ref()
+    }
+}
+
 #[derive(Default)]
 struct State {
     measured: Option<Measured>,
     scale: Option<f32>,
     rows: RefCell<RowCache>,
+    shapes: RefCell<ShapeCache>,
     input: InputState,
     modifiers: Modifiers,
     /// The button whose press started inside the widget and is still down.
@@ -1115,26 +1140,30 @@ where
             // Shapes and decorations: lines that fill cells.
             let metrics_for =
                 shapes::Metrics::new(cell.width, cell.height, measured.font.size, scale);
+            let mut shape_cache = state.shapes.borrow_mut();
+            // The rectangles of a row's lines, with the ones that touch side
+            // by side joined: a border of twenty cells is one quad, which no
+            // renderer can leave a seam in. One list, emptied for each row.
+            let mut lines: Vec<(Rectangle, Color)> = Vec::new();
             for (row, slot) in cache.plans.iter().enumerate() {
                 let Some((_, plan)) = slot else { continue };
-                // The rectangles of a row's lines, with the ones that touch
-                // side by side joined: a border of twenty cells is one quad,
-                // which no renderer can leave a seam in.
-                let mut lines: Vec<(Rectangle, Color)> = Vec::new();
                 for shape_cell in &plan.shapes {
                     if shape_cell.column >= columns {
                         continue;
                     }
+                    let Some(shape) = shape_cache.get(shape_cell.glyph, metrics_for) else {
+                        continue;
+                    };
                     draw_shape(
                         renderer,
                         &mut lines,
-                        shape_cell.glyph,
+                        shape,
                         shape_cell.color,
                         at(shape_cell.column, row),
                         metrics_for,
                     );
                 }
-                for (rect, color) in lines {
+                for (rect, color) in lines.drain(..) {
                     renderer.fill_quad(quad(rect), color);
                 }
                 for span in &plan.decorations {
@@ -1606,16 +1635,13 @@ fn push_joined(lines: &mut Vec<(Rectangle, Color)>, rect: Rectangle, color: Colo
 fn draw_shape<Renderer>(
     renderer: &mut Renderer,
     lines: &mut Vec<(Rectangle, Color)>,
-    glyph: char,
+    shape: &Shape,
     color: Color,
     origin: Point,
     metrics: shapes::Metrics,
 ) where
     Renderer: text::Renderer<Font = iced::Font>,
 {
-    let Some(shape) = shapes::shape(glyph, metrics) else {
-        return;
-    };
     let shift = |r: shapes::Rect| {
         Rectangle::new(
             Point::new(origin.x + r.x, origin.y + r.y),
@@ -1625,16 +1651,16 @@ fn draw_shape<Renderer>(
     match shape {
         Shape::Rects(rects) => {
             for rect in rects {
-                push_joined(lines, shift(rect), color);
+                push_joined(lines, shift(*rect), color);
             }
         }
         Shape::Shade(alpha) => {
             let whole = Rectangle::new(origin, Size::new(metrics.width, metrics.height));
-            renderer.fill_quad(quad(whole), Color { a: alpha, ..color });
+            renderer.fill_quad(quad(whole), Color { a: *alpha, ..color });
         }
         Shape::Arc(arc) => {
-            for stub in arc.stubs {
-                renderer.fill_quad(quad(shift(stub)), color);
+            for stub in &arc.stubs {
+                renderer.fill_quad(quad(shift(*stub)), color);
             }
             // The ring is a rounded square with a border, cut down to the
             // quadrant that is the corner by a clipping layer.
@@ -1660,7 +1686,7 @@ fn draw_shape<Renderer>(
             for (x, y) in centres {
                 let dot = Rectangle::new(
                     Point::new(origin.x + x - diameter / 2.0, origin.y + y - diameter / 2.0),
-                    Size::new(diameter, diameter),
+                    Size::new(*diameter, *diameter),
                 );
                 renderer.fill_quad(
                     Quad {
@@ -1772,6 +1798,20 @@ mod tests {
         width: 8.0,
         height: 16.0,
     };
+
+    #[test]
+    fn shapes_are_built_once_per_metrics() {
+        let mut cache = ShapeCache::default();
+        let small = shapes::Metrics::new(8.0, 17.0, 14.0, 1.0);
+        let large = shapes::Metrics::new(10.0, 21.0, 18.0, 2.0);
+        assert_eq!(cache.get('╭', small), shapes::shape('╭', small).as_ref());
+        assert_eq!(cache.get('─', small), shapes::shape('─', small).as_ref());
+        assert_eq!(cache.get('a', small), None);
+        assert_eq!(cache.shapes.len(), 3);
+        // Other metrics: drawn again, at their size.
+        assert_eq!(cache.get('─', large), shapes::shape('─', large).as_ref());
+        assert_eq!(cache.shapes.len(), 1);
+    }
 
     #[test]
     fn the_grid_is_the_whole_cells_that_fit() {

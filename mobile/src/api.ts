@@ -39,8 +39,11 @@ import type {
  *
  * Same origin, a cookie session set by pairing, and every POST or DELETE
  * carries `X-Hangar: 1`. A 401 anywhere means the phone has to pair again; a 503
- * `pc-busy` means the window did not answer in time and the call can be made
- * again. The client also keeps the time of the last call the PC answered, so
+ * `pc-busy` means the window was not reached, and the call can be made again; a
+ * 504 `pc-slow` means the window took it and has not said what it did yet: it
+ * may have run. A call that changes something carries an `Idempotency-Key`,
+ * the same on each of its tries, so a try again after either one is answered
+ * with what the first did rather than made twice. The client also keeps the time of the last call the PC answered, so
  * the app can say how long it has been unreachable.
  *
  * The contract's shapes are the shared ones of src/remote/types.ts, re-exported
@@ -73,6 +76,17 @@ export type WaitingKind = Waiting["kind"];
 export type ActionState = Extract<ChatItemBody, { kind: "action" }>["state"];
 
 /* ── The phone's own shapes ────────────────────────────────────── */
+
+/**
+ * A permission the PC can name carries `prompt`, the one to send back with the
+ * answer (`permission`): the PC types nothing unless its pane still asks that
+ * one. Not in src/remote/types.ts yet, which the phone does not own.
+ */
+export type PromptId = { prompt?: string };
+export type PendingShown =
+  | Exclude<Pending, { kind: "permission" }>
+  | (Extract<Pending, { kind: "permission" }> & PromptId);
+export type ScreenShown = Screen & PromptId;
 
 
 export interface Health {
@@ -137,7 +151,8 @@ export type { App, AppOpened, AppSource };
 
 /**
  * - unpaired: the PC does not know this phone (any 401): pair again.
- * - busy: the PC answered, its window did not in time (503): try again.
+ * - busy: the PC answered, its window did not: `pc-busy` (503) it was not
+ *   reached, `pc-slow` (504) it has not said yet what it did.
  * - offline: no answer at all, or none in time.
  * - refused: the PC answered no, with its reason in `code`, and the PC's
  *   own words for it in `detail` when it gave them.
@@ -202,13 +217,36 @@ export interface ClientOptions {
   onUnpaired?: () => void;
   /** Called whenever the PC answers. */
   onAnswer?: (at: number) => void;
+  /** Where the calls' keys come from; the tests' are known. */
+  newKey?: () => string;
 }
 
 interface CallOptions {
   timeoutMs?: number;
-  /** Times a `pc-busy` is tried again, a second apart. */
+  /** Times a `pc-busy` or a `pc-slow` is tried again, a second apart. */
   retries?: number;
+  /**
+   * The call changes something: it carries a key of its own, the same on each
+   * try, which the PC makes it once by.
+   */
+  once?: boolean;
 }
+
+/** A key no other call shares. */
+export function newCallKey(): string {
+  const crypto = globalThis.crypto;
+  if (typeof crypto?.randomUUID === "function") return crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * A dialog of several questions is typed in a screen check at a time, which
+ * can take well past one wait of the server's: the same answer is asked after
+ * this many times more, its key keeping it typed once.
+ */
+export const ANSWER_RETRIES = 6;
 
 export type Client = ReturnType<typeof createClient>;
 
@@ -270,6 +308,10 @@ export function createClient(options: ClientOptions = {}) {
       failed();
       throw new ApiError("busy", reason ?? "pc-busy", 503, message);
     }
+    if (response.status === 504 && reason === "pc-slow") {
+      failed();
+      throw new ApiError("busy", reason, 504, message);
+    }
     answered();
     if (response.status === 401) {
       if (!pairing) options.onUnpaired?.();
@@ -290,10 +332,18 @@ export function createClient(options: ClientOptions = {}) {
     }
   }
 
-  const post = (path: string, body: unknown, { timeoutMs = CALL_TIMEOUT_MS, retries = 0 }: CallOptions = {}) =>
-    withRetries(retries, () =>
-      request("POST", path, JSON.stringify(body), { "Content-Type": "application/json" }, timeoutMs),
-    );
+  const newKey = options.newKey ?? newCallKey;
+
+  const post = (
+    path: string,
+    body: unknown,
+    { timeoutMs = CALL_TIMEOUT_MS, retries = 0, once = false }: CallOptions = {},
+  ) => {
+    // One key for every try of this call: a retry is the same call.
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (once) headers["Idempotency-Key"] = newKey();
+    return withRetries(retries, () => request("POST", path, JSON.stringify(body), headers, timeoutMs));
+  };
 
   const call = <T>(op: string, args: object, callOptions?: CallOptions) =>
     post(`/m/api/call/${op}`, args, callOptions) as Promise<T>;
@@ -319,18 +369,26 @@ export function createClient(options: ClientOptions = {}) {
 
     state: () => call<RemoteState>("state", {}),
     screen: (pane: string, lines?: number) =>
-      call<Screen>("screen", lines === undefined ? { pane } : { pane, lines }),
+      call<ScreenShown>("screen", lines === undefined ? { pane } : { pane, lines }),
     /** `queued`: held for a Claude Code that is not up yet, its project asleep or waking. */
-    send: (args: SendArgs) => call<{ sent: boolean; queued?: boolean }>("send", args, { retries: 1 }),
-    permission: (pane: string, allow: boolean) =>
-      call<{ answered: boolean }>("permission", { pane, allow }, { retries: 1 }),
-    manager: (text: string) => call<{ sent: boolean }>("manager", { text }, { retries: 1 }),
+    send: (args: SendArgs) => call<{ sent: boolean; queued?: boolean }>("send", args, { retries: 1, once: true }),
+    /**
+     * Allows or denies what the pane asks; `prompt`, the one the phone showed
+     * (`PromptId`), which the PC refuses to answer if it no longer asks it.
+     */
+    permission: (pane: string, allow: boolean, prompt?: string) =>
+      call<{ answered: boolean }>(
+        "permission",
+        prompt === undefined ? { pane, allow } : { pane, allow, prompt },
+        { retries: 1, once: true },
+      ),
+    manager: (text: string) => call<{ sent: boolean }>("manager", { text }, { retries: 1, once: true }),
     /** A page of a pane's conversation: the latest, or the one before `before`. */
     chat: (pane: string, { before, limit }: { before?: string; limit?: number } = {}) =>
-      call<Chat>("chat", { pane, ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }) }),
+      call<Chat & { pending: PendingShown | null }>("chat", { pane, ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }) }),
     /** Answers the pane's pending question, one answer per question, in their order. */
     answer: (pane: string, toolUseId: string, answers: ChatAnswer[]) =>
-      call<{ answered: boolean }>("answer", { pane, toolUseId, answers }, { retries: 1 }),
+      call<{ answered: boolean }>("answer", { pane, toolUseId, answers }, { retries: ANSWER_RETRIES, once: true }),
     history: (since?: number) =>
       call<{ entries: HistoryEntry[] }>("history", since === undefined ? {} : { since }),
     /** The agents' usage over a period, summed up on the PC, and the plan's limits when known. */
@@ -344,10 +402,13 @@ export function createClient(options: ClientOptions = {}) {
      * stage, and the same call made again waits for that landing.
      */
     land: (task: string, merge: string | null) =>
-      call<Landed>("land", merge === null ? { task } : { task, merge }, { retries: 1 }),
+      call<Landed>("land", merge === null ? { task } : { task, merge }, { retries: 1, once: true }),
     /** Sends it back to its worker with what to fix, as the person's own words. */
     rework: (task: string, text: string, merge: string | null) =>
-      call<{ sent: boolean }>("rework", merge === null ? { task, text } : { task, text, merge }, { retries: 1 }),
+      call<{ sent: boolean }>("rework", merge === null ? { task, text } : { task, text, merge }, {
+        retries: 1,
+        once: true,
+      }),
     /** The dev servers the phone may open, every project's or one's; those listening only. */
     apps: (workspace?: string) => call<{ apps: App[] }>("apps", workspace === undefined ? {} : { workspace }),
     /**
@@ -358,7 +419,8 @@ export function createClient(options: ClientOptions = {}) {
     openApp: (workspaceId: string, port: number) =>
       post("/m/api/app/open", { workspaceId, port }, { timeoutMs: OPEN_APP_TIMEOUT_MS }) as Promise<AppOpened>,
     /** Wakes a project asleep; `waking` is false when it was not. The state says when it is awake. */
-    wake: (projectId: string) => call<{ waking: boolean }>("wake", { workspace: projectId }, { retries: 1 }),
+    wake: (projectId: string) =>
+      call<{ waking: boolean }>("wake", { workspace: projectId }, { retries: 1, once: true }),
 
     shares: (since?: number) =>
       request(

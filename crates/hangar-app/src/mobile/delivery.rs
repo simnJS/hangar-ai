@@ -573,7 +573,8 @@ type Outcome = Result<(), String>;
 /// A landing the phone started: it asks again until it has the outcome.
 #[derive(Clone)]
 pub struct Landing {
-    target: String,
+    /// The branch it lands on, once its plan is read.
+    target: Arc<Mutex<String>>,
     outcome: Arc<Mutex<Option<Outcome>>>,
     ended_at: Arc<Mutex<u64>>,
     done: watch::Receiver<bool>,
@@ -583,18 +584,41 @@ impl Landing {
     pub fn outcome(&self) -> Option<Outcome> {
         locked(&self.outcome).clone()
     }
+
+    /// One not started yet, and what ends it.
+    fn new() -> (Landing, watch::Sender<bool>) {
+        let (finished, done) = watch::channel(false);
+        let landing = Landing {
+            target: Arc::new(Mutex::new(String::new())),
+            outcome: Arc::new(Mutex::new(None)),
+            ended_at: Arc::new(Mutex::new(0)),
+            done,
+        };
+        (landing, finished)
+    }
+
+    fn end(&self, outcome: Outcome, at: u64, finished: &watch::Sender<bool>) {
+        *locked(&self.outcome) = Some(outcome);
+        *locked(&self.ended_at) = at;
+        let _ = finished.send(true);
+    }
+
+    /// Ended longer ago than any phone still asks for its outcome.
+    fn stale(&self, now: u64) -> bool {
+        self.outcome().is_some() && now.saturating_sub(*locked(&self.ended_at)) > LAND_KEPT_MS
+    }
 }
 
 /// Lands the delivery in the background, as « Fusionner » does: the PC shows
 /// it landing, and its workspace stays awake for it (`startLanding`).
-async fn start_landing(port: &Port, mobile: &Mobile, found: &Found, plan: &Plan) -> Landing {
-    let (finished, done) = watch::channel(false);
-    let landing = Landing {
-        target: plan.target.clone(),
-        outcome: Arc::new(Mutex::new(None)),
-        ended_at: Arc::new(Mutex::new(0)),
-        done,
-    };
+async fn start_landing(
+    port: &Port,
+    found: &Found,
+    plan: &Plan,
+    landing: &Landing,
+    finished: watch::Sender<bool>,
+) {
+    *locked(&landing.target) = plan.target.clone();
     let mut run = begin_delivery(port, &found.ws.id, &found.task.id).await;
     let (ws, task, port_held, kept) = (
         found.ws.clone(),
@@ -604,35 +628,58 @@ async fn start_landing(port: &Port, mobile: &Mobile, found: &Found, plan: &Plan)
     );
     port.spawn(Box::pin(async move {
         let outcome = land_delivery(&ws, &task, &port_held).await;
-        *locked(&kept.outcome) = Some(outcome);
-        *locked(&kept.ended_at) = port_held.now_ms();
         run.end().await;
-        let _ = finished.send(true);
+        kept.end(outcome, port_held.now_ms(), &finished);
     }));
-    locked(&mobile.landings).insert(found.task.id.clone(), landing.clone());
-    landing
+}
+
+/// Whether this call is the one to start the task's landing, or one to wait
+/// on the landing another call started.
+enum Claim {
+    Start(Landing, watch::Sender<bool>),
+    Known(Landing),
+}
+
+/// The task's landing, or a new one booked under the same lock: two taps at
+/// once — two phones, or a retry — never both start one, the second waiting
+/// on the first's outcome (MOB-07). Landings no phone came back for are
+/// forgotten here (MOB-16).
+fn claim(mobile: &Mobile, task_id: &str, now: u64) -> Claim {
+    let mut landings = locked(&mobile.landings);
+    landings.retain(|_, landing| !landing.stale(now));
+    if let Some(landing) = landings.get(task_id) {
+        return Claim::Known(landing.clone());
+    }
+    let (landing, finished) = Landing::new();
+    landings.insert(task_id.to_string(), landing.clone());
+    Claim::Start(landing, finished)
 }
 
 async fn remote_land(port: &Port, mobile: &Mobile, args: &Value) -> Result<RemoteLanded, String> {
     let task_id = task_ref(args)?;
-    let known = {
-        let mut landings = locked(&mobile.landings);
-        let stale = landings.get(&task_id).is_some_and(|landing| {
-            landing.outcome().is_some()
-                && port.now_ms().saturating_sub(*locked(&landing.ended_at)) > LAND_KEPT_MS
-        });
-        if stale {
-            landings.remove(&task_id);
-        }
-        landings.get(&task_id).cloned()
-    };
-    let landing = match known {
-        Some(landing) => landing,
-        None => {
-            let found = waiting(port, &task_id).await?;
-            let plan = plan_of(&found).await?;
-            same_as(args, &found, &plan)?;
-            start_landing(port, mobile, &found, &plan).await
+    let landing = match claim(mobile, &task_id, port.now_ms()) {
+        Claim::Known(landing) => landing,
+        Claim::Start(landing, finished) => {
+            let ready = async {
+                let found = waiting(port, &task_id).await?;
+                let plan = plan_of(&found).await?;
+                same_as(args, &found, &plan)?;
+                Ok::<_, String>((found, plan))
+            }
+            .await;
+            match ready {
+                Ok((found, plan)) => {
+                    start_landing(port, &found, &plan, &landing, finished).await;
+                    landing
+                }
+                Err(error) => {
+                    // Refused before it started: a call waiting on it is
+                    // told why, and the next tap is a landing of its own.
+                    locked(&mobile.landings).remove(&task_id);
+                    landing.end(Err(error.clone()), port.now_ms(), &finished);
+                    return Err(error);
+                }
+            }
         }
     };
     let mut done = landing.done.clone();
@@ -650,11 +697,20 @@ async fn remote_land(port: &Port, mobile: &Mobile, args: &Value) -> Result<Remot
         });
     };
     // Said once: the next « Fusionner » is a landing of its own.
-    locked(&mobile.landings).remove(&task_id);
+    {
+        let mut landings = locked(&mobile.landings);
+        if landings
+            .get(&task_id)
+            .is_some_and(|kept| Arc::ptr_eq(&kept.outcome, &landing.outcome))
+        {
+            landings.remove(&task_id);
+        }
+    }
     outcome?;
+    let target = locked(&landing.target).clone();
     Ok(RemoteLanded::Landed {
         landed: true,
-        target: landing.target,
+        target,
     })
 }
 
@@ -714,14 +770,18 @@ pub async fn run(
     tell: &dyn Tell,
 ) -> Result<Value, String> {
     match op {
-        "remote_delivery" => remote_delivery(port, mobile, args).await.map(|a| value(&a)),
+        "remote_delivery" => remote_delivery(port, mobile, args)
+            .await
+            .and_then(|a| value(&a)),
         "remote_delivery_file" => remote_delivery_file(port, mobile, args)
             .await
-            .map(|a| value(&a)),
-        "remote_land" => remote_land(port, mobile, args).await.map(|a| value(&a)),
+            .and_then(|a| value(&a)),
+        "remote_land" => remote_land(port, mobile, args)
+            .await
+            .and_then(|a| value(&a)),
         "remote_rework" => remote_rework(port, mobile, args, tell)
             .await
-            .map(|a| value(&a)),
+            .and_then(|a| value(&a)),
         _ => Err(format!("Unknown remote request \"{op}\".")),
     }
 }

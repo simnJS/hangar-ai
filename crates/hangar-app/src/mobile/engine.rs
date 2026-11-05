@@ -157,36 +157,38 @@ pub async fn run(op: &str, args: &Value, port: &Port, mobile: &Mobile) -> Result
     match op {
         "remote_apps" => super::apps::remote_apps(port, args, mobile.sources())
             .await
-            .map(|answer| value(&answer)),
-        "remote_state" => Ok(value(&super::ops::remote_state(port, mobile).await)),
-        "remote_screen" => super::ops::remote_screen(port, args)
+            .and_then(|answer| value(&answer)),
+        "remote_state" => value(&super::ops::remote_state(port, mobile).await),
+        "remote_screen" => super::ops::remote_screen(port, mobile, args)
             .await
-            .map(|answer| value(&answer)),
+            .and_then(|answer| value(&answer)),
         "remote_send" => super::ops::remote_send(port, mobile, args)
             .await
-            .map(|answer| value(&answer)),
+            .and_then(|answer| value(&answer)),
         "remote_permission" => super::ops::remote_permission(port, mobile, args)
             .await
-            .map(|answer| value(&answer)),
+            .and_then(|answer| value(&answer)),
         "remote_manager" => super::ops::remote_manager(port, mobile, args)
             .await
-            .map(|answer| value(&answer)),
+            .and_then(|answer| value(&answer)),
         "remote_history" => super::ops::remote_history(port, mobile, args)
             .await
-            .map(|answer| value(&answer)),
+            .and_then(|answer| value(&answer)),
         "remote_chat" => super::chat_live::remote_chat(port, mobile, args)
             .await
-            .map(|answer| value(&answer)),
+            .and_then(|answer| value(&answer)),
         "remote_answer" => super::answer::remote_answer(port, mobile, args)
             .await
-            .map(|answer| value(&answer)),
+            .and_then(|answer| value(&answer)),
         "remote_wake" => super::ops::remote_wake(port, mobile, args)
             .await
-            .map(|answer| value(&answer)),
-        "remote_workspace" => super::ops::remote_workspace(port, args).map(|answer| value(&answer)),
+            .and_then(|answer| value(&answer)),
+        "remote_workspace" => {
+            super::ops::remote_workspace(port, args).and_then(|answer| value(&answer))
+        }
         "remote_stats" => super::stats::remote_stats(port, mobile, args)
             .await
-            .map(|answer| value(&answer)),
+            .and_then(|answer| value(&answer)),
         _ => Err(format!("Unknown remote request \"{op}\".")),
     }
 }

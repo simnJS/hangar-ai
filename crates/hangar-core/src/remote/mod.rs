@@ -18,6 +18,8 @@
 //! - apps.rs: the apps the agents build, opened on the phone, each on a
 //!   slot of its own: a port of the tailnet address, 8443 to 8448.
 //! - awake.rs: keeping the PC from sleeping while Hangar Mobile is on.
+//! - calls.rs: the phone's calls that change something, made at most once
+//!   whatever its retries.
 //! - files.rs: the files that go both ways, shared by an agent or uploaded
 //!   by the phone.
 //! - pairing.rs: the six-digit code and the QR code a phone pairs with.
@@ -42,6 +44,7 @@ mod activity;
 mod apps;
 mod assets;
 mod awake;
+mod calls;
 mod files;
 mod pairing;
 mod proxy;
@@ -114,6 +117,28 @@ impl Window {
         control::ask_internal_via(|request| (self.send)(request), op, args, limit).await
     }
 
+    /// `ask`, telling a request that never reached the window — nothing ran,
+    /// it may be made again — from one the window took and did not answer
+    /// within `limit`, which may have run.
+    async fn call(&self, op: &str, args: Value, limit: Duration) -> calls::Outcome {
+        let reached = std::sync::atomic::AtomicBool::new(false);
+        let send = |request| {
+            let sent = (self.send)(request);
+            reached.store(sent.is_ok(), std::sync::atomic::Ordering::Relaxed);
+            sent
+        };
+        match control::ask_internal_via(send, op, args, limit).await {
+            Ok(answer) => calls::Outcome::Answer(answer),
+            Err(ControlError::Refused(message)) => calls::Outcome::Refused(message),
+            Err(ControlError::Unavailable(_))
+                if !reached.load(std::sync::atomic::Ordering::Relaxed) =>
+            {
+                calls::Outcome::Unreached
+            }
+            Err(ControlError::Unavailable(_)) => calls::Outcome::Lost,
+        }
+    }
+
     fn changed(&self) {
         (self.changed)()
     }
@@ -132,6 +157,8 @@ pub struct Remote {
     /// What the phone calls this PC.
     pc: String,
     call_timeout: Duration,
+    /// The calls made with a key, kept for their retries.
+    calls: calls::Calls,
     assets: assets::Lookup,
     shares: Arc<Shares>,
     /// The PC's VAPID key, read or made the first time it is needed.
@@ -232,6 +259,7 @@ impl Remote {
             window,
             pc: pc_name(),
             call_timeout,
+            calls: calls::Calls::default(),
             assets,
             shares: Arc::new(shares),
             push_key: Mutex::new(None),
@@ -779,6 +807,11 @@ pub(super) mod tests {
         pub shared: Arc<Mutex<Vec<Share>>>,
         /// How many times `Event::RemoteChanged` was.
         pub changes: Arc<Mutex<usize>>,
+        /// The ids of the requests it left unanswered, for a test to answer
+        /// late, through `control_reply`, as a slow window does.
+        pub held: Arc<Mutex<Vec<String>>>,
+        /// A window that cannot be reached: every request fails to go out.
+        unreached: bool,
         answer: Arc<dyn Fn(&ControlRequest) -> Answer + Send + Sync>,
     }
 
@@ -790,7 +823,17 @@ pub(super) mod tests {
                 asked: Default::default(),
                 shared: Default::default(),
                 changes: Default::default(),
+                held: Default::default(),
+                unreached: false,
                 answer: Arc::new(answer),
+            }
+        }
+
+        /// A window no request reaches.
+        pub fn unreached() -> Self {
+            Self {
+                unreached: true,
+                ..Self::silent()
             }
         }
 
@@ -812,6 +855,9 @@ pub(super) mod tests {
             Window {
                 send: Arc::new(move |request: ControlRequest| {
                     fake.asked.lock().unwrap().push(request.op.clone());
+                    if fake.unreached {
+                        return Err("no window".to_string());
+                    }
                     match (fake.answer)(&request) {
                         Some(Ok(value)) => {
                             control::control_reply(request.id, true, Some(value), None)
@@ -819,7 +865,7 @@ pub(super) mod tests {
                         Some(Err(reason)) => {
                             control::control_reply(request.id, false, None, Some(reason))
                         }
-                        None => {}
+                        None => fake.held.lock().unwrap().push(request.id),
                     }
                     Ok(())
                 }),

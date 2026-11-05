@@ -30,7 +30,9 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-use crate::protocol::{Command, ErrorCode, Event, OpenWindow, PROTOCOL_VERSION, SchemeResponse};
+use crate::protocol::{
+    Command, ErrorCode, Event, MAX_EVENT_LINE_BYTES, OpenWindow, PROTOCOL_VERSION, SchemeResponse,
+};
 
 /// How long a helper gets to leave after its client is dropped before it is
 /// killed.
@@ -129,6 +131,9 @@ struct Queue {
     arrived: Condvar,
 }
 
+/// The most events the queue holds before it drops a page's messages.
+const MAX_QUEUED_IPC: usize = 1024;
+
 struct QueueState {
     events: VecDeque<Event>,
     closed: bool,
@@ -151,6 +156,11 @@ impl Queue {
     fn push(&self, event: Event) {
         let waker = {
             let mut state = lock(&self.state);
+            // A page that posts faster than the window reads is not kept up
+            // with: its messages past the bound are dropped, not queued.
+            if matches!(event, Event::Ipc { .. }) && state.events.len() >= MAX_QUEUED_IPC {
+                return;
+            }
             state.events.push_back(event);
             state.waker.take()
         };
@@ -519,6 +529,58 @@ fn write_lines(mut writer: impl Write, lines: Receiver<String>, closed: Arc<Atom
     }
 }
 
+enum Line {
+    /// The stream ended with nothing more.
+    End,
+    /// `raw` holds a line (with its newline, unless the stream ended).
+    Read,
+    /// The line was longer than allowed: it was read to its end and dropped,
+    /// without being held.
+    TooLong,
+}
+
+/// `read_until(b'\n')` that never holds more than `max` bytes of a line.
+fn read_line_bounded(
+    reader: &mut impl BufRead,
+    raw: &mut Vec<u8>,
+    max: usize,
+) -> std::io::Result<Line> {
+    let mut over = false;
+    let mut any = false;
+    loop {
+        let available = match reader.fill_buf() {
+            Ok(available) => available,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        };
+        if available.is_empty() {
+            break;
+        }
+        any = true;
+        let (used, done) = match available.iter().position(|byte| *byte == b'\n') {
+            Some(end) => (end + 1, true),
+            None => (available.len(), false),
+        };
+        if !over {
+            if raw.len() + used > max {
+                over = true;
+                raw.clear();
+            } else {
+                raw.extend_from_slice(&available[..used]);
+            }
+        }
+        reader.consume(used);
+        if done {
+            break;
+        }
+    }
+    Ok(match (any, over) {
+        (false, _) => Line::End,
+        (_, true) => Line::TooLong,
+        _ => Line::Read,
+    })
+}
+
 /// Reads the helper's output into the queue until it ends.
 fn read_events(
     reader: impl Read,
@@ -530,9 +592,16 @@ fn read_events(
     let mut raw = Vec::new();
     loop {
         raw.clear();
-        match reader.read_until(b'\n', &mut raw) {
-            Ok(0) | Err(_) => break,
-            Ok(_) => {}
+        match read_line_bounded(&mut reader, &mut raw, MAX_EVENT_LINE_BYTES) {
+            Ok(Line::End) | Err(_) => break,
+            Ok(Line::Read) => {}
+            Ok(Line::TooLong) => {
+                queue.push(Event::error(
+                    ErrorCode::TooLarge,
+                    format!("the helper wrote a line of more than {MAX_EVENT_LINE_BYTES} bytes"),
+                ));
+                continue;
+            }
         }
         let line = match std::str::from_utf8(&raw) {
             Ok(line) => line.trim_end_matches(['\r', '\n']),
@@ -574,4 +643,71 @@ fn read_events(
     }
     closed.store(true, Ordering::Release);
     queue.close();
+}
+
+#[cfg(test)]
+mod bounds {
+    use super::*;
+
+    #[test]
+    fn a_line_over_the_bound_is_dropped_and_the_next_one_is_read() {
+        let mut data = vec![b'x'; 100];
+        data.push(b'\n');
+        data.extend_from_slice(b"ok\n");
+        let mut reader = BufReader::with_capacity(8, std::io::Cursor::new(data));
+        let mut raw = Vec::new();
+        assert!(matches!(
+            read_line_bounded(&mut reader, &mut raw, 50).unwrap(),
+            Line::TooLong
+        ));
+        assert!(raw.len() <= 50, "{}", raw.len());
+        raw.clear();
+        assert!(matches!(
+            read_line_bounded(&mut reader, &mut raw, 50).unwrap(),
+            Line::Read
+        ));
+        assert_eq!(raw, b"ok\n");
+        raw.clear();
+        assert!(matches!(
+            read_line_bounded(&mut reader, &mut raw, 50).unwrap(),
+            Line::End
+        ));
+    }
+
+    #[test]
+    fn a_page_that_floods_the_queue_is_dropped_past_the_bound() {
+        let queue = Queue::new();
+        for _ in 0..MAX_QUEUED_IPC + 500 {
+            queue.push(Event::Ipc {
+                window: "w".into(),
+                uri: String::new(),
+                body: "x".into(),
+            });
+        }
+        assert_eq!(lock(&queue.state).events.len(), MAX_QUEUED_IPC);
+        // Other events still get through.
+        queue.push(Event::error(ErrorCode::BadEvent, "x"));
+        assert_eq!(lock(&queue.state).events.len(), MAX_QUEUED_IPC + 1);
+    }
+
+    #[test]
+    fn a_huge_event_line_reaches_the_queue_as_an_error_not_as_the_line() {
+        let mut data = vec![b'a'; MAX_EVENT_LINE_BYTES + 10];
+        data.push(b'\n');
+        let queue = Queue::new();
+        read_events(
+            std::io::Cursor::new(data),
+            queue.clone(),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(Mutex::new(None)),
+        );
+        let state = lock(&queue.state);
+        assert!(matches!(
+            state.events.front(),
+            Some(Event::Error {
+                code: ErrorCode::TooLarge,
+                ..
+            })
+        ));
+    }
 }

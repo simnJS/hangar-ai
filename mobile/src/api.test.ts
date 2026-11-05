@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, CALL_TIMEOUT_MS, UNREACHABLE_AFTER_MS, UPLOAD_MAX_BYTES, createClient, decodeHead } from "./api";
+import {
+  ANSWER_RETRIES,
+  ApiError,
+  CALL_TIMEOUT_MS,
+  UNREACHABLE_AFTER_MS,
+  UPLOAD_MAX_BYTES,
+  createClient,
+  decodeHead,
+} from "./api";
+import { errorText } from "./errors";
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -289,11 +298,71 @@ describe("the client's errors", () => {
       expect(calls).toHaveLength(2);
     });
 
+    it("tries an action again with the key of its first try, the PC slow or busy, so it is made once", async () => {
+      let n = 0;
+      const newKey = () => `key-${++n}`;
+      const { fetch, calls } = fakeFetch(
+        json(504, { error: "pc-slow" }),
+        json(200, { sent: true }),
+        json(503, { error: "pc-busy" }),
+        json(200, { sent: true }),
+      );
+      const client = createClient({ fetch, newKey });
+      const first = client.send({ pane: "p", text: "hi", submit: true });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await first).toEqual({ sent: true });
+      const second = client.manager("where are we?");
+      await vi.advanceTimersByTimeAsync(1_000);
+      await second;
+      const keys = calls.map((call) => (call.init.headers as Record<string, string>)["Idempotency-Key"]);
+      expect(keys).toEqual(["key-1", "key-1", "key-2", "key-2"]);
+    });
+
+    it("gives a slow PC a dialog's answers for long, asked again with the same key", async () => {
+      const { fetch, calls } = fakeFetch(json(504, { error: "pc-slow" }));
+      const answered = failure(createClient({ fetch, newKey: () => "key-answer" }).answer("p", "toolu_q", []));
+      await vi.advanceTimersByTimeAsync(ANSWER_RETRIES * 1_000);
+      const error = await answered;
+      expect([error.kind, error.code, error.status]).toEqual(["busy", "pc-slow", 504]);
+      expect(calls).toHaveLength(ANSWER_RETRIES + 1);
+      expect(new Set(calls.map((call) => (call.init.headers as Record<string, string>)["Idempotency-Key"]))).toEqual(
+        new Set(["key-answer"]),
+      );
+      // Not "try again": a tap again would be a call of its own.
+      expect(errorText(error)).not.toBe(errorText(new ApiError("busy", "pc-busy", 503)));
+    });
+
     it("leaves polling to try again itself", async () => {
       const { fetch, calls } = fakeFetch(json(503, { error: "pc-busy" }));
       expect((await failure(createClient({ fetch }).state())).kind).toBe("busy");
       expect(calls).toHaveLength(1);
     });
+  });
+});
+
+describe("calls that change something", () => {
+  it("carry a key of their own each, and reads none", async () => {
+    const { fetch, calls } = fakeFetch(json(200, { ok: true }));
+    const client = createClient({ fetch });
+    await client.state();
+    await client.chat("p");
+    await client.send({ pane: "p", text: "a" });
+    await client.send({ pane: "p", text: "a" });
+    await client.permission("p", true, "0123456789abcdef");
+    await client.land("t1", null);
+    await client.rework("t1", "fix", null);
+    await client.wake("ws");
+    const keys = calls.map((call) => (call.init.headers as Record<string, string>)["Idempotency-Key"]);
+    expect(keys.slice(0, 2)).toEqual([undefined, undefined]);
+    const given = keys.slice(2);
+    expect(given.every((key) => typeof key === "string" && key.length >= 8)).toBe(true);
+    expect(new Set(given).size).toBe(given.length);
+  });
+
+  it("answer a permission on the prompt the phone showed", async () => {
+    const { fetch, calls } = fakeFetch(json(200, { answered: true }));
+    await createClient({ fetch }).permission("p-ben", true, "0123456789abcdef");
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({ pane: "p-ben", allow: true, prompt: "0123456789abcdef" });
   });
 });
 

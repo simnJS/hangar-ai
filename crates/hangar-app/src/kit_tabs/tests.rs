@@ -198,7 +198,24 @@ impl Harness {
     }
 
     fn step(&mut self, msg: Msg) -> Task<Message> {
-        step(&mut self.pkg.kit_tabs, &mut self.model, &self.env, msg)
+        let task = step(&mut self.pkg.kit_tabs, &mut self.model, &self.env, msg);
+        // The background compiles the app would await, done here and now.
+        for _ in 0..4 {
+            let pending = self.pkg.kit_tabs.runtime.pending();
+            if pending.is_empty() {
+                break;
+            }
+            for path in pending {
+                self.pkg.kit_tabs.runtime.compile_now(&path);
+            }
+            let _ = step(
+                &mut self.pkg.kit_tabs,
+                &mut self.model,
+                &self.env,
+                Msg::Changed,
+            );
+        }
+        task
     }
 
     /// The body of the tab, as the panel draws it.
@@ -347,11 +364,21 @@ fn a_module_that_appears_later_is_read_without_a_reload() {
     let mut runtime = native::Runtime::default();
     let folder = Folder::new("appears");
     let file = folder.0.join("tabs/board.wasm");
-    let absent = runtime.module(&file).err().expect("there is no file");
+    runtime.compile_now(&file);
+    let absent = runtime
+        .module(&file)
+        .expect("compiled")
+        .err()
+        .expect("there is no file");
     assert!(absent.contains("board.wasm"), "{absent}");
     assert!(!absent.contains("not a WebAssembly module"), "{absent}");
     std::fs::write(&file, b"now there, but not a module").unwrap();
-    let written = runtime.module(&file).err().expect("refused");
+    runtime.compile_now(&file);
+    let written = runtime
+        .module(&file)
+        .expect("compiled")
+        .err()
+        .expect("refused");
     assert!(written.contains("not a WebAssembly module"), "{written}");
 }
 

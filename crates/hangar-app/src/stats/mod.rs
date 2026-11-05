@@ -19,7 +19,7 @@
 
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Instant;
 
 use hangar_core::stats::UsageStats;
@@ -47,25 +47,30 @@ mod view;
 #[allow(unused_imports)]
 pub use cache::{usage, worktrees_of};
 pub use charts::ChartId;
-use model::{Measure, Period, Project, Summary, SummaryOptions, TOP_SESSIONS};
+use model::{Measure, Period, Project, ProjectRoot, Summary, SummaryOptions, TOP_SESSIONS};
 
 /// What the page shows once the statistics are in, kept between frames: the
-/// summary is the costly part and only a change of what it is made from
-/// (the data, the choices, the workspaces' folders, the day) redoes it.
+/// summary is the costly part, worked out off the UI thread (see
+/// [`State::recompute`]) whenever what it is made from changes (the data, the
+/// choices, the workspaces' folders, the day).
 #[derive(Debug)]
 pub struct Computed {
+    /// The statistics it was made from: the page shows these with it, never
+    /// a newer answer beside an older summary.
+    pub data: Arc<UsageStats>,
     pub summary: Arc<Summary>,
     /// The project of each session, by index.
     pub projects: Vec<Project>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ComputedFor {
+pub struct ComputedFor {
     generation: u64,
     period: Period,
     measure: Measure,
     project: Option<String>,
-    roots: u64,
+    /// Bumped when the workspaces' roots are rebuilt.
+    roots_rev: u64,
     day: i64,
 }
 
@@ -93,70 +98,146 @@ pub struct State {
     heat: Option<(usize, usize)>,
     /// The readouts follow the keys, not the pointer.
     keyboard: bool,
-    computed: Mutex<Option<(ComputedFor, Arc<Computed>)>>,
+    /// The last summary and what it was made for; stays on screen while the
+    /// next one is worked out.
+    computed: Option<(ComputedFor, Arc<Computed>)>,
+    /// What the summary being worked out is for, and its request number.
+    pending: Option<ComputedFor>,
+    compute_seq: u64,
+    /// The workspaces' roots, rebuilt only when `fingerprint` of the
+    /// workspaces moves, so a frame (or a `cd` in a shell) costs nothing.
+    roots: Arc<Vec<ProjectRoot>>,
+    roots_rev: u64,
+    fingerprint: u64,
 }
 
 impl State {
-    /// The summary of the page, for the data and choices it has now.
-    fn computed(&self, ctx: &Ctx<'_>) -> Option<Arc<Computed>> {
-        let live = &ctx.model.live.stats;
-        let data = live.data.as_ref()?;
-        let workspaces = &ctx.model.state().workspaces;
-        let roots = model::workspace_roots(workspaces, &self.worktrees);
-        let mut hasher = DefaultHasher::new();
-        roots.hash(&mut hasher);
+    /// The summary of the page: the last one worked out, which may be a
+    /// moment behind the choices while the next one is under way.
+    fn computed(&self) -> Option<Arc<Computed>> {
+        self.computed.as_ref().map(|(_, computed)| computed.clone())
+    }
+
+    /// Asks for the summary of the data and choices the page has now, unless
+    /// that is the one shown or already under way. The work runs on a
+    /// blocking thread; its answer is dropped if a newer ask went out.
+    fn recompute(&mut self, m: &Model) -> Task<Message> {
+        let live = &m.live.stats;
+        let Some(data) = live.data.clone() else {
+            return Task::none();
+        };
         let now = time::now_ms();
         let key = ComputedFor {
             generation: live.generation,
             period: self.period,
             measure: self.measure,
             project: self.project.clone(),
-            roots: hasher.finish(),
+            roots_rev: self.roots_rev,
             day: time::start_of_day(now),
         };
-        let mut slot = self.computed.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((known, computed)) = slot.as_ref()
-            && *known == key
+        if self.pending.as_ref() == Some(&key)
+            || (self.pending.is_none()
+                && self
+                    .computed
+                    .as_ref()
+                    .is_some_and(|(known, _)| *known == key))
         {
-            return Some(computed.clone());
+            return Task::none();
         }
-        let projects: Vec<Project> = data
-            .sessions
-            .iter()
-            .map(|session| model::project_for(&session.cwd, &roots))
-            .collect();
-        let summary = model::summarize(
-            data,
-            &SummaryOptions {
-                period: self.period,
-                project: self.project.as_deref(),
-                measure: self.measure,
-                now,
-                projects: &projects,
-                top_sessions: TOP_SESSIONS,
+        self.compute_seq += 1;
+        let seq = self.compute_seq;
+        self.pending = Some(key.clone());
+        let roots = self.roots.clone();
+        let (period, measure, project) = (self.period, self.measure, self.project.clone());
+        Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    let projects: Vec<Project> = data
+                        .sessions
+                        .iter()
+                        .map(|session| model::project_for(&session.cwd, &roots))
+                        .collect();
+                    let summary = model::summarize(
+                        &data,
+                        &SummaryOptions {
+                            period,
+                            project: project.as_deref(),
+                            measure,
+                            now,
+                            projects: &projects,
+                            top_sessions: TOP_SESSIONS,
+                        },
+                    );
+                    Arc::new(Computed {
+                        data,
+                        summary: Arc::new(summary),
+                        projects,
+                    })
+                })
+                .await
+                .ok()
             },
-        );
-        let computed = Arc::new(Computed {
-            summary: Arc::new(summary),
-            projects,
-        });
-        *slot = Some((key, computed.clone()));
-        Some(computed)
+            move |computed| say(Msg::Computed(seq, key.clone(), computed)),
+        )
     }
 
-    /// The last summary drawn, however stale: what the keys walk over.
+    /// A summary came back. Only the latest ask counts: an older answer is
+    /// for choices the page has moved on from.
+    fn land(&mut self, seq: u64, key: ComputedFor, computed: Option<Arc<Computed>>) {
+        if seq != self.compute_seq {
+            return;
+        }
+        self.pending = None;
+        if let Some(computed) = computed {
+            self.computed = Some((key, computed));
+        }
+    }
+
+    /// Rebuilds the roots when the workspaces they come from changed; true
+    /// then. The pane folders in them are the ones at that moment: a `cd` in
+    /// a shell is no reason to work the whole summary out again.
+    fn refresh_roots(&mut self, m: &Model) -> bool {
+        let workspaces = &m.state().workspaces;
+        let fingerprint = workspaces_fingerprint(workspaces);
+        if fingerprint == self.fingerprint {
+            return false;
+        }
+        self.fingerprint = fingerprint;
+        self.rebuild_roots(m);
+        true
+    }
+
+    fn rebuild_roots(&mut self, m: &Model) {
+        self.roots = Arc::new(model::workspace_roots(
+            &m.state().workspaces,
+            &self.worktrees,
+        ));
+        self.roots_rev += 1;
+    }
+
+    /// The last summary worked out, however stale: what the keys walk over.
     fn last_computed(&self) -> Option<Arc<Computed>> {
-        self.computed
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .as_ref()
-            .map(|(_, computed)| computed.clone())
+        self.computed()
     }
 
     fn clear_readouts(&mut self) {
         self.columns = None;
         self.heat = None;
     }
+}
+
+/// A hash of what the roots are built from, without building them: the
+/// workspaces' ids, names and folders. Pane folders are left out on purpose
+/// (see [`State::refresh_roots`]).
+fn workspaces_fingerprint(workspaces: &[crate::state::types::Workspace]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    for ws in workspaces {
+        ws.id.hash(&mut hasher);
+        ws.name.hash(&mut hasher);
+        ws.cwd.hash(&mut hasher);
+        ws.extra_roots.hash(&mut hasher);
+    }
+    hasher.finish()
 }
 
 /// The package's shared read-model, which other packages may read; lives in
@@ -251,6 +332,9 @@ pub enum Msg {
     Loaded(Result<Arc<UsageStats>, String>),
     /// The worktrees of each workspace, for the request numbered so.
     Worktrees(u64, HashMap<String, Vec<String>>),
+    /// A summary worked out off the UI thread, for the request numbered so
+    /// and the choices it was made for (`None`: the thread failed).
+    Computed(u64, ComputedFor, Option<Arc<Computed>>),
     Chart(ChartId, charts::Event),
     /// F6 landed on the page: the first chart takes the keys.
     FocusChart(ChartId),
@@ -265,9 +349,14 @@ fn say(msg: Msg) -> Message {
 
 pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
     let mut tasks = Vec::new();
-    let visit = matches!(msg, Msg::Mounted);
+    // What moves only the readouts or the spinner changes no summary.
+    let moves_summary = !matches!(
+        msg,
+        Msg::Tick | Msg::Chart(..) | Msg::Key(_) | Msg::FocusChart(_)
+    );
     match msg {
         Msg::Mounted => {
+            st.refresh_roots(m);
             // The worktrees are asked again at every visit, like the web
             // page's effect did at every mount.
             tasks.push(ask_worktrees(st, m, true));
@@ -315,8 +404,10 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
         Msg::Worktrees(seq, found) => {
             if seq == st.worktrees_seq {
                 st.worktrees = found;
+                st.rebuild_roots(m);
             }
         }
+        Msg::Computed(seq, key, computed) => st.land(seq, key, computed),
         Msg::SetPeriod(period) => {
             st.period = period;
             st.clear_readouts();
@@ -358,10 +449,8 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
         Msg::Key(key) => walk(st, key),
         Msg::Tick => {}
     }
-    // A change of the workspaces' folders is worth asking git again; a visit
-    // has asked already.
-    if !visit {
-        tasks.push(ask_worktrees(st, m, false));
+    if moves_summary {
+        tasks.push(st.recompute(m));
     }
     Task::batch(tasks)
 }
@@ -543,14 +632,19 @@ pub fn focus_entry(_st: &State, _m: &Model, _region: Region) -> Option<Task<Mess
 }
 
 /// Every intent, after the shell's own handling of it: `Some` when this
-/// package acted on it. None concerns the statistics page.
+/// package acted on it. Only a change of the workspaces concerns the page.
 pub fn on_intent(
-    _st: &mut State,
-    _m: &mut Model,
+    st: &mut State,
+    m: &mut Model,
     _sv: &Services,
     _intent: &Intent,
 ) -> Option<Task<Message>> {
-    None
+    // Only the page on screen follows the workspaces; a visit catches up.
+    if m.ui.view != View::Stats || !st.refresh_roots(m) {
+        return None;
+    }
+    // A change of the workspaces' folders is worth asking git again.
+    Some(Task::batch([ask_worktrees(st, m, false), st.recompute(m)]))
 }
 
 /// Every core event, after the shell's own handling of it. The statistics

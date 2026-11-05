@@ -90,7 +90,7 @@ pub(crate) struct WidgetState {
     pub sorts: HashMap<String, Sort>,
     pub toggled: HashMap<(String, String), bool>,
     pub editors: HashMap<String, Editor>,
-    pub images: HashMap<ImageSource, Picture>,
+    pub images: ImageCache,
     /// The menu open, by what it holds ([`menu_key`]): a menu has no id, and
     /// what it lists is what tells one from another across views.
     pub menu: Option<u64>,
@@ -101,8 +101,82 @@ pub(crate) struct WidgetState {
     pub asked: HashMap<String, ui::Range>,
 }
 
-/// More images than this in a tab's cache, and it starts again.
-const MAX_IMAGES: usize = 256;
+/// The most bytes of pictures a tab's cache holds; past it, the ones least
+/// recently in a view go first.
+pub(crate) const MAX_IMAGE_CACHE_BYTES: usize = 64 * 1024 * 1024;
+
+/// The pictures a tab's views named, bounded by the bytes they hold, least
+/// recently shown dropped first.
+pub(crate) struct ImageCache {
+    held: HashMap<ImageSource, (Picture, usize, u64)>,
+    bytes: usize,
+    clock: u64,
+    max_bytes: usize,
+}
+
+impl Default for ImageCache {
+    fn default() -> Self {
+        ImageCache::with_max(MAX_IMAGE_CACHE_BYTES)
+    }
+}
+
+impl ImageCache {
+    pub(crate) fn with_max(max_bytes: usize) -> ImageCache {
+        ImageCache {
+            held: HashMap::new(),
+            bytes: 0,
+            clock: 0,
+            max_bytes,
+        }
+    }
+
+    pub(crate) fn get(&self, source: &ImageSource) -> Option<&Picture> {
+        self.held.get(source).map(|(picture, _, _)| picture)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn bytes(&self) -> usize {
+        self.bytes
+    }
+
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.held.len()
+    }
+
+    /// `source` is in the view being synced: it is the last to go.
+    fn touch(&mut self, source: &ImageSource) -> bool {
+        self.clock += 1;
+        match self.held.get_mut(source) {
+            Some(entry) => {
+                entry.2 = self.clock;
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn insert(&mut self, source: ImageSource, picture: Picture, bytes: usize) {
+        self.clock += 1;
+        self.bytes += bytes;
+        if let Some((_, before, _)) = self.held.insert(source, (picture, bytes, self.clock)) {
+            self.bytes -= before;
+        }
+        while self.bytes > self.max_bytes {
+            let Some(oldest) = self
+                .held
+                .iter()
+                .min_by_key(|(_, (_, _, used))| *used)
+                .map(|(source, _)| source.clone())
+            else {
+                break;
+            };
+            if let Some((_, size, _)) = self.held.remove(&oldest) {
+                self.bytes -= size;
+            }
+        }
+    }
+}
 
 impl WidgetState {
     /// Brings what Hangar keeps in line with a new view: text areas made or
@@ -116,15 +190,12 @@ impl WidgetState {
     ) {
         let mut areas = HashSet::new();
         let mut logs = HashSet::new();
-        let load = |images: &mut HashMap<ImageSource, Picture>, source: &ImageSource| {
-            if images.contains_key(source) {
+        let load = |images: &mut ImageCache, source: &ImageSource| {
+            if images.touch(source) {
                 return;
             }
-            if images.len() >= MAX_IMAGES {
-                images.clear();
-            }
-            let loaded = load_image(source, kit, granted, held);
-            images.insert(source.clone(), loaded);
+            let (loaded, bytes) = load_image(source, kit, granted, held);
+            images.insert(source.clone(), loaded, bytes);
         };
         view.root.for_each(&mut |element| match element {
             ui::Element::TextArea(area) => {
@@ -180,13 +251,18 @@ fn is_svg(source: &ImageSource, bytes: &[u8]) -> bool {
     }
 }
 
-fn load_image(source: &ImageSource, kit: &dyn KitApi, granted: &[String], held: &Held) -> Picture {
+fn load_image(
+    source: &ImageSource,
+    kit: &dyn KitApi,
+    granted: &[String],
+    held: &Held,
+) -> (Picture, usize) {
     let checked = match crate::gate::image_source(source, granted) {
         Ok(checked) => checked,
         Err(_) if matches!(source, ImageSource::Data(_)) => {
-            return Picture::Missing(Missing::NeedsData);
+            return (Picture::Missing(Missing::NeedsData), 0);
         }
-        Err(KitError { message, .. }) => return Picture::Missing(Missing::Refused(message)),
+        Err(KitError { message, .. }) => return (Picture::Missing(Missing::Refused(message)), 0),
     };
     let bytes = match &checked {
         ImageSource::Held(id) => held.get(id).map(|bytes| (*bytes).clone()).ok_or_else(|| {
@@ -199,11 +275,17 @@ fn load_image(source: &ImageSource, kit: &dyn KitApi, granted: &[String], held: 
     };
     match bytes {
         Ok(bytes) if bytes.len() > api::limits::BINARY_MAX_BYTES => {
-            Picture::Missing(Missing::TooLarge)
+            (Picture::Missing(Missing::TooLarge), 0)
         }
-        Ok(bytes) if is_svg(&checked, &bytes) => Picture::Vector(svg::Handle::from_memory(bytes)),
-        Ok(bytes) => Picture::Raster(image::Handle::from_bytes(bytes)),
-        Err(KitError { message, .. }) => Picture::Missing(Missing::Refused(message)),
+        Ok(bytes) if is_svg(&checked, &bytes) => {
+            let size = bytes.len();
+            (Picture::Vector(svg::Handle::from_memory(bytes)), size)
+        }
+        Ok(bytes) => {
+            let size = bytes.len();
+            (Picture::Raster(image::Handle::from_bytes(bytes)), size)
+        }
+        Err(KitError { message, .. }) => (Picture::Missing(Missing::Refused(message)), 0),
     }
 }
 

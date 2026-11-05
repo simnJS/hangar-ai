@@ -74,6 +74,15 @@ impl<'a> Harness<'a> {
         }
     }
 
+    /// A harness that goes on with the widget state of an earlier one, as
+    /// `iced` keeps a widget's tree from one view to the next: the cached
+    /// rows included.
+    fn resume(element: Element<'a, Action, iced::Theme, Renderer>, tree: Tree) -> Self {
+        let mut harness = Self::new(element);
+        harness.tree = tree;
+        harness
+    }
+
     fn send(&mut self, event: Event) -> Outcome {
         let mut actions = Vec::new();
         let mut shell = Shell::new(&mut actions);
@@ -860,4 +869,78 @@ fn a_dimmed_terminal_lets_what_is_behind_it_show_through() {
             .into(),
     );
     assert_eq!(h.draw().at(700, 400), background);
+}
+
+// ---- Redrawing -------------------------------------------------------------
+
+/// Whether some row is drawn in `color` far to the right of its text, short
+/// of the scrollbar.
+fn a_row_ends_in(frame: &Frame, m: hangar_term::Metrics, color: [u8; 3]) -> bool {
+    let column = m.columns as usize / 2;
+    (0..m.rows as usize).any(|row| {
+        let centre = cell_centre(m, column, row);
+        frame.at(centre.x as usize, centre.y as usize) == color
+    })
+}
+
+#[test]
+fn a_search_jump_redraws_the_rows_it_scrolls_to() {
+    // The app searches outside `perform`, on an idle pane: nothing else will
+    // tell the widget that the rows on screen are other rows now.
+    let (mut terminal, m) = terminal_with_a_link();
+    // A line of history painted red to its end, far above the screen.
+    terminal.feed(b"\x1b[41mneedle\x1b[K\x1b[0m\r\n");
+    for i in 0..100 {
+        terminal.feed(format!("plain {i}\r\n").as_bytes());
+    }
+    let red = rgb8(terminal.palette().ansi[1]);
+
+    let tree = {
+        let mut h = Harness::new(
+            terminal_view(&terminal, |a| a)
+                .padding(0)
+                .scale_factor(1.0)
+                .into(),
+        );
+        h.frame();
+        assert!(
+            !a_row_ends_in(&h.draw(), m, red),
+            "the red line is not on screen"
+        );
+        h.tree
+    };
+
+    terminal
+        .search("needle", hangar_term::SearchOptions::default())
+        .unwrap();
+    assert!(terminal.display_offset() > 0, "the search scrolled");
+    let tree = {
+        let mut h = Harness::resume(
+            terminal_view(&terminal, |a| a)
+                .padding(0)
+                .scale_factor(1.0)
+                .into(),
+            tree,
+        );
+        let frame = h.draw();
+        assert!(
+            a_row_ends_in(&frame, m, red),
+            "the rows scrolled to are drawn"
+        );
+        h.tree
+    };
+
+    // And back down, as the app's "scroll to the bottom" does.
+    terminal.scroll_to_bottom();
+    let mut h = Harness::resume(
+        terminal_view(&terminal, |a| a)
+            .padding(0)
+            .scale_factor(1.0)
+            .into(),
+        tree,
+    );
+    assert!(
+        !a_row_ends_in(&h.draw(), m, red),
+        "the live screen is drawn again"
+    );
 }

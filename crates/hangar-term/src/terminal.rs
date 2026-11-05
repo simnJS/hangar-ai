@@ -9,7 +9,9 @@ use alacritty_terminal::index::{Column, Line, Point};
 use alacritty_terminal::selection::SelectionRange;
 use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::term::{self, ClipboardType, Term, TermDamage, TermMode};
-use alacritty_terminal::vte::ansi::{CursorShape as EmulatorShape, CursorStyle, Processor, Rgb};
+use alacritty_terminal::vte::ansi::{
+    ClearMode, CursorShape as EmulatorShape, CursorStyle, Handler as _, Processor, Rgb,
+};
 
 use crate::config::{Config, CursorShape, Osc52};
 use crate::event::{Action, ClipboardReply, ClipboardTarget, Event, Metrics, PtySize, ScrollTo};
@@ -19,6 +21,11 @@ use crate::osc::{Osc, OscScanner};
 use crate::palette::{Palette, to_rgb8};
 use crate::pointer::PointerState;
 use crate::search::Search;
+
+/// The most lines of history a terminal keeps, whatever it is configured
+/// with. A line costs 24 bytes per column, so this is about 240 MB for a pane
+/// 200 columns wide; see [`Config::scrollback`].
+pub const MAX_SCROLLBACK: usize = 50_000;
 
 /// How long the visual bell flashes.
 pub(crate) const BELL_FLASH: Duration = Duration::from_millis(140);
@@ -197,10 +204,14 @@ impl Terminal {
                 Osc::WorkingDirectory(path) => events.push(Event::WorkingDirectory(path)),
             }
         }
+        // The match list is only marked out of date. Recomputing it scans the
+        // whole history, and this runs on the thread that reads the process,
+        // holding the terminal that the window also needs to draw. The scan
+        // is done in [`tick`](Self::tick) instead, when the widget asks for
+        // it, at most a few times a second.
         if let Some(search) = &mut self.search {
             search.mark_stale();
         }
-        self.refresh_search(Instant::now());
         events
     }
 
@@ -413,7 +424,13 @@ impl Terminal {
         self.focused && self.window_focused
     }
 
-    fn set_window_focus(&mut self, focused: bool) -> Vec<Event> {
+    /// Tells the terminal whether its window has the focus.
+    ///
+    /// The widget does this for the terminals on screen. An app that shows
+    /// only some of a window's terminals at a time should tell the others as
+    /// well, or a terminal hidden while the window lost the focus keeps
+    /// believing it is unfocused once it is shown again.
+    pub fn set_window_focused(&mut self, focused: bool) -> Vec<Event> {
         if self.window_focused == focused {
             return Vec::new();
         }
@@ -425,7 +442,8 @@ impl Terminal {
     fn focus_changed(&mut self, before: bool) -> Vec<Event> {
         let now = self.has_focus();
         self.term.is_focused = now;
-        self.bump_cursor_rows();
+        // The cursor is drawn solid or hollow: redraw it.
+        self.cursor_generation += 1;
         if before == now || !self.term.mode().contains(TermMode::FOCUS_IN_OUT) {
             return Vec::new();
         }
@@ -434,10 +452,6 @@ impl Terminal {
         } else {
             b"\x1b[O".to_vec()
         })]
-    }
-
-    fn bump_cursor_rows(&mut self) {
-        self.cursor_generation += 1;
     }
 
     // ---- Actions from the widget ------------------------------------------
@@ -462,7 +476,7 @@ impl Terminal {
             Action::Resize(metrics) => self.resize_to(metrics, &mut events),
             Action::Pointer(pointer) => self.pointer(pointer, &mut events),
             Action::Scroll(to) => self.scroll(to),
-            Action::WindowFocus(focused) => events.extend(self.set_window_focus(focused)),
+            Action::WindowFocus(focused) => events.extend(self.set_window_focused(focused)),
             Action::Copy => {
                 if let Some(text) = self.selection_text() {
                     events.push(Event::SetClipboard {
@@ -561,6 +575,9 @@ impl Terminal {
     /// Jumps back to the live screen, as typing does.
     pub fn scroll_to_bottom(&mut self) {
         self.term.scroll_display(Scroll::Bottom);
+        // Called from outside `perform` too: the rows must be marked changed
+        // here, or the widget keeps drawing the rows of the old offset.
+        self.sync_damage();
     }
 
     /// How many lines above the live screen the view is. Zero at the bottom.
@@ -728,8 +745,13 @@ impl Terminal {
         }
         let cursor = self.term.grid().cursor.point;
         let row = self.term.grid()[cursor.line].clone();
-        // Erasing the screen pushes it into the history; then the history goes.
-        self.parser.advance(&mut self.term, b"\x1b[2J\x1b[3J");
+        // Erasing the screen pushes it into the history; then the history
+        // goes. Applied to the emulator directly, not fed to the parser: in
+        // a synchronized update (`CSI ? 2026 h`, which Claude Code wraps each
+        // frame in) the parser would only buffer it, and the clear would land
+        // later, over the line kept below.
+        self.term.clear_screen(ClearMode::All);
+        self.term.clear_screen(ClearMode::Saved);
         let grid = self.term.grid_mut();
         grid[Line(0)] = row;
         grid.cursor.point.line = Line(0);
@@ -869,7 +891,7 @@ fn target_of(kind: ClipboardType) -> ClipboardTarget {
 
 fn emulator_config(config: &Config) -> term::Config {
     term::Config {
-        scrolling_history: config.scrollback,
+        scrolling_history: config.scrollback.min(MAX_SCROLLBACK),
         default_cursor_style: CursorStyle {
             shape: match config.cursor_shape {
                 CursorShape::Block => EmulatorShape::Block,
@@ -1286,6 +1308,80 @@ mod tests {
         // Typing goes on from there.
         term.feed(b" ls");
         assert_eq!(term.screen_text()[0], "$ prompt ls");
+    }
+
+    #[test]
+    fn clear_during_a_synchronized_update_happens_now_and_keeps_the_prompt() {
+        // Claude Code wraps every frame in `CSI ? 2026 h` … `l`; a clear fed
+        // through the parser in between would wait for the end of the frame
+        // and then wipe the line it was meant to keep.
+        let mut term = terminal(20, 4);
+        for i in 0..10 {
+            term.feed(format!("row {i}\r\n").as_bytes());
+        }
+        term.feed(b"$ prompt");
+        term.feed(b"\x1b[?2026h");
+        assert!(term.deadline().is_some(), "the update is pending");
+        term.clear();
+        assert_eq!(term.history_size(), 0);
+        assert_eq!(term.screen_text(), ["$ prompt", "", "", ""]);
+        term.feed(b"\x1b[?2026l");
+        assert_eq!(term.history_size(), 0);
+        assert_eq!(term.screen_text(), ["$ prompt", "", "", ""]);
+        let cursor = term.cursor().unwrap();
+        assert_eq!((cursor.row, cursor.column), (0, 8));
+    }
+
+    #[test]
+    fn scrolling_from_outside_perform_marks_the_rows_changed() {
+        // The app calls this directly; the widget redraws only rows whose
+        // generation moved.
+        let mut term = terminal(20, 3);
+        for i in 0..20 {
+            term.feed(format!("row {i}\r\n").as_bytes());
+        }
+        term.perform(Action::Scroll(ScrollTo::Lines(5)));
+        let before: Vec<u64> = (0..3).map(|r| term.row_generation(r)).collect();
+        term.scroll_to_bottom();
+        assert_eq!(term.display_offset(), 0);
+        for (row, before) in before.into_iter().enumerate() {
+            assert!(term.row_generation(row) > before, "row {row}");
+        }
+    }
+
+    #[test]
+    fn the_scrollback_is_clamped_whatever_the_configuration_says() {
+        // The settings file can hold any number; unclamped, a pane's memory
+        // would grow with its output without a bound.
+        let mut term = Terminal::new(
+            Config {
+                scrollback: usize::MAX,
+                ..Config::default()
+            },
+            20,
+            3,
+        );
+        term.feed("x\r\n".repeat(MAX_SCROLLBACK + 5_000).as_bytes());
+        assert_eq!(term.history_size(), MAX_SCROLLBACK);
+        // Changed later, the same.
+        term.set_config(Config {
+            scrollback: MAX_SCROLLBACK * 4,
+            ..Config::default()
+        });
+        term.feed("y\r\n".repeat(5_000).as_bytes());
+        assert_eq!(term.history_size(), MAX_SCROLLBACK);
+    }
+
+    #[test]
+    fn window_focus_can_be_told_to_a_terminal_off_screen() {
+        let mut term = terminal(20, 4);
+        term.feed(b"\x1b[?1004h");
+        term.set_focused(true);
+        assert_eq!(writes(&term.set_window_focused(false)), b"\x1b[O");
+        assert!(term.cursor().unwrap().hollow);
+        assert_eq!(writes(&term.set_window_focused(true)), b"\x1b[I");
+        assert!(!term.cursor().unwrap().hollow);
+        assert!(term.set_window_focused(true).is_empty());
     }
 
     #[test]

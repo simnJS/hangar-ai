@@ -205,7 +205,12 @@ pub fn update(page: &mut Page, m: &mut Model, sv: &Services, msg: Msg) -> Task<M
 
 /// The rename form was sent: the account and its new name, unless the name
 /// is refused. The page then waits for the command.
+/// Nothing while a request is in flight: Enter in the field submits whether
+/// or not the button is enabled.
 pub(super) fn begin_rename(page: &mut Page, m: &Model) -> Option<(AccountId, String)> {
+    if page.busy {
+        return None;
+    }
     let (id, label) = page.renaming.clone()?;
     let accounts = m.live.accounts.accounts.as_deref().unwrap_or_default();
     if label_problem(accounts, &label, Some(&id)).is_some() {
@@ -218,7 +223,7 @@ pub(super) fn begin_rename(page: &mut Page, m: &Model) -> Option<(AccountId, Str
 
 /// The removal was confirmed. Never for main.
 pub(super) fn begin_remove(page: &mut Page, id: &str) -> bool {
-    if id == MAIN_ACCOUNT {
+    if page.busy || id == MAIN_ACCOUNT {
         return false;
     }
     page.busy = true;
@@ -227,8 +232,12 @@ pub(super) fn begin_remove(page: &mut Page, id: &str) -> bool {
 }
 
 /// The add form was sent: the name, unless it is refused (its problem shows
-/// from now on).
+/// from now on). Nothing while a request is in flight: a quick double Enter
+/// would otherwise send the same name twice.
 pub(super) fn begin_add(page: &mut Page, m: &Model) -> Option<String> {
+    if page.busy {
+        return None;
+    }
     page.touched = true;
     let accounts = m.live.accounts.accounts.as_deref().unwrap_or_default();
     if label_problem(accounts, &page.name, None).is_some() {

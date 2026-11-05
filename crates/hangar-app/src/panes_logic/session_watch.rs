@@ -11,7 +11,7 @@
 //! and reopen it on the next resume, which is not the conversation you left.
 //!
 //! `SessionWatch` is the loop's state with the sleeping taken out: the host
-//! asks `due`, runs `list_sessions` off the UI thread when `begin_round` says
+//! asks `due`, runs `hunt_listing` off the UI thread when `begin_round` says
 //! a look is worth it, and hands the answer to `round_done`.
 
 use std::collections::HashSet;
@@ -26,6 +26,24 @@ use crate::state::types::AgentId;
 pub const HUNT_MS: u64 = 1500;
 /// ...patient once the pane has one.
 pub const FOLLOW_MS: u64 = 5000;
+/// A pane that looked this many times and found nothing new (one launched
+/// with `--resume` never does) is as patient as one that found its session.
+/// `FOLLOW_MS` is still well inside `FRESH_MS`, so a late transcript is caught.
+pub const EMPTY_ROUNDS_BEFORE_FOLLOW: u32 = 3;
+
+/// The listing a hunt round runs off the UI thread: ids and modification
+/// times from the directory alone, no transcript opened, so the labels are
+/// empty (the hunt never reads them).
+pub fn hunt_listing(cwd: String) -> Vec<AgentSession> {
+    hangar_core::sessions::list_session_ids(cwd)
+        .into_iter()
+        .map(|(id, modified_ms)| AgentSession {
+            id,
+            label: String::new(),
+            modified_ms,
+        })
+        .collect()
+}
 
 /// A transcript has to be warm to be ours. Without this a pane could adopt
 /// any file it happens not to know about (one left by another window, say)
@@ -47,6 +65,8 @@ pub struct SessionWatch {
     /// without touching the disk, and a transcript another pane just created
     /// is far less likely to be mistaken for this one's.
     printed: bool,
+    /// Rounds in a row that adopted nothing.
+    empty_rounds: u32,
 }
 
 impl SessionWatch {
@@ -58,6 +78,7 @@ impl SessionWatch {
             interval_ms: HUNT_MS,
             next_at: Some(now + HUNT_MS),
             printed: false,
+            empty_rounds: 0,
         }
     }
 
@@ -81,6 +102,14 @@ impl SessionWatch {
         true
     }
 
+    /// Passes a round without listing: the pane's session is named by the
+    /// mod (bridged), so whatever the disk says would be thrown away. Nothing
+    /// is claimed, nothing is learnt, and the next look is scheduled.
+    pub fn skip_round(&mut self, now: EpochMs) {
+        self.printed = false;
+        self.next_at = Some(now + self.interval_ms);
+    }
+
     /// The listing of a round came back (`None`: it failed, which reads as
     /// nothing found). Answers the session to adopt, if there is one.
     /// `sessions` are sorted most recently touched first, so the first match
@@ -99,6 +128,14 @@ impl SessionWatch {
             })
         });
         let found = fresh.map(|session| session.id.clone());
+        if found.is_none() {
+            self.empty_rounds += 1;
+            if self.empty_rounds >= EMPTY_ROUNDS_BEFORE_FOLLOW {
+                self.interval_ms = FOLLOW_MS;
+            }
+        } else {
+            self.empty_rounds = 0;
+        }
         if let Some(id) = &found {
             claims.claim(id);
             // Remembered as ours, so the next round hunts the one after it.
@@ -240,5 +277,35 @@ mod tests {
             watch.round_done(Some(&both), now, &mut claims).as_deref(),
             Some("two")
         );
+    }
+
+    #[test]
+    fn a_resumed_pane_that_finds_nothing_new_settles_to_the_patient_cadence() {
+        let mut claims = Claims::default();
+        let mut watch = watch(&["resumed"]);
+        let mut now = HUNT_MS;
+        for round in 1..=EMPTY_ROUNDS_BEFORE_FOLLOW {
+            watch.note_output();
+            assert!(watch.begin_round(now));
+            let only_known = [session("resumed", now - 10)];
+            assert_eq!(watch.round_done(Some(&only_known), now, &mut claims), None);
+            if round < EMPTY_ROUNDS_BEFORE_FOLLOW {
+                assert!(watch.due(now + HUNT_MS));
+                now += HUNT_MS;
+            }
+        }
+        assert!(!watch.due(now + FOLLOW_MS - 1));
+        assert!(watch.due(now + FOLLOW_MS));
+    }
+
+    #[test]
+    fn a_skipped_round_claims_nothing_and_is_rescheduled() {
+        let mut watch = watch(&[]);
+        watch.note_output();
+        watch.skip_round(HUNT_MS);
+        // The output was spent on the skipped round; the next one is on time.
+        assert!(!watch.due(HUNT_MS + HUNT_MS - 1));
+        assert!(watch.due(HUNT_MS * 2));
+        assert!(!watch.begin_round(HUNT_MS * 2));
     }
 }

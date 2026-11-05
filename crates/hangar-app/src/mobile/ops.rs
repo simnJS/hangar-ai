@@ -21,10 +21,11 @@ use crate::control::types::same;
 use crate::state::roles::{manager_of, orchestrator_of};
 use crate::state::{AgentActivity, AgentId, AppState, Pane, Snapshot, Workspace};
 
+use super::chat_live::pending_now;
 use super::contract::{
-    NamedActivity, REMOTE_KEYS, RemoteHistory, RemoteManager, RemotePane, RemoteProject,
-    RemoteScreen, RemoteSent, RemoteState, RemoteWaiting, RemoteWoken, RemoteWorkspace,
-    WaitingKind,
+    ChatPending, NamedActivity, REMOTE_KEYS, RemoteHistory, RemoteManager, RemotePane,
+    RemoteProject, RemoteScreen, RemoteSent, RemoteState, RemoteWaiting, RemoteWoken,
+    RemoteWorkspace, WaitingKind,
 };
 use super::engine::Mobile;
 use crate::orchestration::manager_feed::{ManagerEvent, ManagerJournalEntry};
@@ -213,7 +214,19 @@ pub async fn remote_state(port: &Port, mobile: &Mobile) -> RemoteState {
             }
         }
     }
-    mobile.book().first_seen.retain(|key, _| seen.contains(key));
+    {
+        // What is kept of panes closed since goes with them (MOB-16).
+        let panes: std::collections::HashSet<&str> = state
+            .workspaces
+            .iter()
+            .flat_map(|ws| ws.panes.iter().map(|pane| pane.id.as_str()))
+            .collect();
+        let mut book = mobile.book();
+        book.first_seen.retain(|key, _| seen.contains(key));
+        book.resuming
+            .retain(|pane, _| panes.contains(pane.as_str()));
+        book.chat.keep_only(&panes);
+    }
     waiting.sort_by_key(|entry| entry.since);
 
     let manager = manager_of(state).map(|(_, pane)| RemoteManager {
@@ -271,8 +284,14 @@ pub async fn remote_state(port: &Port, mobile: &Mobile) -> RemoteState {
 /* ── remote_screen ────────────────────────────────────────────── */
 
 /// `remote_screen {pane, lines?}`: the pane's last lines; empty while its
-/// workspace sleeps or is closed, which is not the pane being gone.
-pub async fn remote_screen(port: &Port, args: &Value) -> Result<RemoteScreen, String> {
+/// workspace sleeps or is closed, which is not the pane being gone. While it
+/// waits on a permission the PC can name, `prompt` says which, for the
+/// phone's answer to name it back (MOB-02).
+pub async fn remote_screen(
+    port: &Port,
+    mobile: &Mobile,
+    args: &Value,
+) -> Result<RemoteScreen, String> {
     let snapshot = port.snapshot();
     let (ws, pane) = find_pane(&snapshot.state, args.get("pane"))?;
     let lines = args
@@ -290,7 +309,16 @@ pub async fn remote_screen(port: &Port, args: &Value) -> Result<RemoteScreen, St
         Err(error) if port.terminal(&pane.id).is_some() => return Err(error),
         Err(_) => String::new(),
     };
+    let prompt = if activity(&snapshot, &pane.id) == Some(AgentActivity::Waiting) {
+        match pending_now(port, mobile, &ws, &pane).await {
+            Ok(Some(ChatPending::Permission { prompt, .. })) => Some(prompt),
+            _ => None,
+        }
+    } else {
+        None
+    };
     Ok(RemoteScreen {
+        prompt,
         pane_id: pane.id.clone(),
         pane: pane.name.clone(),
         workspace: ws.name.clone(),
@@ -367,6 +395,14 @@ fn not_up(port: &Port, ws: &Workspace, pane: &Pane) -> String {
     format!("{why} Nothing was sent; send it again in a few seconds.")
 }
 
+/// A pane whose terminal or shell did not start in time: nothing was typed.
+fn not_started(pane: &Pane) -> String {
+    format!(
+        "\"{}\" has not started yet: nothing was sent; send it again in a few seconds.",
+        pane.name
+    )
+}
+
 /// What the person sent a Claude Code not up yet, put in the hangar-bridge
 /// queue, which the session takes once it is ready, as their own words; the
 /// workspace is woken for it. Without text to queue, or without the mod to
@@ -412,6 +448,14 @@ pub async fn type_into(
     pane: &Pane,
     input: Input,
 ) -> Result<RemoteSent, String> {
+    // Keys typed while an answer is being typed into the same dialog would
+    // land in the middle of it (MOB-18).
+    if mobile.book().answering.contains(&pane.id) {
+        return Err(format!(
+            "An answer is being typed into \"{}\": wait for it. Nothing was sent.",
+            pane.name
+        ));
+    }
     if resumes(port, mobile, pane) {
         let text = input.text.as_deref().unwrap_or("");
         let holdable =
@@ -430,6 +474,11 @@ pub async fn type_into(
                 break;
             }
             waited += OPEN_POLL_MS;
+        }
+        // Still no shell: what is typed would reach no process, and the
+        // phone be told it was sent (MOB-17).
+        if port.terminal(&pane.id).is_none() || !port.alive(&pane.id).await {
+            return Err(not_started(pane));
         }
     }
     let mut args = Map::new();
@@ -535,7 +584,44 @@ pub async fn remote_wake(
     Ok(RemoteWoken { waking: true })
 }
 
-/// `remote_permission {pane, allow}`: Enter or Escape to a pane that waits.
+/// Refuses, with nothing typed, unless the prompt open now is the one the
+/// phone showed (`prompt`, from `remote_chat` or `remote_screen`): Enter
+/// approves whatever is open, and the phone's look at the pane is a second or
+/// more old — the person may have answered at the PC, Claude Code moved on to
+/// its next call (MOB-02). A question is not a permission: Enter would pick
+/// its highlighted option.
+///
+/// A pane the PC can name no prompt of (an agent other than Claude Code, a
+/// session without a transcript or the mod) is answered as asked, as
+/// before: the phone has nothing to name either, and showed only its screen.
+async fn shown_prompt(
+    port: &Port,
+    mobile: &Mobile,
+    ws: &Workspace,
+    pane: &Pane,
+    args: &Value,
+) -> Result<(), String> {
+    let shown = args.get("prompt").and_then(Value::as_str);
+    let changed = || {
+        format!(
+            "What \"{}\" asks has changed since the phone showed it: look again. Nothing was sent.",
+            pane.name
+        )
+    };
+    match pending_now(port, mobile, ws, pane).await? {
+        Some(ChatPending::Question { .. }) => Err(format!(
+            "\"{}\" waits on a question, not a permission: answer it in the chat. Nothing was sent.",
+            pane.name
+        )),
+        Some(ChatPending::Permission { prompt, .. }) if shown == Some(prompt.as_str()) => Ok(()),
+        Some(ChatPending::Permission { .. }) => Err(changed()),
+        None if shown.is_some() => Err(changed()),
+        None => Ok(()),
+    }
+}
+
+/// `remote_permission {pane, allow, prompt?}`: Enter or Escape to a pane
+/// that waits, on the prompt the phone showed (`shown_prompt`).
 pub async fn remote_permission(
     port: &Port,
     mobile: &Mobile,
@@ -561,6 +647,7 @@ pub async fn remote_permission(
             pane.name
         ));
     }
+    shown_prompt(port, mobile, &ws, &pane, args).await?;
     let key = if allow { "enter" } else { "escape" };
     let input = Input {
         keys: vec![key.into()],

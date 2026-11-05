@@ -16,6 +16,31 @@
 //!   person's to write to.
 //! - **Windows**: the installer is started and the app has to exit so it can
 //!   replace the files; it starts the new version itself.
+//!
+//! # Verified twice
+//!
+//! The download is checked against its signature when it finishes, and then
+//! waits, possibly for hours, until the person clicks *Restart*. Anything
+//! running as the same user could rewrite it in between, and a package or an
+//! admin bundle swap runs as root behind a password the person types for
+//! Hangar. So:
+//!
+//! - everything but an AppImage is downloaded into a folder created fresh for
+//!   it, `0700`, in the temp folder, which keeps other users out;
+//! - [`apply`] checks the signature again just before anything is installed,
+//!   reading the file once through a handle opened on a plain file (a symlink
+//!   is refused), and keeps the SHA-256 of exactly the bytes it checked;
+//! - the privileged step (`pkexec`/`sudo` for a package, the administrator
+//!   AppleScript on macOS) copies the file into a folder only root can write,
+//!   and refuses it unless that copy has the same SHA-256. What root installs
+//!   is therefore the bytes that were verified, whatever happened to the file
+//!   in the user's folder;
+//! - on Windows the file is opened with no write or delete sharing before it
+//!   is verified, and that handle stays open until the process exits, so it
+//!   cannot be changed between the check and the installer reading it.
+//!
+//! An AppImage is the user's own file, replaced with the user's rights: no
+//! privilege is crossed, and it is re-verified like the others all the same.
 
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
@@ -23,11 +48,15 @@ use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use std::time::{Duration, SystemTime};
+
 use flate2::read::GzDecoder;
-use tempfile::TempPath;
+use tempfile::{TempDir, TempPath};
 
 use crate::error::{Error, Result};
 use crate::platform::{Install, PackageManager};
+use crate::sha256;
+use crate::signature;
 
 /// Prefix of every file the updater leaves in a folder it does not own, so
 /// that one found there after a crash can be recognised and deleted.
@@ -45,20 +74,69 @@ pub enum InstallOutcome {
     InstallerStarted,
 }
 
+/// A download waiting to be installed: the file, and the private folder it
+/// was written in (none for an AppImage, which is staged beside the image so
+/// that putting it in place is a rename). Dropping it deletes both.
+#[derive(Debug)]
+pub(crate) struct Staged {
+    // Declared before `dir` so the file goes first.
+    path: TempPath,
+    dir: Option<TempDir>,
+}
+
+impl Staged {
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_path(path: TempPath) -> Self {
+        Self { path, dir: None }
+    }
+}
+
+/// What the artifact must verify against.
+#[derive(Clone, Copy)]
+pub(crate) struct Signed<'a> {
+    pub pubkey: &'a str,
+    pub signature: &'a str,
+}
+
+/// A folder only this user can enter, created fresh for one download.
+fn private_dir() -> Result<TempDir> {
+    let mut builder = tempfile::Builder::new();
+    builder.prefix(SCRATCH_PREFIX);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        builder.permissions(fs::Permissions::from_mode(0o700));
+    }
+    builder
+        .tempdir()
+        .map_err(|e| Error::io("creating a private folder for the download", e))
+}
+
 /// Where the download is written. It is the place the install will read it
-/// from, which for an AppImage is the folder of the image itself so that
-/// putting it in place is one rename on one volume.
-pub(crate) fn create_staging(install: &Install) -> Result<(File, TempPath)> {
-    let (dir, suffix): (PathBuf, &str) = match install {
+/// from: for an AppImage the folder of the image itself, so that putting it in
+/// place is one rename on one volume; for everything else a private folder of
+/// its own in the temp folder.
+pub(crate) fn create_staging(install: &Install) -> Result<(File, Staged)> {
+    let (dir, private, suffix): (PathBuf, Option<TempDir>, &str) = match install {
         Install::AppImage { path } => {
             let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
-            (dir, ".part")
+            (dir, None, ".part")
         }
-        Install::Deb => (std::env::temp_dir(), ".deb"),
-        Install::Rpm => (std::env::temp_dir(), ".rpm"),
-        Install::MacApp { .. } => (std::env::temp_dir(), ".app.tar.gz"),
-        Install::Nsis => (std::env::temp_dir(), ".exe"),
-        Install::Msi => (std::env::temp_dir(), ".msi"),
+        other => {
+            let suffix = match other {
+                Install::Deb => ".deb",
+                Install::Rpm => ".rpm",
+                Install::MacApp { .. } => ".app.tar.gz",
+                Install::Nsis => ".exe",
+                _ => ".msi",
+            };
+            let private = private_dir()?;
+            (private.path().to_path_buf(), Some(private), suffix)
+        }
     };
     let file = tempfile::Builder::new()
         .prefix(SCRATCH_PREFIX)
@@ -71,34 +149,121 @@ pub(crate) fn create_staging(install: &Install) -> Result<(File, TempPath)> {
             )),
             _ => Error::io(format!("creating a file in {}", dir.display()), e),
         })?;
-    Ok(file.into_parts())
+    let (file, path) = file.into_parts();
+    Ok((file, Staged { path, dir: private }))
 }
 
-/// Installs `staged`, which is the verified artifact for `install`.
+/// Opens `path` for the second check: it must still be a plain file, not a
+/// symlink put in its place. On Windows nobody may write, rename or delete it
+/// while the handle is open.
+fn open_plain_file(path: &Path) -> Result<File> {
+    let changed =
+        || Error::Install("the download is no longer a plain file; nothing was installed".into());
+    let link = fs::symlink_metadata(path).map_err(|e| Error::io("reading the download", e))?;
+    if !link.file_type().is_file() {
+        return Err(changed());
+    }
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_SHARE_READ: u32 = 0x1;
+        options.share_mode(FILE_SHARE_READ);
+    }
+    let file = options
+        .open(path)
+        .map_err(|e| Error::io("reading the download", e))?;
+    // The file opened is the one that was looked at, not something swapped in
+    // between the two calls.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let opened = file
+            .metadata()
+            .map_err(|e| Error::io("reading the download", e))?;
+        if !opened.is_file() || opened.dev() != link.dev() || opened.ino() != link.ino() {
+            return Err(changed());
+        }
+    }
+    Ok(file)
+}
+
+/// Checks the signature of `path` again, reading it once through a handle on
+/// a plain file, and returns the SHA-256 of the bytes checked with that handle.
+fn reverify(path: &Path, signed: Signed<'_>) -> Result<([u8; 32], File)> {
+    let mut file = open_plain_file(path)?;
+    let digest = signature::verify_reader(&mut file, signed.pubkey, signed.signature)?;
+    Ok((digest, file))
+}
+
+/// Installs `staged`, the artifact for `install`, after checking its signature
+/// once more (see the module's documentation).
 pub(crate) fn apply(
     install: &Install,
-    staged: TempPath,
+    staged: Staged,
+    signed: Signed<'_>,
     app_args: &[OsString],
 ) -> Result<InstallOutcome> {
+    let (digest, file) = reverify(staged.path(), signed)?;
     match install {
         Install::AppImage { path } => {
-            replace_appimage(staged, path)?;
+            drop(file);
+            replace_appimage(staged.path, path)?;
             Ok(InstallOutcome::Replaced)
         }
         Install::Deb => {
-            install_package(staged, PackageManager::Dpkg)?;
+            drop(file);
+            install_package(staged.path(), PackageManager::Dpkg, &digest)?;
             Ok(InstallOutcome::Replaced)
         }
         Install::Rpm => {
-            install_package(staged, PackageManager::Rpm)?;
+            drop(file);
+            install_package(staged.path(), PackageManager::Rpm, &digest)?;
             Ok(InstallOutcome::Replaced)
         }
         Install::MacApp { bundle } => {
-            replace_mac_bundle(&staged, bundle)?;
+            drop(file);
+            replace_mac_bundle(staged.path(), bundle, &digest)?;
             Ok(InstallOutcome::Replaced)
         }
-        Install::Nsis => start_windows_installer(staged, WindowsInstaller::Nsis, app_args),
-        Install::Msi => start_windows_installer(staged, WindowsInstaller::Msi, app_args),
+        Install::Nsis => start_windows_installer(staged, file, WindowsInstaller::Nsis, app_args),
+        Install::Msi => start_windows_installer(staged, file, WindowsInstaller::Msi, app_args),
+    }
+}
+
+/// Deletes what earlier updates left in `dir` (the temp folder): a Windows
+/// installer has to outlive the process that started it, so it is kept, and
+/// removed here at a later start once it is older than `older_than`.
+pub(crate) fn sweep_stale(dir: &Path, older_than: Duration) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    let now = SystemTime::now();
+    for entry in entries.flatten() {
+        if !entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with(SCRATCH_PREFIX)
+        {
+            continue;
+        }
+        let Ok(meta) = entry.path().symlink_metadata() else {
+            continue;
+        };
+        let old = meta
+            .modified()
+            .ok()
+            .and_then(|m| now.duration_since(m).ok())
+            .is_some_and(|age| age >= older_than);
+        if !old {
+            continue;
+        }
+        let _ = if meta.is_dir() {
+            fs::remove_dir_all(entry.path())
+        } else {
+            fs::remove_file(entry.path())
+        };
     }
 }
 
@@ -206,6 +371,35 @@ fn looks_like_package(manager: PackageManager, head: &[u8]) -> bool {
     }
 }
 
+/// Exit status of a privileged script that found the file changed since it
+/// was verified.
+const CHANGED_AFTER_CHECK: i32 = 97;
+
+/// The shell script run as root that installs a package: it copies `$1` into a
+/// folder only root can write, refuses the copy unless its SHA-256 is `$2`
+/// (the digest of the bytes whose signature was checked), and installs the
+/// copy. A file swapped in the user's folder at any time before the copy is
+/// refused; one swapped after it is not what is installed.
+fn package_script(manager: PackageManager) -> String {
+    let (name, tool) = match manager {
+        PackageManager::Dpkg => ("update.deb", "dpkg -i"),
+        PackageManager::Rpm => ("update.rpm", "rpm -U"),
+    };
+    format!(
+        r#"set -eu
+umask 022
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+cp -- "$1" "$work/{name}"
+sum=$(sha256sum "$work/{name}")
+if [ "${{sum%% *}}" != "$2" ]; then
+  echo "hangar-update: the package changed after it was verified" >&2
+  exit {CHANGED_AFTER_CHECK}
+fi
+{tool} "$work/{name}""#
+    )
+}
+
 /// The commands that install `package`, in the order they are tried.
 ///
 /// `pkexec` asks through the desktop's own password dialog. The plugin then
@@ -214,25 +408,28 @@ fn looks_like_package(manager: PackageManager, head: &[u8]) -> bool {
 /// someone else's window is not a thing an updater should be collecting, and a
 /// GUI app has no terminal to ask on. `sudo -n` is kept for a machine where
 /// the person has made it passwordless.
-fn package_commands(manager: PackageManager, package: &Path) -> Vec<Vec<OsString>> {
-    let tool: &[&str] = match manager {
-        PackageManager::Dpkg => &["dpkg", "-i"],
-        PackageManager::Rpm => &["rpm", "-U"],
-    };
+fn package_commands(manager: PackageManager, package: &Path, digest: &str) -> Vec<Vec<OsString>> {
+    let script = package_script(manager);
     let with = |prefix: &[&str]| -> Vec<OsString> {
         prefix
             .iter()
-            .chain(tool)
             .map(OsString::from)
-            .chain(Some(package.as_os_str().to_owned()))
+            .chain([
+                OsString::from("/bin/sh"),
+                OsString::from("-c"),
+                OsString::from(&script),
+                OsString::from("hangar-update"),
+                package.as_os_str().to_owned(),
+                OsString::from(digest),
+            ])
             .collect()
     };
     vec![with(&["pkexec"]), with(&["sudo", "-n"])]
 }
 
-fn install_package(staged: TempPath, manager: PackageManager) -> Result<()> {
+fn install_package(package: &Path, manager: PackageManager, digest: &[u8; 32]) -> Result<()> {
     let mut head = [0u8; 8];
-    let read = File::open(&staged)
+    let read = File::open(package)
         .and_then(|mut f| f.read(&mut head))
         .map_err(|e| Error::io("reading the download", e))?;
     if !looks_like_package(manager, &head[..read]) {
@@ -241,34 +438,31 @@ fn install_package(staged: TempPath, manager: PackageManager) -> Result<()> {
         ));
     }
 
-    let commands = package_commands(manager, &staged);
+    let commands = package_commands(manager, package, &sha256::hex(digest));
     for command in &commands {
         let ran = Command::new(&command[0])
             .args(&command[1..])
             .stdin(Stdio::null())
             .status();
-        if ran.is_ok_and(|status| status.success()) {
-            return Ok(());
+        match ran {
+            Ok(status) if status.success() => return Ok(()),
+            Ok(status) if status.code() == Some(CHANGED_AFTER_CHECK) => {
+                return Err(changed_after_check());
+            }
+            _ => {}
         }
     }
 
-    // Keep the file: the person can run the command themselves, and the
-    // message says which.
-    let kept = staged
-        .keep()
-        .map_err(|e| Error::io("keeping the package", e.error))?;
-    Err(Error::Install(format!(
-        "administrator rights were not granted. The update was downloaded and checked; install it with: {}",
-        manual_command(manager, &kept)
-    )))
+    // The file is not kept for the person to install by hand: it sits in a
+    // folder they can write to, which is the very thing the checks above are
+    // for. *Retry* downloads it again.
+    Err(Error::Install(
+        "administrator rights were not granted, so nothing was installed".into(),
+    ))
 }
 
-fn manual_command(manager: PackageManager, package: &Path) -> String {
-    let tool = match manager {
-        PackageManager::Dpkg => "dpkg -i",
-        PackageManager::Rpm => "rpm -U",
-    };
-    format!("sudo {tool} '{}'", package.display())
+fn changed_after_check() -> Error {
+    Error::Signature("the download changed after it was verified; nothing was installed".into())
 }
 
 // ------------------------------------------------------------------- macOS
@@ -276,9 +470,11 @@ fn manual_command(manager: PackageManager, package: &Path) -> String {
 /// Unpacks a `.app.tar.gz` into `dest`.
 ///
 /// The archive holds one directory, `Hangar.AI.app`, which is dropped: `dest`
-/// becomes the bundle. Paths that would land outside `dest` (`..`, absolute
-/// ones) are refused rather than trusted; the signature already vouches for
-/// the archive, and this is for the day it vouches for a mistake.
+/// becomes the bundle. Paths that would land outside `dest` are refused rather
+/// than trusted: `..` and absolute ones, and any that go through a symlink an
+/// earlier entry made (`X -> /Users/me/.ssh`, then `X/authorized_keys`). The
+/// signature already vouches for the archive; this is for the day it vouches
+/// for a mistake.
 fn extract_app_archive(archive: &Path, dest: &Path) -> Result<()> {
     let file = File::open(archive).map_err(|e| Error::io("reading the download", e))?;
     let mut archive = tar::Archive::new(GzDecoder::new(file));
@@ -309,6 +505,12 @@ fn extract_app_archive(archive: &Path, dest: &Path) -> Result<()> {
         if inside.as_os_str().is_empty() {
             continue; // the bundle directory itself
         }
+        if goes_through_symlink(dest, &inside) {
+            return Err(Error::Install(format!(
+                "the archive has an unsafe path: {} goes through a symlink",
+                path.display()
+            )));
+        }
         let target = dest.join(&inside);
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent).map_err(|e| Error::io("unpacking the app", e))?;
@@ -320,10 +522,21 @@ fn extract_app_archive(archive: &Path, dest: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Whether `dest/inside` is reached through a symlink already on disk under
+/// `dest`, or is one itself: writing there would follow it.
+fn goes_through_symlink(dest: &Path, inside: &Path) -> bool {
+    let mut at = dest.to_path_buf();
+    inside.components().any(|part| {
+        at.push(part);
+        fs::symlink_metadata(&at).is_ok_and(|m| m.file_type().is_symlink())
+    })
+}
+
 /// Swaps `bundle` for the app in `archive`: the old one is moved aside, the new
 /// one moved in, and the old one deleted. If the move in fails, the old one is
-/// moved back.
-fn replace_mac_bundle(archive: &Path, bundle: &Path) -> Result<()> {
+/// moved back. `digest` is the SHA-256 of the verified archive, which the
+/// administrator path checks again as root.
+fn replace_mac_bundle(archive: &Path, bundle: &Path, digest: &[u8; 32]) -> Result<()> {
     let parent = bundle
         .parent()
         .ok_or_else(|| Error::Install(format!("{} has no folder", bundle.display())))?;
@@ -334,7 +547,7 @@ fn replace_mac_bundle(archive: &Path, bundle: &Path) -> Result<()> {
     {
         Ok(work) => work,
         Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
-            return replace_mac_bundle_as_admin(archive, bundle);
+            return replace_mac_bundle_as_admin(archive, bundle, digest);
         }
         Err(e) => return Err(Error::io(format!("working in {}", parent.display()), e)),
     };
@@ -364,44 +577,88 @@ fn replace_mac_bundle(archive: &Path, bundle: &Path) -> Result<()> {
 }
 
 /// The folder is not the person's to write to (an app installed for every
-/// user, by an administrator): unpack somewhere that is, and let macOS ask for
-/// the password to move it.
-fn replace_mac_bundle_as_admin(archive: &Path, bundle: &Path) -> Result<()> {
-    let work = tempfile::Builder::new()
-        .prefix(SCRATCH_PREFIX)
-        .tempdir()
-        .map_err(|e| Error::io("creating a work folder", e))?;
-    let fresh = work.path().join("new.app");
-    extract_app_archive(archive, &fresh)?;
-
-    let script = admin_move_script(&fresh, bundle);
+/// user, by an administrator): macOS asks for the password, and everything
+/// from there runs as root in [`admin_swap_command`], unpacking included, so
+/// that no file the person's account can write is used after the check.
+fn replace_mac_bundle_as_admin(archive: &Path, bundle: &Path, digest: &[u8; 32]) -> Result<()> {
+    let script = admin_move_script(&admin_swap_command(archive, &sha256::hex(digest), bundle)?);
     let status = Command::new("osascript")
         .arg("-e")
         .arg(&script)
         .stdin(Stdio::null())
         .status()
         .map_err(|e| Error::io("asking macOS for administrator rights", e))?;
+    if status.code() == Some(CHANGED_AFTER_CHECK) {
+        return Err(changed_after_check());
+    }
     if !status.success() {
         return Err(Error::Install(
-            "administrator rights were not granted, so the app was not replaced".into(),
+            "administrator rights were not granted, or the new app could not be put in place; the old one was kept".into(),
         ));
     }
     let _ = Command::new("touch").arg(bundle).status();
     Ok(())
 }
 
-/// The AppleScript that replaces `bundle` with `fresh` as administrator.
-///
-/// The paths go through two layers of quoting, the shell's and AppleScript's,
-/// and are applied innermost first.
-fn admin_move_script(fresh: &Path, bundle: &Path) -> String {
-    let sh = |p: &Path| format!("'{}'", p.to_string_lossy().replace('\'', r"'\''"));
-    let command = format!(
-        "rm -rf {bundle} && mv -f {fresh} {bundle}",
-        bundle = sh(bundle),
-        fresh = sh(fresh)
-    );
-    let applescript = command.replace('\\', r"\\").replace('"', r#"\""#);
+/// Quotes `p` for the shell.
+fn sh_quote(p: &OsStr) -> String {
+    format!("'{}'", p.to_string_lossy().replace('\'', r"'\''"))
+}
+
+/// The shell command that replaces `bundle` with the app in `archive`, run as
+/// root. It copies the archive into a folder of its own beside the bundle
+/// (root's, since the person cannot write there), refuses the copy unless its
+/// SHA-256 is `digest`, unpacks it there, and swaps the bundles the way the
+/// unprivileged path does: the old one moved aside, the new one moved in, the
+/// old one moved back if that fails, and deleted only once it worked.
+fn admin_swap_command(archive: &Path, digest: &str, bundle: &Path) -> Result<String> {
+    let parent = bundle
+        .parent()
+        .ok_or_else(|| Error::Install(format!("{} has no folder", bundle.display())))?;
+    Ok(format!(
+        r#"set -eu
+umask 022
+src={src}
+sum={sum}
+bundle={bundle}
+work=$(mktemp -d {parent}/{SCRATCH_PREFIX}XXXXXX)
+trap 'rm -rf "$work"' EXIT
+cp -- "$src" "$work/update.tar.gz"
+got=$(shasum -a 256 "$work/update.tar.gz")
+if [ "${{got%% *}}" != "$sum" ]; then
+  echo "hangar-update: the archive changed after it was verified" >&2
+  exit {CHANGED_AFTER_CHECK}
+fi
+mkdir "$work/new"
+tar -xzf "$work/update.tar.gz" --no-same-owner -C "$work/new"
+set -- "$work/new"/*.app
+if [ "$#" -ne 1 ] || [ -L "$1" ] || [ ! -d "$1" ]; then
+  echo "hangar-update: the archive does not hold one app" >&2
+  exit 98
+fi
+mv -- "$bundle" "$work/old.app"
+if ! mv -- "$1" "$bundle"; then
+  if ! mv -- "$work/old.app" "$bundle"; then
+    trap - EXIT
+    echo "hangar-update: the old app could not be put back; it is in $work/old.app" >&2
+  fi
+  exit 99
+fi"#,
+        src = sh_quote(archive.as_os_str()),
+        sum = sh_quote(OsStr::new(digest)),
+        bundle = sh_quote(bundle.as_os_str()),
+        parent = sh_quote(parent.as_os_str()),
+    ))
+}
+
+/// The AppleScript that runs `command` as administrator. The command is put
+/// in an AppleScript string, where a backslash, a quote and a line break are
+/// escaped.
+fn admin_move_script(command: &str) -> String {
+    let applescript = command
+        .replace('\\', r"\\")
+        .replace('"', r#"\""#)
+        .replace('\n', r"\n");
     format!("do shell script \"{applescript}\" with administrator privileges")
 }
 
@@ -413,14 +670,21 @@ enum WindowsInstaller {
     Msi,
 }
 
+/// Starts the installer in `staged`. `verified` is the handle the signature
+/// was just checked through; on Windows it allows no writing, renaming or
+/// deleting, and it is left open until the process exits so the installer
+/// starts on the bytes that were checked.
 fn start_windows_installer(
-    staged: TempPath,
+    staged: Staged,
+    mut verified: File,
     kind: WindowsInstaller,
     app_args: &[OsString],
 ) -> Result<InstallOutcome> {
+    use std::io::{Seek, SeekFrom};
     let mut head = [0u8; 8];
-    let read = File::open(&staged)
-        .and_then(|mut f| f.read(&mut head))
+    let read = verified
+        .seek(SeekFrom::Start(0))
+        .and_then(|_| verified.read(&mut head))
         .map_err(|e| Error::io("reading the download", e))?;
     let head = &head[..read];
     let plausible = match kind {
@@ -437,10 +701,14 @@ fn start_windows_installer(
     }
 
     // The installer runs after this process is gone, so the file must outlive
-    // it: the temp folder is the system's to clean.
-    let path = staged
+    // it; `sweep_stale` deletes it at a later start.
+    let Staged { path, dir } = staged;
+    let path = path
         .keep()
         .map_err(|e| Error::io("keeping the installer", e.error))?;
+    if let Some(dir) = dir {
+        let _ = dir.keep();
+    }
 
     let (file, parameters) = match kind {
         WindowsInstaller::Nsis => (path.into_os_string(), nsis_arguments(app_args).join(" ")),
@@ -455,6 +723,8 @@ fn start_windows_installer(
         }
     };
     shell_execute(&file, &parameters)?;
+    // Held, write-locked, until the process ends.
+    std::mem::forget(verified);
     Ok(InstallOutcome::InstallerStarted)
 }
 
@@ -592,9 +862,11 @@ fn shell_execute(_: &OsStr, _: &str) -> Result<()> {
 ///
 /// The process is not replaced from the inside: Hangar has terminals to hang
 /// up and state to save before it ends, and has to be the one to end. So the
-/// command waits for `parent_pid` to be gone (for a few seconds at most) and
-/// only then starts the app, which also means the new copy never finds the old
-/// one still holding its single-instance lock or its window.
+/// command waits for `parent_pid` to be gone (30 seconds at most) and only
+/// then starts the app, which also means the new copy never finds the old one
+/// still holding its single-instance lock or its window. If the old process is
+/// still there after that, nothing is started: a second instance beside a
+/// stuck one is worse than starting Hangar by hand.
 pub(crate) fn relaunch_command(
     install: &Install,
     exe: &Path,
@@ -602,7 +874,10 @@ pub(crate) fn relaunch_command(
     parent_pid: u32,
 ) -> Option<Command> {
     const WAIT_THEN_EXEC: &str = r#"pid=$1; shift; n=0
-while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 150 ]; do sleep 0.2; n=$((n + 1)); done
+while kill -0 "$pid" 2>/dev/null; do
+  [ "$n" -ge 150 ] && exit 1
+  sleep 0.2; n=$((n + 1))
+done
 exec "$@""#;
 
     let (program, args): (OsString, Vec<OsString>) = match install {
@@ -654,7 +929,20 @@ exec "$@""#;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fixtures::{PUBKEY, SIG_PREHASHED, payload};
     use std::io::Write;
+
+    const SIGNED: Signed<'static> = Signed {
+        pubkey: PUBKEY,
+        signature: SIG_PREHASHED,
+    };
+
+    #[cfg(unix)]
+    fn digest_of(bytes: &[u8]) -> [u8; 32] {
+        let mut h = sha256::Sha256::new();
+        h.update(bytes);
+        h.finalize()
+    }
 
     fn tar_gz(entries: &[(&str, &[u8], u32)]) -> Vec<u8> {
         let mut builder = tar::Builder::new(Vec::new());
@@ -681,7 +969,7 @@ mod tests {
     }
 
     /// An AppImage standing in `dir`, and a staging file for `install`.
-    fn staged_appimage(dir: &Path, old: &[u8], mode: u32) -> (Install, File, TempPath) {
+    fn staged_appimage(dir: &Path, old: &[u8], mode: u32) -> (Install, File, Staged) {
         let path = dir.join("Hangar.AI.AppImage");
         fs::write(&path, old).unwrap();
         set_file_mode(&path, mode).unwrap();
@@ -698,16 +986,16 @@ mod tests {
         let Install::AppImage { path } = &install else {
             unreachable!()
         };
-        file.write_all(b"new image").unwrap();
+        file.write_all(&payload()).unwrap();
         drop(file);
 
         // The running process has the old image open, as an AppImage does.
         let mut running = File::open(path).unwrap();
 
-        let outcome = apply(&install, staged, &[]).unwrap();
+        let outcome = apply(&install, staged, SIGNED, &[]).unwrap();
         assert_eq!(outcome, InstallOutcome::Replaced);
 
-        assert_eq!(fs::read(path).unwrap(), b"new image");
+        assert_eq!(fs::read(path).unwrap(), payload());
         assert_eq!(file_mode(path).unwrap() & 0o777, 0o750);
         // It kept reading the old file: the new one is a different inode.
         let mut seen = String::new();
@@ -726,9 +1014,9 @@ mod tests {
         let Install::AppImage { path } = &install else {
             unreachable!()
         };
-        file.write_all(b"new").unwrap();
+        file.write_all(&payload()).unwrap();
         drop(file);
-        apply(&install, staged, &[]).unwrap();
+        apply(&install, staged, SIGNED, &[]).unwrap();
         assert_eq!(file_mode(path).unwrap() & 0o777, 0o740);
     }
 
@@ -736,7 +1024,7 @@ mod tests {
     fn the_staging_file_goes_beside_the_appimage_and_cleans_up_after_itself() {
         let dir = tempfile::tempdir().unwrap();
         let (_, file, staged) = staged_appimage(dir.path(), b"old", 0o755);
-        assert_eq!(staged.parent(), Some(dir.path()));
+        assert_eq!(staged.path().parent(), Some(dir.path()));
         assert_eq!(names(dir.path()).len(), 2);
         // A cancelled or failed update drops the staging file and leaves the
         // folder as it was.
@@ -770,7 +1058,8 @@ mod tests {
         file.write_all(&archive).unwrap();
         drop(file);
 
-        apply(&install, staged, &[]).unwrap();
+        // Past the signature check, which a made-up archive cannot pass.
+        replace_appimage(staged.path, path).unwrap();
         assert_eq!(fs::read(path).unwrap(), b"unpacked image");
         assert_eq!(names(dir.path()), ["Hangar.AI.AppImage"]);
     }
@@ -786,7 +1075,7 @@ mod tests {
             .unwrap();
         drop(file);
 
-        match apply(&install, staged, &[]) {
+        match replace_appimage(staged.path, path) {
             Err(Error::Install(why)) => assert!(why.contains("no .AppImage"), "{why}"),
             other => panic!("expected an install error, got {other:?}"),
         }
@@ -807,11 +1096,11 @@ mod tests {
         let install = Install::AppImage { path: path.clone() };
 
         let staged = elsewhere.path().join("download");
-        fs::write(&staged, b"new").unwrap();
-        let staged = TempPath::try_from_path(staged).unwrap();
+        fs::write(&staged, payload()).unwrap();
+        let staged = Staged::from_path(TempPath::try_from_path(staged).unwrap());
 
-        apply(&install, staged, &[]).unwrap();
-        assert_eq!(fs::read(&path).unwrap(), b"new");
+        apply(&install, staged, SIGNED, &[]).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), payload());
         assert_eq!(names(app_dir.path()), ["Hangar.AI.AppImage"]);
         assert!(
             names(elsewhere.path()).is_empty(),
@@ -900,7 +1189,7 @@ mod tests {
         )
         .unwrap();
 
-        replace_mac_bundle(&archive_path, &bundle).unwrap();
+        replace_mac_bundle(&archive_path, &bundle, &[0; 32]).unwrap();
 
         assert_eq!(
             fs::read(bundle.join("Contents/MacOS/hangar-ai")).unwrap(),
@@ -916,37 +1205,247 @@ mod tests {
 
     #[test]
     fn the_administrator_script_survives_hostile_paths() {
-        let script = admin_move_script(
-            Path::new("/tmp/it's/new.app"),
+        let command = admin_swap_command(
+            Path::new("/tmp/it's/update.tar.gz"),
+            "ab12",
             Path::new(r#"/Applications/My "App" \ Hangar.app"#),
+        )
+        .unwrap();
+        assert!(
+            command.contains(r"src='/tmp/it'\''s/update.tar.gz'"),
+            "{command}"
         );
-        assert_eq!(
-            script,
-            r#"do shell script "rm -rf '/Applications/My \"App\" \\ Hangar.app' && mv -f '/tmp/it'\\''s/new.app' '/Applications/My \"App\" \\ Hangar.app'" with administrator privileges"#
+        assert!(
+            command.contains(r#"bundle='/Applications/My "App" \ Hangar.app'"#),
+            "{command}"
         );
+        assert!(
+            command.contains(r#"mktemp -d '/Applications'/.hangar-update-XXXXXX"#),
+            "{command}"
+        );
+        let script = admin_move_script(&command);
+        assert!(script.starts_with("do shell script \""));
+        assert!(script.ends_with("\" with administrator privileges"));
+        assert!(!script.contains('\n'), "line breaks are escaped");
+        assert!(
+            script.contains(r#"bundle='/Applications/My \"App\" \\ Hangar.app'"#),
+            "{script}"
+        );
+        // Unescaping the AppleScript string gives the shell command back.
+        let inner = &script
+            ["do shell script \"".len()..script.len() - "\" with administrator privileges".len()];
+        let mut unescaped = String::new();
+        let mut chars = inner.chars();
+        while let Some(c) = chars.next() {
+            if c == '\\' {
+                match chars.next() {
+                    Some('n') => unescaped.push('\n'),
+                    Some(other) => unescaped.push(other),
+                    None => panic!("dangling escape"),
+                }
+            } else {
+                unescaped.push(c);
+            }
+        }
+        assert_eq!(unescaped, command);
     }
 
     #[test]
     fn packages_are_installed_through_pkexec_then_passwordless_sudo() {
-        let deb = package_commands(PackageManager::Dpkg, Path::new("/tmp/x.deb"));
-        assert_eq!(
-            deb,
-            [
-                ["pkexec", "dpkg", "-i", "/tmp/x.deb"]
-                    .map(OsString::from)
-                    .to_vec(),
-                ["sudo", "-n", "dpkg", "-i", "/tmp/x.deb"]
-                    .map(OsString::from)
-                    .to_vec(),
-            ]
-        );
-        let rpm = package_commands(PackageManager::Rpm, Path::new("/tmp/x.rpm"));
-        assert_eq!(
-            rpm[0],
-            ["pkexec", "rpm", "-U", "/tmp/x.rpm"]
+        let deb = package_commands(PackageManager::Dpkg, Path::new("/tmp/x.deb"), "ab12");
+        let script = package_script(PackageManager::Dpkg);
+        let tail = |prefix: &[&str]| -> Vec<OsString> {
+            prefix
+                .iter()
+                .copied()
+                .chain([
+                    "/bin/sh",
+                    "-c",
+                    &script,
+                    "hangar-update",
+                    "/tmp/x.deb",
+                    "ab12",
+                ])
                 .map(OsString::from)
-                .to_vec()
+                .collect()
+        };
+        assert_eq!(deb, [tail(&["pkexec"]), tail(&["sudo", "-n"])]);
+        assert!(
+            script.ends_with(r#"dpkg -i "$work/update.deb""#),
+            "{script}"
         );
+        let rpm = package_script(PackageManager::Rpm);
+        assert!(rpm.ends_with(r#"rpm -U "$work/update.rpm""#), "{rpm}");
+    }
+
+    /// Runs the root script of a package install as this user, with a fake
+    /// `dpkg` that records what it was given.
+    #[cfg(unix)]
+    fn run_package_script(package: &Path, digest: &str) -> (std::process::Output, PathBuf) {
+        let tools = tempfile::tempdir().unwrap().keep();
+        let received = tools.join("received.deb");
+        let dpkg = tools.join("dpkg");
+        fs::write(
+            &dpkg,
+            format!(
+                "#!/bin/sh\n[ \"$1\" = -i ] && cp \"$2\" '{}'\n",
+                received.display()
+            ),
+        )
+        .unwrap();
+        set_file_mode(&dpkg, 0o755).unwrap();
+        let path = format!(
+            "{}:{}",
+            tools.display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        let output = Command::new("/bin/sh")
+            .arg("-c")
+            .arg(package_script(PackageManager::Dpkg))
+            .arg("hangar-update")
+            .arg(package)
+            .arg(digest)
+            .env("PATH", path)
+            .output()
+            .unwrap();
+        (output, received)
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn the_root_script_installs_exactly_the_verified_bytes() {
+        if Command::new("sha256sum").arg("--version").output().is_err() {
+            return; // not a GNU userland; the macOS script is tested below
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let package = dir.path().join("update.deb");
+        fs::write(&package, payload()).unwrap();
+        let digest = sha256::hex(&digest_of(&payload()));
+
+        let (output, received) = run_package_script(&package, &digest);
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(fs::read(&received).unwrap(), payload());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn the_root_script_refuses_a_package_swapped_after_the_check() {
+        if Command::new("sha256sum").arg("--version").output().is_err() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let package = dir.path().join("update.deb");
+        // Verified as the payload, then rewritten by someone else.
+        let digest = sha256::hex(&digest_of(&payload()));
+        fs::write(&package, b"!<arch>\nsomething else").unwrap();
+
+        let (output, received) = run_package_script(&package, &digest);
+        assert_eq!(
+            output.status.code(),
+            Some(CHANGED_AFTER_CHECK),
+            "{output:?}"
+        );
+        assert!(!received.exists(), "dpkg never ran");
+    }
+
+    /// Runs the macOS root command as this user against a bundle in a
+    /// folder of its own; `None` where `shasum` or `tar` is missing.
+    #[cfg(unix)]
+    fn run_admin_swap(
+        archive: &[u8],
+        digest: &str,
+    ) -> Option<(std::process::Output, tempfile::TempDir)> {
+        let have = |tool: &str, arg: &str| {
+            Command::new(tool)
+                .arg(arg)
+                .output()
+                .is_ok_and(|o| o.status.success())
+        };
+        if !have("shasum", "--version") || !have("tar", "--version") {
+            return None;
+        }
+        let apps = tempfile::tempdir().unwrap();
+        let bundle = apps.path().join("Hangar.AI.app");
+        fs::create_dir_all(bundle.join("Contents/MacOS")).unwrap();
+        fs::write(bundle.join("Contents/MacOS/hangar-ai"), b"old binary").unwrap();
+        let downloads = tempfile::tempdir().unwrap();
+        let path = downloads.path().join("update.tar.gz");
+        fs::write(&path, archive).unwrap();
+        let output = Command::new("/bin/sh")
+            .arg("-c")
+            .arg(admin_swap_command(&path, digest, &bundle).unwrap())
+            .output()
+            .unwrap();
+        Some((output, apps))
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn the_mac_root_command_unpacks_and_swaps_the_verified_archive() {
+        let archive = tar_gz(&[(
+            "Hangar.AI.app/Contents/MacOS/hangar-ai",
+            b"new binary",
+            0o755,
+        )]);
+        let Some((output, apps)) = run_admin_swap(&archive, &sha256::hex(&digest_of(&archive)))
+        else {
+            return;
+        };
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(
+            fs::read(apps.path().join("Hangar.AI.app/Contents/MacOS/hangar-ai")).unwrap(),
+            b"new binary"
+        );
+        assert_eq!(
+            names(apps.path()),
+            ["Hangar.AI.app"],
+            "the work folder is gone"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn the_mac_root_command_refuses_an_archive_swapped_after_the_check() {
+        let verified = tar_gz(&[(
+            "Hangar.AI.app/Contents/MacOS/hangar-ai",
+            b"new binary",
+            0o755,
+        )]);
+        let swapped = tar_gz(&[(
+            "Hangar.AI.app/Contents/MacOS/hangar-ai",
+            b"evil binary",
+            0o755,
+        )]);
+        let Some((output, apps)) = run_admin_swap(&swapped, &sha256::hex(&digest_of(&verified)))
+        else {
+            return;
+        };
+        assert_eq!(
+            output.status.code(),
+            Some(CHANGED_AFTER_CHECK),
+            "{output:?}"
+        );
+        assert_eq!(
+            fs::read(apps.path().join("Hangar.AI.app/Contents/MacOS/hangar-ai")).unwrap(),
+            b"old binary"
+        );
+        assert_eq!(names(apps.path()), ["Hangar.AI.app"]);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn the_mac_root_command_keeps_the_old_app_when_the_archive_holds_none() {
+        let archive = tar_gz(&[("README", b"no app here", 0o644)]);
+        let Some((output, apps)) = run_admin_swap(&archive, &sha256::hex(&digest_of(&archive)))
+        else {
+            return;
+        };
+        assert_eq!(output.status.code(), Some(98), "{output:?}");
+        assert_eq!(
+            fs::read(apps.path().join("Hangar.AI.app/Contents/MacOS/hangar-ai")).unwrap(),
+            b"old binary"
+        );
+        assert_eq!(names(apps.path()), ["Hangar.AI.app"]);
     }
 
     #[test]
@@ -966,7 +1465,7 @@ mod tests {
         // The check runs before anything is asked of the person.
         let mut file = tempfile::Builder::new().suffix(".deb").tempfile().unwrap();
         file.write_all(b"\x7fELF not a package").unwrap();
-        match install_package(file.into_temp_path(), PackageManager::Dpkg) {
+        match install_package(file.path(), PackageManager::Dpkg, &[0; 32]) {
             Err(Error::Install(why)) => assert!(why.contains("not the package"), "{why}"),
             other => panic!("expected the file to be refused, got {other:?}"),
         }
@@ -1143,5 +1642,173 @@ mod tests {
         old.wait().unwrap();
         launcher.wait().unwrap();
         assert_eq!(fs::read_to_string(&marker).unwrap().trim(), "hello");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_download_rewritten_after_its_check_is_never_installed() {
+        let dir = tempfile::tempdir().unwrap();
+        let (install, mut file, staged) = staged_appimage(dir.path(), b"old", 0o755);
+        let Install::AppImage { path } = &install else {
+            unreachable!()
+        };
+        file.write_all(&payload()).unwrap();
+        drop(file);
+        // Checked when the download ended; then another process rewrites it.
+        signature::verify_file(staged.path(), PUBKEY, SIG_PREHASHED).unwrap();
+        let mut swapped = payload();
+        swapped[10] ^= 0xff;
+        fs::write(staged.path(), &swapped).unwrap();
+
+        match apply(&install, staged, SIGNED, &[]) {
+            Err(Error::Signature(why)) => assert!(why.contains("does not match"), "{why}"),
+            other => panic!("expected the swapped file to be refused, got {other:?}"),
+        }
+        assert_eq!(fs::read(path).unwrap(), b"old");
+        assert_eq!(names(dir.path()), ["Hangar.AI.AppImage"]);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_symlink_put_in_place_of_the_download_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let (install, file, staged) = staged_appimage(dir.path(), b"old", 0o755);
+        drop(file);
+        // Even pointing at a file that would verify.
+        let elsewhere = tempfile::tempdir().unwrap();
+        let target = elsewhere.path().join("signed");
+        fs::write(&target, payload()).unwrap();
+        fs::remove_file(staged.path()).unwrap();
+        std::os::unix::fs::symlink(&target, staged.path()).unwrap();
+
+        match apply(&install, staged, SIGNED, &[]) {
+            Err(Error::Install(why)) => assert!(
+                why.contains("not a plain file") || why.contains("no longer"),
+                "{why}"
+            ),
+            other => panic!("expected the symlink to be refused, got {other:?}"),
+        }
+        let Install::AppImage { path } = &install else {
+            unreachable!()
+        };
+        assert_eq!(fs::read(path).unwrap(), b"old");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_package_is_downloaded_into_a_private_folder_of_its_own() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_file, staged) = create_staging(&Install::Deb).unwrap();
+        let (_other_file, other) = create_staging(&Install::Deb).unwrap();
+        let folder = staged.path().parent().unwrap().to_path_buf();
+        assert_ne!(
+            Some(folder.as_path()),
+            other.path().parent(),
+            "created fresh each time"
+        );
+        assert!(folder.starts_with(std::env::temp_dir()));
+        let mode = fs::metadata(&folder).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
+        drop(staged);
+        assert!(!folder.exists(), "dropping the download removes its folder");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_mac_archive_cannot_write_through_a_symlink_it_made() {
+        let work = tempfile::tempdir().unwrap();
+        let outside = work.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+
+        let mut builder = tar::Builder::new(Vec::new());
+        let mut link = tar::Header::new_gnu();
+        link.set_entry_type(tar::EntryType::Symlink);
+        link.set_size(0);
+        link.set_mode(0o777);
+        builder
+            .append_link(&mut link, "Hangar.AI.app/X", &outside)
+            .unwrap();
+        let mut file = tar::Header::new_gnu();
+        file.set_size(4);
+        file.set_mode(0o644);
+        file.set_cksum();
+        builder
+            .append_data(&mut file, "Hangar.AI.app/X/authorized_keys", &b"evil"[..])
+            .unwrap();
+        let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        gz.write_all(&builder.into_inner().unwrap()).unwrap();
+        let archive = work.path().join("evil.tar.gz");
+        fs::write(&archive, gz.finish().unwrap()).unwrap();
+
+        match extract_app_archive(&archive, &work.path().join("out.app")) {
+            Err(Error::Install(why)) => assert!(why.contains("symlink"), "{why}"),
+            other => panic!("expected the path to be refused, got {other:?}"),
+        }
+        assert!(
+            names(&outside).is_empty(),
+            "nothing written outside the bundle"
+        );
+    }
+
+    #[test]
+    fn leftovers_of_earlier_updates_are_swept_once_old() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = dir.path().join(".hangar-update-old.exe");
+        let fresh = dir.path().join(".hangar-update-fresh.msi");
+        let old_folder = dir.path().join(".hangar-update-folder");
+        let unrelated = dir.path().join("someone-else.exe");
+        for file in [&old, &fresh, &unrelated] {
+            fs::write(file, b"x").unwrap();
+        }
+        fs::create_dir(&old_folder).unwrap();
+        fs::write(old_folder.join("setup.exe"), b"x").unwrap();
+        let long_ago = SystemTime::now() - Duration::from_secs(2 * 60 * 60);
+        for path in [&old, &unrelated] {
+            File::options()
+                .write(true)
+                .open(path)
+                .unwrap()
+                .set_modified(long_ago)
+                .unwrap();
+        }
+        #[cfg(unix)]
+        File::open(&old_folder)
+            .unwrap()
+            .set_modified(long_ago)
+            .unwrap();
+
+        sweep_stale(dir.path(), Duration::from_secs(60 * 60));
+        assert!(!old.exists());
+        assert!(fresh.exists(), "a recent one may still be in use");
+        assert!(unrelated.exists(), "only the updater's own files");
+        #[cfg(unix)]
+        assert!(!old_folder.exists());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn the_launcher_starts_nothing_while_the_old_process_lives_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("started");
+        let mut stuck = Command::new("sleep").arg("5").spawn().unwrap();
+        let install = Install::Deb;
+        let command = relaunch_command(&install, Path::new("/ignored"), &[], stuck.id()).unwrap();
+        // The real script, with its 30 s wait cut to two tries.
+        let line = command_line(&command);
+        let script = line[2].replace("-ge 150", "-ge 2");
+        assert_ne!(script, line[2], "the limit is where the test expects it");
+        let status = Command::new("sh")
+            .arg("-c")
+            .arg(script)
+            .arg("hangar-relaunch")
+            .arg(stuck.id().to_string())
+            .arg("touch")
+            .arg(&marker)
+            .status()
+            .unwrap();
+        stuck.kill().unwrap();
+        let _ = stuck.wait();
+        assert!(!status.success());
+        assert!(!marker.exists(), "no second instance beside a stuck one");
     }
 }

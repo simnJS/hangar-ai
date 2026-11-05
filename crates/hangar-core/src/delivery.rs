@@ -357,7 +357,7 @@ fn run(mut command: Command, spawn: Spawn) -> std::io::Result<Finished> {
     })
 }
 
-fn scrub(command: &mut Command) {
+pub(crate) fn scrub(command: &mut Command) {
     for name in SCRUBBED {
         command.env_remove(name);
     }
@@ -593,20 +593,86 @@ fn legacy_root() -> PathBuf {
 /// them all. `%LOCALAPPDATA%\hangar\c\<8 hex>` (elsewhere the user's local
 /// data folder, then the system's temp one).
 fn check_folder(request: &Delivery) -> PathBuf {
-    let root = match request
-        .check_root
-        .as_deref()
-        .filter(|root| !root.is_empty())
-    {
+    let root = check_root(request.check_root.as_deref());
+    let _ = std::fs::create_dir_all(&root);
+    let root = dunce::canonicalize(&root).unwrap_or(root);
+    root.join(crate::build_cache::key_for(&request.workspace_id))
+}
+
+/// The folder the workspaces' check worktrees live in: `root` when one is
+/// given, `<data_local>/hangar/c` otherwise.
+fn check_root(root: Option<&str>) -> PathBuf {
+    match root.filter(|root| !root.is_empty()) {
         Some(root) => PathBuf::from(root),
         None => dirs::data_local_dir()
             .unwrap_or_else(std::env::temp_dir)
             .join("hangar")
             .join("c"),
-    };
-    let _ = std::fs::create_dir_all(&root);
-    let root = dunce::canonicalize(&root).unwrap_or(root);
-    root.join(crate::build_cache::key_for(&request.workspace_id))
+    }
+}
+
+/// A workspace was deleted: its check worktree goes, from `workspace_folder`'s
+/// repository (git forgets it) and from the disk, dependencies and all.
+/// `check_root`: as in `Delivery`. Waits for git: call it off the UI thread.
+pub fn remove_workspace_check(
+    workspace_id: &str,
+    workspace_folder: &str,
+    check_root: Option<&str>,
+) {
+    let root = check_root_canonical(check_root);
+    let path = root.join(crate::build_cache::key_for(workspace_id));
+    if !path.exists() {
+        return;
+    }
+    let repo = Path::new(workspace_folder);
+    if repo.is_dir() && common_dir(repo).is_ok() {
+        remove_scratch(repo, &path);
+        let _ = git_run(repo, &["worktree", "prune"], false);
+    }
+    if path.exists() {
+        let _ = std::fs::remove_dir_all(&path);
+    }
+}
+
+fn check_root_canonical(root: Option<&str>) -> PathBuf {
+    let root = check_root(root);
+    dunce::canonicalize(&root).unwrap_or(root)
+}
+
+/// At the app's start: the check worktrees in `root` whose repository is gone,
+/// or is none of `repos` (a folder of each workspace there is), are removed.
+/// A check worktree is a folder holding a `.git` file; anything else in `root`
+/// is not Hangar's and stays. Nothing is touched when `repos` is empty: that
+/// is an app that has not loaded its workspaces, not one that has none.
+fn sweep_stale_checks(root: &Path, repos: &[String]) {
+    if repos.is_empty() {
+        return;
+    }
+    let live: std::collections::HashSet<String> = repos
+        .iter()
+        .filter_map(|repo| common_dir(Path::new(repo)).ok())
+        .map(|common| key(&common.to_string_lossy()))
+        .collect();
+    for entry in std::fs::read_dir(root).into_iter().flatten().flatten() {
+        let path = entry.path();
+        if !path.join(".git").is_file() {
+            continue;
+        }
+        match common_dir(&path) {
+            Ok(common) if common.is_dir() => {
+                if live.contains(&key(&common.to_string_lossy())) {
+                    continue;
+                }
+                remove_scratch(&common, &path);
+                let _ = git_run(&common, &["worktree", "prune"], false);
+            }
+            // Its repository is gone: nothing to tell git, the folder is all.
+            _ => {}
+        }
+        if path.exists() {
+            let _ = std::fs::remove_dir_all(&path);
+        }
+    }
 }
 
 /// The workspace's worktree for checks: made once, put on each merge in turn.
@@ -729,9 +795,11 @@ fn sweep_legacy(root: &Path, repos: &[String]) {
     }
 }
 
-/// The app's start: what old versions left in the system's temp folder goes.
+/// The app's start: what old versions left in the system's temp folder goes,
+/// and so do the check worktrees of workspaces that no longer exist.
 pub fn sweep_leftovers(repos: &[String]) {
     sweep_legacy(&legacy_root(), repos);
+    sweep_stale_checks(&check_root_canonical(None), repos);
 }
 
 fn tested_ref(task: &str, part: &str) -> String {
@@ -892,62 +960,7 @@ fn remember_passed(request: &Delivery, repo: &str, tree: &str, line: &str) {
 
 /* ── What a task owns ──────────────────────────────────────────── */
 
-fn match_segment(pattern: &[char], text: &[char]) -> bool {
-    match (pattern.first(), text.first()) {
-        (None, None) => true,
-        (Some('*'), _) => {
-            match_segment(&pattern[1..], text)
-                || (!text.is_empty() && match_segment(pattern, &text[1..]))
-        }
-        (Some('?'), Some(_)) => match_segment(&pattern[1..], &text[1..]),
-        (Some(p), Some(t)) if p == t => match_segment(&pattern[1..], &text[1..]),
-        _ => false,
-    }
-}
-
-fn match_segments(pattern: &[&str], path: &[&str]) -> bool {
-    match pattern.first() {
-        None => path.is_empty(),
-        Some(&"**") => (0..=path.len()).any(|skip| match_segments(&pattern[1..], &path[skip..])),
-        Some(segment) => {
-            !path.is_empty() && {
-                let segment: Vec<char> = segment.chars().collect();
-                let name: Vec<char> = path[0].chars().collect();
-                match_segment(&segment, &name) && match_segments(&pattern[1..], &path[1..])
-            }
-        }
-    }
-}
-
-/// Whether `owns` — paths and globs relative to the workspace folder, which
-/// sits at `prefix` in the repository — covers `path`, relative to the
-/// repository. A path owns everything under it, and so does a glob matching
-/// a folder: `src/lib` and `src/*` both own `src/lib/a.ts`. `*` and `?` stay
-/// within a name, `**` crosses folders.
-fn owned(path: &str, owns: &[String], prefix: &str) -> bool {
-    let fold = |text: &str| {
-        let text = text.replace('\\', "/");
-        if cfg!(windows) {
-            text.to_lowercase()
-        } else {
-            text
-        }
-    };
-    let path = fold(path);
-    let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-    owns.iter().any(|pattern| {
-        let pattern = fold(pattern.trim());
-        let pattern = pattern.trim_start_matches("./").trim_matches('/');
-        let full = match pattern {
-            "" | "." => fold(prefix).trim_end_matches('/').to_string(),
-            _ => format!("{}{pattern}", fold(prefix)),
-        };
-        let wanted: Vec<&str> = full.split('/').filter(|s| !s.is_empty()).collect();
-        // The path itself, or a folder it is in.
-        wanted.is_empty()
-            || (1..=segments.len()).any(|len| match_segments(&wanted, &segments[..len]))
-    })
-}
+mod owns;
 
 /* ── The check ─────────────────────────────────────────────────── */
 
@@ -1470,7 +1483,7 @@ which holds the merged result. You did not write this code, and nothing else che
             description
         }
     ));
-    if task.owns.is_empty() {
+    if !owns::scoped(&task.owns) {
         prompt.push_str("Files the task owns: not stated.\n\n");
     } else {
         prompt.push_str(&format!(
@@ -1952,12 +1965,12 @@ together, say so in a comment on your task and stop.",
     )
     .map(|out| out.trim().to_string())
     .unwrap_or_default();
-    let outside: Vec<String> = if request.task.owns.is_empty() {
+    let outside: Vec<String> = if !owns::scoped(&request.task.owns) {
         vec![]
     } else {
         changed
             .iter()
-            .filter(|path| !owned(path, &request.task.owns, &prefix))
+            .filter(|path| !owns::covers(path, &request.task.owns, &prefix))
             .cloned()
             .collect()
     };
@@ -3550,6 +3563,72 @@ mod tests {
         assert_eq!(worktrees(&repo.main).unwrap().len(), 2);
     }
 
+    fn check_worktree(repo: &Repo, root: &Path, name: &str) -> PathBuf {
+        let path = root.join(name);
+        fs::create_dir_all(root).unwrap();
+        sh(
+            &repo.main,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "--detach",
+                &path.to_string_lossy(),
+                "main",
+            ],
+        );
+        path
+    }
+
+    #[test]
+    fn a_deleted_workspace_takes_its_check_worktree_with_it() {
+        let repo = repo("forget");
+        let root = repo.root.join("checks");
+        let path = check_worktree(&repo, &root, &crate::build_cache::key_for("ws-1"));
+        let other = check_worktree(&repo, &root, &crate::build_cache::key_for("ws-2"));
+        write(&path, "node_modules/x/index.js", "ignored\n");
+
+        remove_workspace_check(
+            "ws-1",
+            &repo.main.to_string_lossy(),
+            Some(&root.to_string_lossy()),
+        );
+
+        assert!(!path.exists());
+        assert!(other.exists(), "another workspace's stays");
+        let listed = worktrees(&repo.main).unwrap();
+        assert!(!listed
+            .iter()
+            .any(|(listed, _, _)| key(listed) == key(&path.to_string_lossy())));
+        // Nothing to remove is not an error.
+        remove_workspace_check(
+            "ws-9",
+            &repo.main.to_string_lossy(),
+            Some(&root.to_string_lossy()),
+        );
+    }
+
+    #[test]
+    fn the_startup_sweep_removes_the_checks_of_repositories_no_workspace_has() {
+        let gone = repo("stale-gone");
+        let kept = repo("stale-kept");
+        let root = kept.root.join("checks");
+        let stale = check_worktree(&gone, &root, "aaaaaaaa");
+        let live = check_worktree(&kept, &root, "bbbbbbbb");
+        let foreign = root.join("not-a-worktree");
+        fs::create_dir_all(&foreign).unwrap();
+
+        sweep_stale_checks(&root, &[]);
+        assert!(stale.exists(), "no workspaces known: nothing is touched");
+
+        sweep_stale_checks(&root, &[kept.main.to_string_lossy().into_owned()]);
+
+        assert!(!stale.exists());
+        assert!(live.exists());
+        assert!(foreign.exists(), "what is not a worktree stays");
+        assert_eq!(worktrees(&gone.main).unwrap().len(), 2, "git forgot it");
+    }
+
     #[test]
     fn a_target_checked_out_nowhere_lands_by_moving_its_ref() {
         let repo = repo("ref");
@@ -3772,30 +3851,6 @@ mod tests {
         assert!(!kept.worktree_removed && !kept.branch_deleted, "{kept:?}");
         assert!(kept.kept[0].contains("never delivered"), "{kept:?}");
         assert_eq!(read(&dirty, "wip.txt"), "unsaved");
-    }
-
-    #[test]
-    fn what_a_task_owns_covers_its_paths_folders_and_globs() {
-        let owns = |patterns: &[&str]| patterns.iter().map(|p| p.to_string()).collect::<Vec<_>>();
-        assert!(owned("src/lib/a.ts", &owns(&["src/lib/a.ts"]), ""));
-        assert!(owned("src/lib/a.ts", &owns(&["src/lib"]), ""));
-        assert!(owned("src/lib/a.ts", &owns(&["./src/lib/"]), ""));
-        assert!(owned("src/lib/a.ts", &owns(&["src/*"]), ""));
-        assert!(owned("src/lib/deep/a.ts", &owns(&["src/**/*.ts"]), ""));
-        assert!(owned("src/a.ts", &owns(&["src/**/*.ts"]), ""));
-        assert!(owned(
-            "src/lib/a.test.ts",
-            &owns(&["src/lib/*.test.ts"]),
-            ""
-        ));
-        assert!(owned("src/lib/a.ts", &owns(&["src\\lib"]), ""));
-        assert!(!owned("src/lib/a.ts", &owns(&["src/lib/b.ts", "docs"]), ""));
-        assert!(!owned("src/library/a.ts", &owns(&["src/lib"]), ""));
-        assert!(!owned("src/lib/a.tsx", &owns(&["src/lib/*.ts"]), ""));
-        // Relative to the workspace, which may sit below the repository root.
-        assert!(owned("app/src/a.ts", &owns(&["src"]), "app/"));
-        assert!(!owned("src/a.ts", &owns(&["src"]), "app/"));
-        assert!(owned("app/anything", &owns(&["."]), "app/"));
     }
 
     #[test]
