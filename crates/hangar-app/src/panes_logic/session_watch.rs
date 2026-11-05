@@ -11,7 +11,7 @@
 //! and reopen it on the next resume, which is not the conversation you left.
 //!
 //! `SessionWatch` is the loop's state with the sleeping taken out: the host
-//! asks `due`, runs `list_sessions` off the UI thread when `begin_round` says
+//! asks `due`, runs `hunt_listing` off the UI thread when `begin_round` says
 //! a look is worth it, and hands the answer to `round_done`.
 
 use std::collections::HashSet;
@@ -26,6 +26,20 @@ use crate::state::types::AgentId;
 pub const HUNT_MS: u64 = 1500;
 /// ...patient once the pane has one.
 pub const FOLLOW_MS: u64 = 5000;
+
+/// The listing a hunt round runs off the UI thread: ids and modification
+/// times from the directory alone, no transcript opened, so the labels are
+/// empty (the hunt never reads them).
+pub fn hunt_listing(cwd: String) -> Vec<AgentSession> {
+    hangar_core::sessions::list_session_ids(cwd)
+        .into_iter()
+        .map(|(id, modified_ms)| AgentSession {
+            id,
+            label: String::new(),
+            modified_ms,
+        })
+        .collect()
+}
 
 /// A transcript has to be warm to be ours. Without this a pane could adopt
 /// any file it happens not to know about (one left by another window, say)

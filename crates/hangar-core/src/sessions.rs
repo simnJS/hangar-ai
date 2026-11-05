@@ -2,9 +2,11 @@
 //! agent Hangar runs (owner's decision, 2026-11-03): a plain shell pane keeps
 //! no session, so nothing here takes an agent.
 
+use std::collections::HashMap;
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::time::UNIX_EPOCH;
 
 use serde::Serialize;
@@ -26,24 +28,37 @@ pub(crate) fn encode_project_dir(cwd: &str) -> String {
         .collect()
 }
 
-fn modified_ms(path: &Path) -> u64 {
-    fs::metadata(path)
-        .and_then(|m| m.modified())
-        .ok()
-        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+/// How much of a transcript's head is read to find its label. A single line
+/// can be tens of MB (a paste), so lines are not read whole.
+const LABEL_HEAD_BYTES: u64 = 256 * 1024;
+
+/// Labels already read, by transcript: valid while its size and mtime hold.
+type LabelCache = HashMap<PathBuf, (u64, u64, String)>;
+
+fn label_cache() -> &'static Mutex<LabelCache> {
+    static CACHE: OnceLock<Mutex<LabelCache>> = OnceLock::new();
+    CACHE.get_or_init(Default::default)
 }
 
-/// Extracts a display label from a `.jsonl` transcript by finding the first
-/// real user message. Reads only the head of the file.
+/// Extracts a display label from the head of a `.jsonl` transcript: the first
+/// real user message among its first 60 lines, within `LABEL_HEAD_BYTES`.
 fn label_from_jsonl(path: &Path) -> String {
     let Ok(file) = fs::File::open(path) else {
         return String::new();
     };
-    let reader = BufReader::new(file);
-    for line in reader.lines().take(60).map_while(Result::ok) {
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+    let mut head = Vec::new();
+    if file.take(LABEL_HEAD_BYTES).read_to_end(&mut head).is_err() && head.is_empty() {
+        return String::new();
+    }
+    let mut lines: Vec<&[u8]> = head.split(|b| *b == b'\n').collect();
+    // The last piece has no newline after it: cut by the byte budget (or the
+    // file's end, where it is the last line and still complete).
+    let complete_end = head.len() < LABEL_HEAD_BYTES as usize;
+    if !complete_end {
+        lines.pop();
+    }
+    for line in lines.into_iter().take(60) {
+        let Ok(value) = serde_json::from_slice::<serde_json::Value>(line) else {
             continue;
         };
         if value.get("type").and_then(|t| t.as_str()) != Some("user") {
@@ -71,20 +86,40 @@ fn label_from_jsonl(path: &Path) -> String {
     String::new()
 }
 
-/// The conversations Claude Code keeps for `cwd`, on every Claude account:
-/// they share the main account's `projects/`, and a profile that could not
-/// share it is read as well (accounts.rs).
-fn claude_sessions(cwd: &str) -> Vec<AgentSession> {
-    claude_sessions_in(&crate::accounts::projects_dirs(), cwd)
+/// `label_from_jsonl`, not read again while the file's size and mtime hold.
+fn cached_label(path: &Path, size: u64, modified_ms: u64) -> String {
+    let hit = label_cache()
+        .lock()
+        .ok()
+        .and_then(|c| c.get(path).cloned())
+        .filter(|(s, m, _)| *s == size && *m == modified_ms);
+    if let Some((_, _, label)) = hit {
+        return label;
+    }
+    let label = label_from_jsonl(path);
+    if let Ok(mut cache) = label_cache().lock() {
+        cache.insert(path.to_path_buf(), (size, modified_ms, label.clone()));
+    }
+    label
 }
 
-fn claude_sessions_in(roots: &[PathBuf], cwd: &str) -> Vec<AgentSession> {
-    let mut sessions: Vec<AgentSession> = Vec::new();
+struct Transcript {
+    id: String,
+    path: PathBuf,
+    size: u64,
+    modified_ms: u64,
+}
+
+/// The transcripts of `cwd` on every Claude account (accounts.rs), from the
+/// directory listing and file metadata alone: no file is opened. Newest first.
+fn transcripts_in(roots: &[PathBuf], cwd: &str) -> Vec<Transcript> {
+    let mut found: Vec<Transcript> = Vec::new();
     for root in roots {
         let Ok(entries) = fs::read_dir(root.join(encode_project_dir(cwd))) else {
             continue;
         };
-        for path in entries.filter_map(Result::ok).map(|e| e.path()) {
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
             if !path.extension().is_some_and(|e| e == "jsonl") {
                 continue;
             }
@@ -92,24 +127,53 @@ fn claude_sessions_in(roots: &[PathBuf], cwd: &str) -> Vec<AgentSession> {
                 .file_stem()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            if sessions.iter().any(|known| known.id == id) {
+            if found.iter().any(|known| known.id == id) {
                 continue;
             }
-            sessions.push(AgentSession {
+            let meta = entry.metadata().ok();
+            let modified_ms = meta
+                .as_ref()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            found.push(Transcript {
                 id,
-                label: label_from_jsonl(&path),
-                modified_ms: modified_ms(&path),
+                path,
+                size: meta.map(|m| m.len()).unwrap_or(0),
+                modified_ms,
             });
         }
     }
-
-    sessions.sort_by_key(|s| std::cmp::Reverse(s.modified_ms));
-    sessions
+    found.sort_by_key(|t| std::cmp::Reverse(t.modified_ms));
+    found
 }
 
-/// The Claude Code conversations kept for `cwd`, newest first.
+fn claude_sessions_in(roots: &[PathBuf], cwd: &str) -> Vec<AgentSession> {
+    transcripts_in(roots, cwd)
+        .into_iter()
+        .map(|t| AgentSession {
+            label: cached_label(&t.path, t.size, t.modified_ms),
+            id: t.id,
+            modified_ms: t.modified_ms,
+        })
+        .collect()
+}
+
+/// The ids and modification times (ms) of the conversations kept for `cwd`,
+/// newest first. Cheap: a directory listing and metadata, no transcript is
+/// opened. For what only needs to know which sessions exist.
+pub fn list_session_ids(cwd: String) -> Vec<(String, u64)> {
+    transcripts_in(&crate::accounts::projects_dirs(), &cwd)
+        .into_iter()
+        .map(|t| (t.id, t.modified_ms))
+        .collect()
+}
+
+/// The Claude Code conversations kept for `cwd`, newest first, with their
+/// labels.
 pub fn list_sessions(cwd: String) -> Vec<AgentSession> {
-    claude_sessions(&cwd)
+    claude_sessions_in(&crate::accounts::projects_dirs(), &cwd)
 }
 
 /// Whether the conversation a pane is about to resume has a transcript left:
@@ -262,6 +326,72 @@ mod tests {
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].id, "s-1");
         assert_eq!(listed[0].label, "fix the bug");
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn ids_and_mtimes_are_listed_newest_first_without_opening_files() {
+        let root = temp_dir("ids");
+        let dir = root.join(encode_project_dir("/work/ids"));
+        fs::create_dir_all(&dir).expect("project dir");
+        fs::write(dir.join("old.jsonl"), "{}\n").expect("transcript");
+        fs::write(dir.join("new.jsonl"), "{}\n").expect("transcript");
+        fs::write(dir.join("notes.txt"), "x").expect("other file");
+        let old = fs::File::options()
+            .write(true)
+            .open(dir.join("old.jsonl"))
+            .expect("open");
+        old.set_modified(UNIX_EPOCH + std::time::Duration::from_secs(1000))
+            .expect("mtime");
+
+        let found = transcripts_in(std::slice::from_ref(&root), "/work/ids");
+        let ids: Vec<(&str, u64)> = found
+            .iter()
+            .map(|t| (t.id.as_str(), t.modified_ms))
+            .collect();
+        assert_eq!(ids.len(), 2);
+        assert_eq!(ids[0].0, "new");
+        assert_eq!(ids[1], ("old", 1_000_000));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn a_huge_first_line_is_not_read_whole() {
+        let root = temp_dir("huge");
+        let path = root.join("big.jsonl");
+        // 50 MB on one line, then the real prompt: the head budget ends first.
+        let mut text = String::from(r#"{"type":"user","message":{"content":""#);
+        text.push_str(&"a".repeat(50 * 1024 * 1024));
+        text.push_str("\"}}\n");
+        text.push_str(r#"{"type":"user","message":{"content":"later"}}"#);
+        fs::write(&path, text).expect("transcript");
+
+        // Nothing readable within the budget: no label, and no 50 MB read.
+        assert_eq!(label_from_jsonl(&path), "");
+
+        // A short line inside the budget is still found.
+        let ok = root.join("ok.jsonl");
+        fs::write(&ok, "{\"type\":\"user\",\"message\":{\"content\":\"hi\"}}").expect("write");
+        assert_eq!(label_from_jsonl(&ok), "hi");
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn a_cached_label_is_reread_when_the_file_changes() {
+        let root = temp_dir("cache");
+        let path = root.join("c.jsonl");
+        fs::write(&path, r#"{"type":"user","message":{"content":"first"}}"#).expect("write");
+        assert_eq!(cached_label(&path, 10, 1), "first");
+
+        // Same (size, mtime): served from the cache, the file is not read.
+        fs::write(&path, r#"{"type":"user","message":{"content":"second"}}"#).expect("write");
+        assert_eq!(cached_label(&path, 10, 1), "first");
+        // A new mtime (or size) invalidates it.
+        assert_eq!(cached_label(&path, 10, 2), "second");
+        assert_eq!(cached_label(&path, 11, 2), "second");
 
         fs::remove_dir_all(&root).ok();
     }
