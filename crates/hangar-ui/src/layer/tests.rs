@@ -352,3 +352,68 @@ mod stacking {
         assert_eq!(pixel(cx + 60, cy), [0, 0, 255]);
     }
 }
+
+mod shadows {
+    use iced::widget::container;
+    use iced::{Color, Element, Shadow, Vector};
+
+    use super::*;
+    use crate::testing::simulate;
+
+    /// A layer without a veil is only as big as its card, yet its shadow
+    /// reaches outside the card: the render layer must not clip it.
+    #[test]
+    fn a_dock_keeps_the_shadow_it_casts_outside_its_card() {
+        let card: Element<'_, ()> = container("")
+            .width(200.0)
+            .height(100.0)
+            .style(|_| {
+                container::background(Color::WHITE).shadow(Shadow {
+                    color: Color::BLACK,
+                    offset: Vector::ZERO,
+                    blur_radius: 16.0,
+                })
+            })
+            .into();
+        let page: Element<'_, ()> = container("")
+            .width(iced::Length::Fill)
+            .height(iced::Length::Fill)
+            .style(|_| container::background(Color::WHITE))
+            .into();
+
+        let mut ui = simulate(Element::from(dock(page, Some(card))));
+        let snapshot = ui.snapshot(&iced::Theme::Light).expect("it draws");
+        let dir = std::env::temp_dir().join(format!("hangar-layer-shadow-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        snapshot.matches_image(dir.join("shadow")).expect("written");
+        let file = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .next()
+            .expect("the png")
+            .path();
+        let mut reader =
+            png::Decoder::new(std::io::BufReader::new(std::fs::File::open(file).unwrap()))
+                .read_info()
+                .unwrap();
+        let mut bytes = vec![0; reader.output_buffer_size().unwrap()];
+        let info = reader.next_frame(&mut bytes).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let pixel = |x: u32, y: u32| {
+            let at = (y as usize * info.width as usize + x as usize) * 4;
+            bytes[at]
+        };
+        // The snapshot is at twice the size. The dock is a margin (16) from
+        // the bottom-right corner; probe 3 px outside its left edge, halfway
+        // down, and a point well away from it.
+        let scale = 2.0;
+        let (w, h) = (info.width as f32 / scale, info.height as f32 / scale);
+        let left = w - 16.0 - 200.0;
+        let middle = h - 16.0 - 50.0;
+        let near = pixel(((left - 3.0) * scale) as u32, (middle * scale) as u32);
+        let far = pixel(8, 8);
+        assert_eq!(far, 255, "the page is white away from the card");
+        assert!(near < 250, "the shadow shows beside the card, got {near}");
+    }
+}
