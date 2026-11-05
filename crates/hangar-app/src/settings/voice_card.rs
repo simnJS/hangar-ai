@@ -132,8 +132,24 @@ pub fn percent(received: u64, total: u64) -> u32 {
 impl State {
     /// The category is shown: the catalogue and the keychain.
     pub fn enter(&mut self, sv: &Services) -> Task<Message> {
-        *self = State::default();
+        self.forget();
         Task::batch([read_models(sv), read_key_status()])
+    }
+
+    /// Forgets what the card loaded, except a download under way: it goes on
+    /// whether or not the card is on screen, so the card must still know it
+    /// when it comes back.
+    pub fn forget(&mut self) {
+        let progress = self.progress.take();
+        *self = State {
+            progress,
+            ..State::default()
+        };
+    }
+
+    /// Whether a download of `id` is under way.
+    pub(super) fn is_downloading(&self, id: &str) -> bool {
+        self.progress.as_ref().is_some_and(|p| p.id == id)
     }
 
     /// The model the card shows: the selected one, else the first (an id that
@@ -182,6 +198,11 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
             Task::none()
         }
         Msg::Download(id) => {
+            // A second download of the same model would wipe the first one's
+            // staging folder.
+            if st.is_downloading(&id) {
+                return Task::none();
+            }
             st.error = None;
             let size = st
                 .models

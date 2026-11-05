@@ -269,24 +269,7 @@ fn apply_change(m: &mut Model, change: Change) -> Task<Message> {
 /// goes.
 fn sync(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
     let Some(current) = open_category(m) else {
-        if !st.open {
-            return Task::none();
-        }
-        // Closed: whatever it held goes with it, so the next sheet is a fresh
-        // one, as the TS page was when it mounted.
-        let leaving = leave(st);
-        let kept = (
-            st.launched_at,
-            std::mem::take(&mut st.publisher),
-            st.dev_opened,
-        );
-        *st = State {
-            launched_at: kept.0,
-            publisher: kept.1,
-            dev_opened: kept.2,
-            ..State::default()
-        };
-        return leaving;
+        return close(st);
     };
     if !st.open {
         st.open = true;
@@ -309,6 +292,31 @@ fn sync(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
     Task::batch(tasks)
 }
 
+/// The overlay stack holds no sheet: whatever the sheet held goes with it, so
+/// the next one is a fresh one, as the TS page was when it mounted. A voice
+/// download under way is kept: it goes on without the sheet.
+fn close(st: &mut State) -> Task<Message> {
+    if !st.open {
+        return Task::none();
+    }
+    let leaving = leave(st);
+    let kept = (
+        st.launched_at,
+        std::mem::take(&mut st.publisher),
+        st.dev_opened,
+        std::mem::take(&mut st.voice),
+    );
+    *st = State {
+        launched_at: kept.0,
+        publisher: kept.1,
+        dev_opened: kept.2,
+        voice: kept.3,
+        ..State::default()
+    };
+    st.voice.forget();
+    leaving
+}
+
 /// The category that was shown is no longer: its cards forget what they
 /// loaded, and a recording in the shortcut editor ends.
 fn leave(st: &mut State) -> Task<Message> {
@@ -319,7 +327,7 @@ fn leave(st: &mut State) -> Task<Message> {
             Task::none()
         }
         Some(SettingsCategory::Voice) => {
-            st.voice = voice_card::State::default();
+            st.voice.forget();
             Task::none()
         }
         Some(SettingsCategory::Discord) => {
@@ -528,7 +536,9 @@ pub fn on_intent(
             st.chosen = category.unwrap_or_default();
             Some(sync(st, m, sv))
         }
-        Intent::CloseOverlay => Some(sync(st, m, sv)),
+        // Any other intent may have changed the stack (FocusPane clears it),
+        // so an open sheet is reconciled with it: cheap when nothing moved.
+        _ if st.open => Some(sync(st, m, sv)),
         _ => None,
     }
 }
@@ -544,10 +554,11 @@ pub fn on_event(
         CoreEvent::RemoteChanged if st.shown == Some(SettingsCategory::Mobile) => {
             Some(st.mobile.remote_changed(sv))
         }
-        CoreEvent::VoiceDownload(progress) if st.shown == Some(SettingsCategory::Voice) => st
-            .voice
-            .download_event(progress.clone())
-            .then(|| voice_card::read_models(sv)),
+        // Kept whatever category is shown: the card finds it again on return.
+        CoreEvent::VoiceDownload(progress) => {
+            let done = st.voice.download_event(progress.clone());
+            (done && st.shown == Some(SettingsCategory::Voice)).then(|| voice_card::read_models(sv))
+        }
         _ => None,
     }
 }

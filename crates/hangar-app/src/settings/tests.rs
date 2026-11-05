@@ -200,3 +200,34 @@ fn the_settings_asks_nothing_of_the_environment_in_a_release_build() {
         assert_eq!(dev_category(), None);
     }
 }
+
+#[test]
+fn a_sheet_that_left_the_stack_lets_go_of_the_keyboard_but_keeps_a_download() {
+    // `Intent::FocusPane` clears the stack without `CloseOverlay`: the
+    // reconcile that `on_intent` now runs for every intent ends up here.
+    let mut st = State {
+        open: true,
+        shown: Some(SettingsCategory::Shortcuts),
+        ..State::default()
+    };
+    let index = crate::keymap::KeymapIndex::default();
+    shortcuts::step(
+        &mut st.shortcuts,
+        &index,
+        shortcuts::Msg::Record(crate::commands::CommandId::PaneSplit),
+    );
+    st.voice
+        .download_event(hangar_core::voice::models::Progress {
+            id: "a".into(),
+            received: 1,
+            total: 2,
+            done: false,
+        });
+    assert!(st.shortcuts.is_recording());
+    let _release = close(&mut st);
+    assert!(!st.open && st.shown.is_none());
+    assert!(!st.shortcuts.is_recording());
+    assert!(st.voice.is_downloading("a"));
+    // Nothing open: nothing to do.
+    let _ = close(&mut st);
+}

@@ -100,3 +100,17 @@ fn the_catalogue_is_the_cores() {
         }
     );
 }
+
+#[test]
+fn a_download_survives_leaving_and_entering_the_card() {
+    let mut st = State {
+        models: vec![model("a", false)],
+        saved: Some(true),
+        ..State::default()
+    };
+    st.download_event(progress("a", 10, 100, false));
+    st.forget();
+    assert!(st.models.is_empty() && st.saved.is_none());
+    assert!(st.is_downloading("a"));
+    assert!(!st.is_downloading("b"));
+}
