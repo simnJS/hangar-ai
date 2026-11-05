@@ -434,6 +434,9 @@ pub struct BriefFacts<'a> {
     pub target: Option<&'a str>,
     pub worktree: Option<&'a str>,
     pub port_base: u32,
+    /// The variables of the workspace's shared build cache are set in the
+    /// worker's shell (`build_cache::env_for` gave some).
+    pub build_cache: Vec<String>,
     pub check_command: Option<&'a str>,
     pub attempt: u32,
     pub hook_failure: Option<&'a HookFailure>,
@@ -523,6 +526,15 @@ pub fn worker_brief(facts: &BriefFacts<'_>) -> String {
             facts.port_base,
             facts.port_base + PORT_COUNT - 1
         )),
+        (!facts.build_cache.is_empty()).then(|| {
+            let names: Vec<String> = facts.build_cache.iter().map(|n| format!("`{n}`")).collect();
+            format!(
+                "- Your build cache: {} {} set in your shell, to a folder the workspace's workers and delivery checks share, so dependencies are built once. Do not override or unset {}, and do not build into a folder of your own.",
+                names.join(", "),
+                if names.len() == 1 { "is" } else { "are" },
+                if names.len() == 1 { "it" } else { "them" }
+            )
+        }),
         Some("- The task is claimed for you and in doing. Do not claim, move or reassign it: Hangar does.".into()),
         Some(String::new()),
         Some("## Done means".into()),
@@ -971,6 +983,14 @@ async fn start_steps(
         target: target.as_deref(),
         worktree: tree.as_ref().map(|(_, path)| path.as_str()),
         port_base: start.port_base,
+        build_cache: hangar_core::build_cache::env_for(
+            std::path::Path::new(&ws.cwd),
+            &ws.id,
+            settings.shared_build_cache,
+        )
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect(),
         check_command: settings.check_command.as_deref(),
         attempt,
         hook_failure: hook_failure.as_ref(),

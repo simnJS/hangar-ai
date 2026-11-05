@@ -16,10 +16,8 @@
 //! Only worker panes and delivery checks use it, never the person's terminals.
 //! Cargo is the only toolchain for now; `env_for` is where others would go.
 
-use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
 
 /// A stable 32-bit FNV-1a: `DefaultHasher` makes no promise across releases,
 /// and the folder must stay the same from one version of Hangar to the next.
@@ -108,28 +106,6 @@ pub fn empty(dir: &Path) -> io::Result<()> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         other => other,
     }
-}
-
-fn registry() -> &'static Mutex<HashMap<String, Vec<(String, String)>>> {
-    static REGISTRY: OnceLock<Mutex<HashMap<String, Vec<(String, String)>>>> = OnceLock::new();
-    REGISTRY.get_or_init(Default::default)
-}
-
-/// Remembers the environment of a worker pane, to be applied when its shell
-/// starts (`pty_spawn`) and again if it is restarted.
-pub fn assign_pane(pane_id: &str, env: Vec<(String, String)>) {
-    let mut map = registry().lock().unwrap_or_else(|p| p.into_inner());
-    if env.is_empty() {
-        map.remove(pane_id);
-    } else {
-        map.insert(pane_id.to_string(), env);
-    }
-}
-
-/// What `assign_pane` was given for this pane.
-pub fn pane_env(pane_id: &str) -> Vec<(String, String)> {
-    let map = registry().lock().unwrap_or_else(|p| p.into_inner());
-    map.get(pane_id).cloned().unwrap_or_default()
 }
 
 #[cfg(test)]

@@ -1790,10 +1790,23 @@ fn facts<'a>(owns: &'a [String]) -> BriefFacts<'a> {
         target: Some("main"),
         worktree: Some("/w"),
         port_base: PORT_POOL_START,
+        build_cache: Vec::new(),
         check_command: None,
         attempt: 1,
         hook_failure: None,
     }
+}
+
+#[test]
+fn the_brief_names_the_build_cache_variable_only_when_it_is_set() {
+    let plain = worker_brief(&facts(&strings(&["a"])));
+    assert!(!plain.contains("build cache"));
+    let owns = strings(&["a"]);
+    let mut cached = facts(&owns);
+    cached.build_cache = vec!["CARGO_TARGET_DIR".into()];
+    let brief = worker_brief(&cached);
+    assert!(brief.contains("`CARGO_TARGET_DIR` is set in your shell"));
+    assert!(brief.contains("Do not override or unset it"));
 }
 
 #[test]

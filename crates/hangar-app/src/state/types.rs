@@ -309,6 +309,11 @@ pub struct OrchestrationSettings {
     pub branch: Option<String>,
     /// `auto`, `acceptEdits` or `bypassPermissions`; null: the person's own.
     pub permission_mode: Option<String>,
+    /// The workspace's workers and delivery checks build into one cache
+    /// folder of the workspace's own (`hangar_core::build_cache`). Missing
+    /// reads true. Hangar 1.x does not know the key and, like any other it
+    /// does not read, leaves it alone.
+    pub shared_build_cache: bool,
 }
 
 impl Default for OrchestrationSettings {
@@ -321,6 +326,7 @@ impl Default for OrchestrationSettings {
             reviewer_model: "sonnet".into(),
             branch: None,
             permission_mode: None,
+            shared_build_cache: true,
         }
     }
 }
