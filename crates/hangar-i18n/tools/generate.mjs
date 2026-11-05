@@ -9,6 +9,10 @@
 // runs this, and commits the result. The output is committed so that building
 // the crate needs no Node; any Node from 18 on runs this script.
 //
+// Line endings do not count: `--check` compares with CRLF folded to LF, so it
+// passes on a Windows clone with core.autocrlf=true, where git checks the
+// files out with CRLF. The file is always written with LF.
+//
 // The dictionaries were the React app's src/i18n.ts, src/strings/*.ts and
 // src/components/accounts/strings.ts (tag v1.12.1), merged as they were read:
 // the accounts strings keep the `accounts.` prefix they were given here.
@@ -20,6 +24,15 @@ import { typeset } from "./typography.mjs";
 
 const CRATE = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = join(CRATE, "src", "generated.rs");
+
+/**
+ * Text with LF line endings. A Windows clone with core.autocrlf=true checks
+ * the files out with CRLF while the generator always writes LF, so the
+ * dictionaries are read, and the committed output compared in `--check`,
+ * with line endings folded to LF: only the content decides whether the file
+ * is stale. Writing stays LF whatever the checkout.
+ */
+const lf = (text) => text.replace(/\r\n/g, "\n");
 
 /** Refuses a no-break space typed into a source: the typesetter is the only one to set them. */
 function checkHandSpacing(text, label) {
@@ -36,7 +49,7 @@ function checkHandSpacing(text, label) {
  */
 function readDictionary(locale) {
   const file = `dict/${locale}.json`;
-  const text = readFileSync(join(CRATE, file), "utf8");
+  const text = lf(readFileSync(join(CRATE, file), "utf8"));
   checkHandSpacing(text, file);
   const dict = JSON.parse(text);
   const seen = new Set();
@@ -179,7 +192,7 @@ lines.push(
 
 const output = lines.join("\n");
 if (process.argv.includes("--check")) {
-  if (!existsSync(OUT) || readFileSync(OUT, "utf8") !== output) {
+  if (!existsSync(OUT) || lf(readFileSync(OUT, "utf8")) !== output) {
     console.error("crates/hangar-i18n/src/generated.rs is stale: run node crates/hangar-i18n/tools/generate.mjs");
     process.exit(1);
   }
