@@ -13,6 +13,7 @@ Every release, with its installers, is on the
 ### Changed
 
 - On relaunch, the Claude panes on screen resume their conversations first; the others follow two at a time, or at once when they come into view, so a workspace full of big sessions no longer starts every Claude Code at the same moment.
+- A change to the app's state no longer copies and compares the whole state on every action, the state snapshot is rebuilt only when it differs instead of on each keystroke, and saves are serialised off the UI thread.
 - Less work while agents run: the session hunt lists transcript file names and dates only instead of reading the head of every transcript every few seconds, skips panes the mod already tracks, and settles to a 5 s cadence for resumed panes; the session picker reads at most 256 KB of each transcript and caches its labels.
 - The context gauge and the phone's chat read transcripts without a lock shared by every pane, stream a transcript instead of loading it whole, and find it under `CLAUDE_CONFIG_DIR` and account profiles too.
 - Kits ask again for your consent when a script, hook or MCP server file they run has changed since you allowed them, not only when their command lines change. An update is checked in full (manifest, permissions) before it replaces the installed kit, and a kit installed from a tag notices when that tag later points elsewhere.
@@ -38,6 +39,7 @@ Every release, with its installers, is on the
 - The terminal redraws the rows it scrolls to after a search, and clearing it during a synchronized update works.
 - A field focused under a dialog loses the keyboard; menus taller than the window scroll to their last entry; the palette no longer jumps to the row under a resting pointer.
 - The update banner no longer stays on "restarting" after a failed install; "Download again" repairs a damaged voice model; a voice transcription that cannot start no longer leaves the button stuck; Discord presence no longer lags one update behind.
+- Deleting a workspace removes its delivery check worktree, and a last save that fails at quit is written to `hangar.log`.
 - A worker is never given a block of ports one of which another process already listens on.
 - Clicking a notification or a Needs-you item closes the settings cleanly, and a voice model download keeps showing its progress when you switch settings categories.
 - A dialog opened over another one, such as a kit's activation dialog over the settings, is drawn opaque and on top: the settings' scrolled content no longer shows through it.
