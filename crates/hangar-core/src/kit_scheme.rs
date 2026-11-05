@@ -444,9 +444,49 @@ pub(crate) fn answer(
     model::finish(builder, body)
 }
 
-/// The installed kits that can be used now, by canonical folder. Read at
-/// each request, so a kit removed or broken stops being served at once.
-fn usable_kits() -> Vec<KitRoot> {
+/// How long the kits read for one request serve the next ones: a page
+/// asks for a script, a stylesheet and its images at once, and reading every
+/// kit (index, manifest, plugin) for each of them is what this saves. A kit
+/// removed or broken stops being served within this.
+const KITS_TTL: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// The kits last read, and when.
+struct Remembered {
+    at: Option<std::time::Instant>,
+    kits: std::sync::Arc<Vec<KitRoot>>,
+}
+
+impl Remembered {
+    /// The kits as of `now`: those held while they are fresh, else `load`ed
+    /// (and held).
+    fn get(
+        &mut self,
+        now: std::time::Instant,
+        load: impl FnOnce() -> Vec<KitRoot>,
+    ) -> std::sync::Arc<Vec<KitRoot>> {
+        match self.at {
+            Some(at) if now.saturating_duration_since(at) < KITS_TTL => {}
+            _ => {
+                self.kits = std::sync::Arc::new(load());
+                self.at = Some(now);
+            }
+        }
+        self.kits.clone()
+    }
+}
+
+fn usable_kits() -> std::sync::Arc<Vec<KitRoot>> {
+    static HELD: std::sync::Mutex<Option<Remembered>> = std::sync::Mutex::new(None);
+    let mut held = HELD.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    held.get_or_insert_with(|| Remembered {
+        at: None,
+        kits: Default::default(),
+    })
+    .get(std::time::Instant::now(), read_usable_kits)
+}
+
+/// The installed kits that can be used now, by canonical folder.
+fn read_usable_kits() -> Vec<KitRoot> {
     crate::kits::list_now()
         .unwrap_or_default()
         .into_iter()
@@ -494,7 +534,7 @@ fn entry_modules(manifest: &crate::kits::Manifest, root: &Path) -> Vec<PathBuf> 
 /// blocking pool.
 pub fn serve(request: &Request<Vec<u8>>, origins: &[String]) -> Response<Vec<u8>> {
     let kits = if library_file(request.uri().path()).is_some() {
-        Vec::new()
+        Default::default()
     } else {
         usable_kits()
     };
@@ -505,6 +545,27 @@ pub fn serve(request: &Request<Vec<u8>>, origins: &[String]) -> Response<Vec<u8>
 mod tests {
     use super::*;
     use crate::model::tests::{header_of, link, temp_dir, write};
+
+    #[test]
+    fn the_kits_are_read_once_for_the_requests_of_a_page_and_again_when_stale() {
+        let mut held = Remembered {
+            at: None,
+            kits: Default::default(),
+        };
+        let reads = std::cell::Cell::new(0);
+        let load = || {
+            reads.set(reads.get() + 1);
+            Vec::new()
+        };
+        let start = std::time::Instant::now();
+        for _ in 0..40 {
+            held.get(start, load);
+        }
+        held.get(start + KITS_TTL / 2, load);
+        assert_eq!(reads.get(), 1, "40 requests of a page read the kits once");
+        held.get(start + KITS_TTL + std::time::Duration::from_millis(1), load);
+        assert_eq!(reads.get(), 2, "a stale reading is made again");
+    }
 
     /// `answer`, Hangar's own pages being where the Tauri window had them.
     fn answer(request: &Request<Vec<u8>>, kits: &[KitRoot]) -> Response<Vec<u8>> {

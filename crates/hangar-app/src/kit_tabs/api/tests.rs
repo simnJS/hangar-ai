@@ -1002,6 +1002,16 @@ mod only_the_tabs_own_page_is_answered {
     }
 
     #[test]
+    fn drops_a_message_over_the_size_a_tab_may_post_unread() {
+        let mut s = setup();
+        let big = "x".repeat(hangar_webview::MAX_IPC_BODY_BYTES + 1);
+        let request =
+            json!({ "hangar": 1, "id": "a", "method": "panes.list", "params": { "x": big } });
+        assert_eq!(s.receive(request), None);
+        assert!(s.sent.is_empty());
+    }
+
+    #[test]
     fn answers_a_request_without_a_method_name_as_invalid() {
         let mut s = setup();
         s.receive(json!({ "hangar": 1, "id": 7, "method": 42 }));
@@ -1637,7 +1647,7 @@ mod files_write_binary {
     }
 
     #[test]
-    fn refuses_a_base64_that_is_not_a_string_or_too_long_for_ten_mb() {
+    fn refuses_a_base64_that_is_not_a_string() {
         let mut s = writer();
         for base64 in [json!(null), json!(3), json!(["a"])] {
             assert_eq!(
@@ -1654,20 +1664,15 @@ mod files_write_binary {
                 .as_deref(),
             Some("invalid")
         );
-        let at_cap = "A".repeat(limits::BINARY_MAX_BYTES.div_ceil(3) * 4);
-        assert_eq!(
-            s.error_of(
-                "files.writeBinary",
-                json!({ "path": "a.png", "base64": format!("{at_cap}A") })
-            )
-            .as_deref(),
-            Some("invalid")
-        );
+        // A page's message is held to 4 MB (see `drops_a_message_over_the_size`
+        // ...), so a picture whose base64 is longer never gets here; one under
+        // it is written.
         assert!(!s.fake.called("writeBinaryFile"));
+        let under = "A".repeat(3 * 1024 * 1024);
         assert_eq!(
             s.error_of(
                 "files.writeBinary",
-                json!({ "path": "a.png", "base64": at_cap })
+                json!({ "path": "a.png", "base64": under })
             ),
             None
         );

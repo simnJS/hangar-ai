@@ -258,6 +258,10 @@ impl ResourceLimiter for Limiter {
 struct GuestState {
     limiter: Limiter,
     logs: Vec<LogEntry>,
+    /// How many lines one call may keep; the rest are only counted.
+    log_cap: usize,
+    /// Lines refused during this call, past `log_cap`.
+    dropped: usize,
     /// The last `panic` line, the reason of the trap that follows it.
     panic: Option<String>,
 }
@@ -307,6 +311,9 @@ pub struct KitTab {
     gate: Gate,
     pub(crate) widgets: WidgetState,
     logs: VecDeque<LogEntry>,
+    /// Wasm time used past the tab's share, and when it was last counted.
+    busy: Duration,
+    counted: Instant,
     /// What its widgets' ids are made of.
     pub(crate) ns: u64,
     pub(crate) held: Arc<Mutex<Held>>,
@@ -334,6 +341,8 @@ impl KitTab {
             gate: Gate::new(),
             widgets: WidgetState::default(),
             logs: VecDeque::new(),
+            busy: Duration::ZERO,
+            counted: Instant::now(),
             ns: NEXT_TAB.fetch_add(1, Ordering::Relaxed),
             held: Arc::default(),
         };
@@ -543,6 +552,8 @@ impl KitTab {
                 refused: None,
             },
             logs: Vec::new(),
+            log_cap: limits.log_lines,
+            dropped: 0,
             panic: None,
         };
         let mut store = Store::new(engine, state);
@@ -556,6 +567,14 @@ impl KitTab {
                 import::MODULE,
                 import::LOG,
                 |mut caller: Caller<'_, GuestState>, level: u32, ptr: u32, len: u32| {
+                    // Past the cap a line is counted, not read: a loop on
+                    // `log` costs nothing more than the loop itself.
+                    let level = LogLevel::from_u32(level);
+                    if caller.data().logs.len() >= caller.data().log_cap && level != LogLevel::Panic
+                    {
+                        caller.data_mut().dropped += 1;
+                        return;
+                    }
                     let Some(Extern::Memory(memory)) = caller.get_export(export::MEMORY) else {
                         return;
                     };
@@ -564,17 +583,20 @@ impl KitTab {
                     if memory.read(&caller, ptr as usize, &mut bytes).is_err() {
                         return;
                     }
-                    let level = LogLevel::from_u32(level);
                     let text = String::from_utf8_lossy(&bytes).into_owned();
                     let state = caller.data_mut();
                     if level == LogLevel::Panic {
                         state.panic = Some(text.clone());
                     }
-                    state.logs.push(LogEntry {
-                        level,
-                        text,
-                        at: now_ms(),
-                    });
+                    // A panic line is read past the cap (it is the reason of
+                    // the trap), but kept as one line over it at most.
+                    if state.logs.len() <= state.log_cap {
+                        state.logs.push(LogEntry {
+                            level,
+                            text,
+                            at: now_ms(),
+                        });
+                    }
                 },
             )
             .and_then(|linker| linker.func_wrap(import::MODULE, import::NOW, now_ms))
@@ -628,6 +650,28 @@ impl KitTab {
         })
     }
 
+    /// Counts a call of `spent` that began at `began` against the tab's
+    /// share of the clock: time is paid back at the share's rate between
+    /// calls. A tab that stays over it for longer than the burst is stopped,
+    /// since the window it shares the thread with is what it saturates.
+    fn charge(&mut self, began: Instant, spent: Duration) -> Option<Failure> {
+        let limits = &self.runtime.limits;
+        let share = f64::from(limits.busy_percent.min(100)) / 100.0;
+        let idle = began.saturating_duration_since(self.counted);
+        self.busy = self.busy.saturating_sub(idle.mul_f64(share)) + spent;
+        self.counted = began + spent;
+        (self.busy > limits.busy_burst).then(|| {
+            Failure::new(
+                FailureKind::Timeout,
+                format!(
+                    "it kept the window busy: more than {} ms of work over the {}% of the time a tab may use",
+                    limits.busy_burst.as_millis(),
+                    limits.busy_percent
+                ),
+            )
+        })
+    }
+
     /// Writes `input`, calls `entry`, reads its answer as `T`. A failure of
     /// any of it stops the tab, and answers none.
     fn exchange<I: Serialize, T: DeserializeOwned>(
@@ -651,14 +695,30 @@ impl KitTab {
             _ => self.runtime.limits.call_deadline,
         };
         let guest = self.guest.as_mut()?;
+        let began = Instant::now();
         let answer = invoke(guest, entry, bytes.as_deref(), deadline);
+        let spent = began.elapsed();
         let state = guest.store.data_mut();
-        let logged = std::mem::take(&mut state.logs);
+        let mut logged = std::mem::take(&mut state.logs);
+        let dropped = std::mem::take(&mut state.dropped);
+        if dropped > 0 {
+            logged.push(LogEntry {
+                level: LogLevel::Warn,
+                text: format!("{dropped} log entries dropped: too many in one call"),
+                at: now_ms(),
+            });
+        }
         for entry in logged {
             self.logs.push_back(entry);
         }
         while self.logs.len() > self.runtime.limits.log_lines {
             self.logs.pop_front();
+        }
+        if entry != Entry::Init
+            && let Some(failure) = self.charge(began, spent)
+        {
+            self.fail(failure);
+            return None;
         }
         let answer = match answer {
             Ok(answer) => answer,

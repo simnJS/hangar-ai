@@ -578,6 +578,71 @@ fn a_kit_that_allocates_too_much_fails_cleanly() {
 }
 
 #[test]
+fn a_module_that_floods_the_log_keeps_a_bounded_log_and_a_marker() {
+    let runtime = runtime(Limits {
+        log_lines: 50,
+        init_deadline: Duration::from_secs(20),
+        ..Limits::default()
+    });
+    let (tab, _) = KitTab::start(
+        &runtime,
+        &probe(&runtime),
+        start(&[("mode", "log")]),
+        Fake::granting(&[]),
+    );
+    let logs: Vec<_> = tab.logs().collect();
+    assert!(logs.len() <= 50, "{} entries", logs.len());
+    assert!(
+        logs.iter()
+            .any(|entry| entry.text.contains("log entries dropped")),
+        "no marker"
+    );
+}
+
+#[test]
+fn updates_that_each_fit_a_deadline_but_never_let_the_window_breathe_stop_the_tab() {
+    let runtime = runtime(Limits {
+        busy_percent: 10,
+        busy_burst: Duration::from_millis(150),
+        ..Limits::default()
+    });
+    let (mut tab, effects) =
+        KitTab::start(&runtime, &probe(&runtime), start(&[]), Fake::granting(&[]));
+    settle(&mut tab, effects);
+    // One burst of work is within the burst allowed.
+    press(&mut tab, "Burn");
+    assert!(tab.failure().is_none(), "{:?}", tab.failure());
+    // Chained, they are not: each is 60 ms, far under the 250 ms deadline.
+    for _ in 0..6 {
+        if tab.failure().is_some() {
+            break;
+        }
+        press(&mut tab, "Burn");
+    }
+    let failure = tab.failure().expect("stopped");
+    assert_eq!(failure.kind, FailureKind::Timeout, "{failure:?}");
+    assert!(failure.reason.contains("busy"), "{}", failure.reason);
+}
+
+#[test]
+fn a_tab_that_works_now_and_then_is_left_alone() {
+    let runtime = runtime(Limits {
+        busy_percent: 50,
+        busy_burst: Duration::from_millis(150),
+        ..Limits::default()
+    });
+    let (mut tab, effects) =
+        KitTab::start(&runtime, &probe(&runtime), start(&[]), Fake::granting(&[]));
+    settle(&mut tab, effects);
+    for _ in 0..4 {
+        press(&mut tab, "Burn");
+        // Idle for as long as it worked, twice: its share is paid back.
+        std::thread::sleep(Duration::from_millis(130));
+    }
+    assert!(tab.failure().is_none(), "{:?}", tab.failure());
+}
+
+#[test]
 fn a_panic_is_shown_with_its_message() {
     let runtime = runtime(Limits::default());
     let (tab, _) = KitTab::start(

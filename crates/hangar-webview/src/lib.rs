@@ -107,8 +107,9 @@ mod session;
 
 pub use client::{Client, Closed, Events, SpawnOptions, Stderr, find_helper};
 pub use protocol::{
-    CloseReason, Command, Content, ErrorCode, Event, Header, OpenWindow, PROTOCOL_VERSION,
-    PageLoadState, SchemeRequest, SchemeResponse, Size,
+    CloseReason, Command, Content, ErrorCode, Event, Header, MAX_EVENT_LINE_BYTES,
+    MAX_IPC_BODY_BYTES, OpenWindow, PROTOCOL_VERSION, PageLoadState, SchemeRequest, SchemeResponse,
+    Size,
 };
 pub use scheme::{
     Navigation, file_url, file_url_for, scheme_base, scheme_base_for, scheme_url, valid_scheme_name,

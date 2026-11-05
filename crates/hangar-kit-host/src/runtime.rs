@@ -46,6 +46,14 @@ pub struct Limits {
     pub module_bytes: usize,
     /// How many log lines a tab keeps, the oldest dropped first.
     pub log_lines: usize,
+    /// The share of the clock, in percent, a tab may spend in its updates and
+    /// views, on average: the rest is the window's.
+    pub busy_percent: u32,
+    /// How much time past that share a tab may have spent at once (a burst
+    /// of work, a slow moment) before it is stopped: calls that are each
+    /// within [`Limits::call_deadline`] and together never let the window
+    /// breathe are a runaway too.
+    pub busy_burst: Duration,
 }
 
 impl Default for Limits {
@@ -56,6 +64,8 @@ impl Default for Limits {
             call_deadline: Duration::from_millis(250),
             module_bytes: 64 * 1024 * 1024,
             log_lines: 200,
+            busy_percent: 50,
+            busy_burst: Duration::from_millis(1500),
         }
     }
 }

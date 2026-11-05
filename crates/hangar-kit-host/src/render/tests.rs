@@ -968,6 +968,45 @@ fn a_workspace_image_needs_files_read_and_a_held_one_is_the_tabs() {
     ));
 }
 
+#[test]
+fn the_images_a_tab_names_are_held_up_to_a_total_of_bytes_least_recent_first() {
+    let mut held = crate::tab::Held::default();
+    let ids: Vec<_> = (0..10u8)
+        .map(|n| held.hold(vec![n; 3 * 1024 * 1024]))
+        .collect();
+    let page = |range: std::ops::Range<usize>| ui::abi::View {
+        seq: 1,
+        root: ui::Element::Column(ui::Column::new(
+            ids[range]
+                .iter()
+                .map(|id| ui::Element::Image(ui::Image::new(ImageSource::Held(id.clone()))))
+                .collect(),
+        )),
+    };
+    let mut widgets = WidgetState {
+        images: super::ImageCache::with_max(10 * 1024 * 1024),
+        ..WidgetState::default()
+    };
+    for from in 0..8 {
+        widgets.sync(&page(from..from + 2), &NoImages, &[], &held);
+        assert!(widgets.images.bytes() <= 10 * 1024 * 1024);
+    }
+    assert!(widgets.images.len() <= 3, "{}", widgets.images.len());
+    // The last view's pictures are there; the first view's are gone.
+    assert!(
+        widgets
+            .images
+            .get(&ImageSource::Held(ids[8].clone()))
+            .is_some()
+    );
+    assert!(
+        widgets
+            .images
+            .get(&ImageSource::Held(ids[0].clone()))
+            .is_none()
+    );
+}
+
 /* ── a text area across the views a kit sends ───────────────────────── */
 
 /// `given` drawn as the window draws a frame: laid out (a few times first, as
