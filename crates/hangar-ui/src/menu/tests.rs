@@ -437,7 +437,7 @@ mod short_window {
             .map(|n| item(format!("Line {n}")).on_select(Msg::First).into())
             .collect();
         let mut m = menu(t, lines);
-        let mut tree = Tree::new(&Element::<Msg>::from(menu(t, vec![])));
+        let mut tree = Tree::new(Element::<Msg>::from(menu(t, vec![])));
         tree.state.downcast_mut::<State>().scroll = 500.0;
         let node = m.layout(
             &mut tree,

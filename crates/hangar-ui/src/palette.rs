@@ -447,9 +447,8 @@ impl<T: Clone> Palette<T> {
     /// included when it is the first of its group.
     fn extent(&self, index: usize) -> (f32, f32) {
         let mut y = 4.0;
-        let mut at = 0;
         let mut group: Option<&str> = None;
-        for (index_in_items, _) in &self.kept {
+        for (at, (index_in_items, _)) in self.kept.iter().enumerate() {
             let item = &self.items[*index_in_items];
             let heading_top = y;
             let first = group != Some(item.group.as_str());
@@ -462,7 +461,6 @@ impl<T: Clone> Palette<T> {
                 return (top, y + ROW);
             }
             y += ROW;
-            at += 1;
         }
         (0.0, 0.0)
     }
