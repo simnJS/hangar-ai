@@ -35,13 +35,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 
 use crate::host::Host;
 use crate::install::{server_entry, LEGACY_SERVER_KEYS, SERVER_KEY};
+use crate::store::{landing, put_in_place, write_atomic, write_temp, Access};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -759,24 +759,9 @@ fn write_if_changed(path: &Path, body: &str) -> Result<(), String> {
     if fs::read_to_string(path).ok().as_deref() == Some(body) {
         return Ok(());
     }
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let tmp = path.with_extension(format!(
-        "{}-{}.tmp",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::Relaxed)
-    ));
-    fs::write(&tmp, body).map_err(|e| e.to_string())?;
     // The copies carry whatever the servers' entries carry, tokens included,
     // so they are kept as private as ~/.claude.json itself.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600));
-    }
-    fs::rename(&tmp, path).map_err(|e| {
-        let _ = fs::remove_file(&tmp);
-        e.to_string()
-    })
+    write_atomic(path, body.as_bytes(), Access::Private)
 }
 
 fn scope_dir(host: &Host) -> Result<PathBuf, String> {
@@ -887,6 +872,9 @@ fn trust_folder(config: &Path, folder: &Path) -> Result<Trusted, String> {
     let shown = shown.strip_prefix("//?/").unwrap_or(&shown);
     let shown = shown.trim_end_matches('/').to_string();
     let wanted = path_key(Path::new(&shown));
+    // A config kept as a link (a dotfiles repository) stays one.
+    let config = landing(config);
+    let config = config.as_path();
     let stamp = |path: &Path| {
         fs::metadata(path)
             .ok()
@@ -929,21 +917,15 @@ fn trust_folder(config: &Path, folder: &Path) -> Result<Trusted, String> {
             None => *entry = json!({ "hasTrustDialogAccepted": true }),
         }
         let body = serde_json::to_string_pretty(&Value::Object(root)).map_err(|e| e.to_string())?;
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        let tmp = config.with_extension(format!(
-            "hangar-{}-{}.tmp",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::write(&tmp, body).map_err(|e| e.to_string())?;
+        // With the file's own permissions: it can hold MCP servers' tokens,
+        // and Claude Code keeps it 0600.
+        let tmp =
+            write_temp(config, body.as_bytes(), Access::AsBefore).map_err(|e| e.to_string())?;
         if stamp(config) != before {
             let _ = fs::remove_file(&tmp);
             continue;
         }
-        fs::rename(&tmp, config).map_err(|e| {
-            let _ = fs::remove_file(&tmp);
-            e.to_string()
-        })?;
+        put_in_place(&tmp, config).map_err(|e| e.to_string())?;
         return Ok(Trusted::Added);
     }
     Err("the Claude configuration kept changing; try again".into())
@@ -1420,6 +1402,24 @@ mod tests {
             trust_folder(&m.files.config, &below).unwrap(),
             Trusted::Already
         );
+    }
+
+    /// `~/.claude.json` can hold servers' tokens: trusting a folder must not
+    /// leave it readable by other users.
+    #[cfg(unix)]
+    #[test]
+    fn trusting_a_folder_keeps_the_config_s_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let m = Machine::new("trust-mode");
+        let repo = m.dir("work/mine");
+        m.config(json!({}), &[]);
+        fs::set_permissions(&m.files.config, fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(
+            trust_folder(&m.files.config, &repo).unwrap(),
+            Trusted::Added
+        );
+        let mode = fs::metadata(&m.files.config).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
     }
 
     #[test]

@@ -1,10 +1,12 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
+
+use crate::store::{write_atomic, Access};
 
 /// The label of a task that waits for the person (src/lib/orchestration.ts).
 pub const NEEDS_YOU_LABEL: &str = "needs-you";
@@ -210,7 +212,42 @@ fn shared_workspace(workspace_cwd: &str) -> String {
     crate::git::shared_root(workspace_cwd).unwrap_or_else(|| workspace_cwd.to_string())
 }
 
-fn read_board(workspace_cwd: &str) -> Board {
+/// Why the board on disk could not be used. Neither is ever an empty board:
+/// one that is written back would wipe every task, comment and history entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Unreadable {
+    /// The file is there but could not be read (permissions; on Windows, an
+    /// antivirus or an indexer holding it). It may well be fine: it is left
+    /// as it is and nothing is written over it.
+    Io { path: PathBuf, reason: String },
+    /// It was read, but it is not a board (a hand edit, a write cut short,
+    /// a field an older build does not know the type of).
+    Corrupt { path: PathBuf, reason: String },
+}
+
+impl std::fmt::Display for Unreadable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Unreadable::Io { path, reason } => write!(
+                f,
+                "the board {} cannot be read ({reason}); nothing was written over it",
+                path.display()
+            ),
+            Unreadable::Corrupt { path, reason } => write!(
+                f,
+                "the board {} is not a valid board ({reason})",
+                path.display()
+            ),
+        }
+    }
+}
+
+/// How many times a read that failed is tried, and how long apart: a file
+/// held for a moment (an antivirus, a backup tool) reads fine on the next go.
+const READ_ATTEMPTS: u32 = 3;
+const READ_RETRY: std::time::Duration = std::time::Duration::from_millis(50);
+
+fn read_board(workspace_cwd: &str) -> Result<Board, Unreadable> {
     let shared = shared_workspace(workspace_cwd);
     let mut candidates = vec![board_path(&shared), legacy_board_path(&shared)];
     // A worktree opened as a workspace before boards were shared has a board
@@ -221,14 +258,58 @@ fn read_board(workspace_cwd: &str) -> Board {
         candidates.push(board_path(workspace_cwd));
         candidates.push(legacy_board_path(workspace_cwd));
     }
-    let path = candidates
-        .into_iter()
-        .find(|candidate| candidate.is_file())
-        .unwrap_or_else(|| board_path(&shared));
-    fs::read_to_string(&path)
-        .ok()
-        .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_default()
+    let Some(path) = candidates.into_iter().find(|candidate| candidate.is_file()) else {
+        return Ok(Board::default());
+    };
+    let mut attempt = 1;
+    let bytes = loop {
+        match fs::read(&path) {
+            Ok(bytes) => break bytes,
+            // Gone between the look and the read: there is no board.
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Board::default()),
+            Err(_) if attempt < READ_ATTEMPTS => {
+                attempt += 1;
+                std::thread::sleep(READ_RETRY);
+            }
+            Err(err) => {
+                return Err(Unreadable::Io {
+                    path,
+                    reason: err.to_string(),
+                })
+            }
+        }
+    };
+    serde_json::from_slice(&bytes).map_err(|err| Unreadable::Corrupt {
+        path,
+        reason: err.to_string(),
+    })
+}
+
+/// The board to change, or why there is none to change.
+///
+/// A board that will not parse is moved aside (`store::quarantine`, as
+/// `state.json` and the memory are) and the operation fails, saying where it
+/// went: the next one starts on an empty board, and the old one is there to
+/// be repaired by hand. One that cannot be moved, or cannot be read at all,
+/// stays where it is and every change is refused.
+fn board_to_change(workspace_cwd: &str) -> Result<Board, String> {
+    match read_board(workspace_cwd) {
+        Ok(board) => Ok(board),
+        Err(err) => {
+            let Unreadable::Corrupt { path, .. } = &err else {
+                return Err(err.to_string());
+            };
+            match crate::store::quarantine(path) {
+                Some(kept) => Err(format!(
+                    "{err}; it was kept as {} and the board starts empty: try again",
+                    kept.display()
+                )),
+                None => Err(format!(
+                    "{err}; it could not be moved aside, so nothing is written over it"
+                )),
+            }
+        }
+    }
 }
 
 fn write_board(workspace_cwd: &str, board: &Board) -> Result<(), String> {
@@ -238,9 +319,9 @@ fn write_board(workspace_cwd: &str, board: &Board) -> Result<(), String> {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     let body = serde_json::to_string_pretty(board).map_err(|e| e.to_string())?;
-    let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, body).map_err(|e| e.to_string())?;
-    fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+    // A unique temporary file, flushed before the rename: a power cut cannot
+    // leave an empty board, nor can two Hangar processes share one temp.
+    write_atomic(&path, body.as_bytes(), Access::AsBefore)?;
     keep_out_of_git(&shared);
     Ok(())
 }
@@ -277,9 +358,18 @@ impl BoardStore {
     /// Reading is also when a recheck day that has passed is acted on
     /// (`sweep_rechecks`): the orchestrator's engine reads every board every
     /// few seconds, so no timer of its own is needed.
+    ///
+    /// A board that cannot be read shows as an empty one, and is left as it
+    /// is on disk: only a change (`update`) sets it aside, and says so.
     pub fn read(&self, cwd: &str) -> Board {
-        let _guard = self.guard.lock().unwrap();
-        let mut board = read_board(cwd);
+        let _guard = self.guard.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut board = match read_board(cwd) {
+            Ok(board) => board,
+            Err(err) => {
+                eprintln!("[hangar] {err}");
+                return Board::default();
+            }
+        };
         if sweep_rechecks(&mut board, &today()) {
             let _ = write_board(cwd, &board);
         }
@@ -292,8 +382,8 @@ impl BoardStore {
         cwd: &str,
         mutate: impl FnOnce(&mut Board) -> Result<T, String>,
     ) -> Result<T, String> {
-        let _guard = self.guard.lock().unwrap();
-        let mut board = read_board(cwd);
+        let _guard = self.guard.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut board = board_to_change(cwd)?;
         sweep_rechecks(&mut board, &today());
         let outcome = mutate(&mut board)?;
         write_board(cwd, &board)?;
@@ -1202,7 +1292,7 @@ mod tests {
         let cwd = dir.to_string_lossy().into_owned();
         seed(&legacy_board_path(&cwd), ONE_TASK);
 
-        let board = read_board(&cwd);
+        let board = read_board(&cwd).unwrap();
 
         assert_eq!(board.tasks.len(), 1);
         assert_eq!(board.tasks[0].title, "tache existante");
@@ -1218,10 +1308,10 @@ mod tests {
         let legacy = legacy_board_path(&cwd);
         seed(&legacy, ONE_TASK);
 
-        let board = read_board(&cwd);
+        let board = read_board(&cwd).unwrap();
         write_board(&cwd, &board).expect("write");
 
-        let adopted = read_board(&cwd);
+        let adopted = read_board(&cwd).unwrap();
         assert!(board_path(&cwd).is_file());
         assert_eq!(adopted.tasks.len(), 1);
         assert_eq!(adopted.tasks[0].title, "tache existante");
@@ -1239,7 +1329,7 @@ mod tests {
             r#"{"tasks":[{"id":"b","title":"tache courante","column":"todo","created_at":2,"updated_at":2}]}"#,
         );
 
-        let board = read_board(&cwd);
+        let board = read_board(&cwd).unwrap();
 
         assert_eq!(board.tasks.len(), 1);
         assert_eq!(board.tasks[0].title, "tache courante");
@@ -1937,7 +2027,10 @@ mod tests {
         let board = store.read(&cwd);
 
         assert!(board.tasks[0].blocked.is_none());
-        assert!(read_board(&cwd).tasks[0].blocked.is_none(), "kept on disk");
+        assert!(
+            read_board(&cwd).unwrap().tasks[0].blocked.is_none(),
+            "kept on disk"
+        );
         fs::remove_dir_all(&dir).ok();
     }
 
@@ -1967,12 +2060,92 @@ mod tests {
         assert!(free.blocked.is_none());
     }
 
+    /// The board on disk, byte for byte, and the rescues beside it.
+    fn on_disk(cwd: &str) -> (Option<Vec<u8>>, Vec<Vec<u8>>) {
+        let path = board_path(cwd);
+        let rescues = fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().contains(".corrupt."))
+            .map(|e| fs::read(e.path()).unwrap())
+            .collect();
+        (fs::read(&path).ok(), rescues)
+    }
+
+    /// The data loss this guards against: a board that would not parse was
+    /// read as an empty one, and the next change wrote that over every task.
+    #[test]
+    fn a_board_that_does_not_parse_is_kept_aside_never_written_over() {
+        let dir = temp_workspace("corrupt");
+        let cwd = dir.to_string_lossy().into_owned();
+        // Not UTF-8 at all: a write cut short in the middle of a character.
+        let bytes = b"{\"tasks\":[{\"id\":\"a\",\"title\":\"caf\xc3".to_vec();
+        let path = board_path(&cwd);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, &bytes).unwrap();
+        let store = BoardStore::default();
+
+        // Reading shows nothing, and changes nothing on disk.
+        assert!(store.read(&cwd).tasks.is_empty());
+        assert_eq!(on_disk(&cwd), (Some(bytes.clone()), vec![]));
+
+        // A change fails, and the file is kept aside whole.
+        let refused = store.update(&cwd, |board| {
+            todo_task(board);
+            Ok(())
+        });
+        let message = refused.expect_err("the change must fail");
+        assert!(message.contains(".corrupt."), "{message}");
+        assert_eq!(on_disk(&cwd), (None, vec![bytes.clone()]));
+
+        // The next one starts on an empty board, the rescue still there.
+        store
+            .update(&cwd, |board| {
+                todo_task(board);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(read_board(&cwd).unwrap().tasks.len(), 1);
+        assert_eq!(on_disk(&cwd).1, vec![bytes]);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A board that cannot be read may be fine: it is neither moved nor
+    /// written over, and every change is refused.
+    #[cfg(unix)]
+    #[test]
+    fn a_board_that_cannot_be_read_is_left_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        // Permissions do not stop root.
+        if unsafe { libc::geteuid() } == 0 {
+            return;
+        }
+        let dir = temp_workspace("eacces");
+        let cwd = dir.to_string_lossy().into_owned();
+        let path = board_path(&cwd);
+        seed(&path, ONE_TASK);
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o200)).unwrap();
+        let store = BoardStore::default();
+
+        assert!(store.read(&cwd).tasks.is_empty());
+        let refused = store.update(&cwd, |board| {
+            todo_task(board);
+            Ok(())
+        });
+        assert!(refused.is_err(), "{refused:?}");
+
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), ONE_TASK);
+        assert!(on_disk(&cwd).1.is_empty());
+        fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn a_workspace_with_no_board_anywhere_starts_empty() {
         let dir = temp_workspace("empty");
         let cwd = dir.to_string_lossy().into_owned();
 
-        assert!(read_board(&cwd).tasks.is_empty());
+        assert!(read_board(&cwd).unwrap().tasks.is_empty());
         fs::remove_dir_all(&dir).ok();
     }
 }

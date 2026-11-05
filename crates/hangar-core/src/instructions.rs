@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
+use crate::store::{write_atomic, Access};
+
 const START: &str = "<!-- HANGAR:START - generated, do not edit by hand -->";
 const END: &str = "<!-- HANGAR:END -->";
 
@@ -181,14 +183,19 @@ way to tell which one is still true.
 fn upsert_block(existing: &str, block: &str) -> String {
     let known = std::iter::once((START, END)).chain(LEGACY_MARKERS.iter().copied());
     for (start_marker, end_marker) in known {
-        if let (Some(start), Some(end)) = (existing.find(start_marker), existing.find(end_marker)) {
-            if start < end {
-                let mut out = String::with_capacity(existing.len());
-                out.push_str(&existing[..start]);
-                out.push_str(block);
-                out.push_str(&existing[end + end_marker.len()..]);
-                return out;
-            }
+        // The block is an END and the START closest before it. Pairing the
+        // first START with the first END instead would, once the person had
+        // deleted an END (and a block had been appended after it), take
+        // everything between the two blocks, their own text included.
+        let Some(end) = existing.find(end_marker) else {
+            continue;
+        };
+        if let Some(start) = existing[..end].rfind(start_marker) {
+            let mut out = String::with_capacity(existing.len());
+            out.push_str(&existing[..start]);
+            out.push_str(block);
+            out.push_str(&existing[end + end_marker.len()..]);
+            return out;
         }
     }
 
@@ -198,12 +205,41 @@ fn upsert_block(existing: &str, block: &str) -> String {
     format!("{}\n\n{}\n", existing.trim_end(), block)
 }
 
+/// What a file Hangar adds to holds now: `None` when there is none yet.
+///
+/// Only a missing file counts as empty. One that cannot be read (EACCES), or
+/// that is not UTF-8 text (a `CLAUDE.md` saved as UTF-16 or Latin-1 by
+/// Notepad), is not ours to rewrite: written back, it would hold Hangar's
+/// lines alone and the person's would be gone.
+fn read_existing(path: &Path) -> Result<Option<String>, String> {
+    match fs::read(path) {
+        Ok(bytes) => String::from_utf8(bytes).map(Some).map_err(|_| {
+            "ce fichier n'est pas du texte UTF-8 ; il est laissé tel quel".to_string()
+        }),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(format!(
+            "lecture impossible ({err}) ; le fichier est laissé tel quel"
+        )),
+    }
+}
+
+fn refused(path: &Path, message: String) -> InstructionReport {
+    InstructionReport {
+        path: path.to_string_lossy().into_owned(),
+        ok: false,
+        message,
+    }
+}
+
 fn write_playbook(root: &Path, file: &str) -> InstructionReport {
     let path = root.join(file);
-    let existing = fs::read_to_string(&path).unwrap_or_default();
+    let existing = match read_existing(&path) {
+        Ok(existing) => existing.unwrap_or_default(),
+        Err(message) => return refused(&path, message),
+    };
     let updated = upsert_block(&existing, &playbook());
 
-    match fs::write(&path, updated) {
+    match write_atomic(&path, updated.as_bytes(), Access::AsBefore) {
         Ok(()) => InstructionReport {
             path: path.to_string_lossy().into_owned(),
             ok: true,
@@ -216,7 +252,7 @@ fn write_playbook(root: &Path, file: &str) -> InstructionReport {
         Err(err) => InstructionReport {
             path: path.to_string_lossy().into_owned(),
             ok: false,
-            message: err.to_string(),
+            message: err,
         },
     }
 }
@@ -225,7 +261,10 @@ fn write_playbook(root: &Path, file: &str) -> InstructionReport {
 /// running this repeatedly does not pile up duplicates.
 fn update_gitignore(root: &Path) -> InstructionReport {
     let path = root.join(".gitignore");
-    let existing = fs::read_to_string(&path).unwrap_or_default();
+    let existing = match read_existing(&path) {
+        Ok(existing) => existing.unwrap_or_default(),
+        Err(message) => return refused(&path, message),
+    };
 
     // Deliberately only looks for the current directory: a repository that
     // already ignores `.iabench/` still needs a rule for `.hangar/`, or the
@@ -253,7 +292,7 @@ fn update_gitignore(root: &Path) -> InstructionReport {
     }
     updated.push_str("# Hangar.AI — tableau de tâches local\n.hangar/\n");
 
-    match fs::write(&path, updated) {
+    match write_atomic(&path, updated.as_bytes(), Access::AsBefore) {
         Ok(()) => InstructionReport {
             path: path.to_string_lossy().into_owned(),
             ok: true,
@@ -262,7 +301,7 @@ fn update_gitignore(root: &Path) -> InstructionReport {
         Err(err) => InstructionReport {
             path: path.to_string_lossy().into_owned(),
             ok: false,
-            message: err.to_string(),
+            message: err,
         },
     }
 }
@@ -391,6 +430,70 @@ mod tests {
         for tool in ["kit_tab_list", "kit_tab_open", "kit_tab_close"] {
             assert!(block.contains(tool), "playbook never mentions {tool}");
         }
+    }
+
+    /// A START left alone (the person deleted its END) must not pair with the
+    /// END of a later block and take the text between them.
+    #[test]
+    fn a_start_without_its_end_does_not_swallow_the_text_after_it() {
+        let existing = format!("{START}\nreste\n\n# Mes notes\n\n{START}\nx\n{END}\n");
+
+        let updated = upsert_block(&existing, &playbook());
+
+        assert!(updated.contains("# Mes notes"));
+        assert!(updated.contains("reste"));
+        assert!(!updated.contains("\nx\n"));
+        assert_eq!(updated.matches(END).count(), 1);
+    }
+
+    fn scratch() -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "hangar-instructions-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    /// A `CLAUDE.md` and a `.gitignore` that are not UTF-8 (saved as UTF-16 or
+    /// Latin-1) are reported, and left byte for byte as they were.
+    #[test]
+    fn files_that_are_not_utf8_are_left_untouched() {
+        let root = scratch();
+        let latin1 = b"# Caf\xe9\n\nMes r\xe8gles.\n".to_vec();
+        let utf16 = b"\xff\xfe#\x00 \x00n\x00o\x00d\x00e\x00\n\x00".to_vec();
+        fs::write(root.join("CLAUDE.md"), &latin1).unwrap();
+        fs::write(root.join(".gitignore"), &utf16).unwrap();
+
+        let reports = write_agent_instructions(root.to_string_lossy().into_owned());
+
+        assert_eq!(reports.len(), 2);
+        assert!(reports.iter().all(|report| !report.ok), "{reports:?}");
+        assert_eq!(fs::read(root.join("CLAUDE.md")).unwrap(), latin1);
+        assert_eq!(fs::read(root.join(".gitignore")).unwrap(), utf16);
+        fs::remove_dir_all(&root).ok();
+    }
+
+    /// One Hangar may not read is not taken for an empty one.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_that_cannot_be_read_is_not_written_over() {
+        use std::os::unix::fs::PermissionsExt;
+        // Permissions do not stop root.
+        if unsafe { libc::geteuid() } == 0 {
+            return;
+        }
+        let root = scratch();
+        let path = root.join("CLAUDE.md");
+        fs::write(&path, "# Mes règles\n").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o200)).unwrap();
+
+        let report = write_playbook(&root, "CLAUDE.md");
+
+        assert!(!report.ok, "{report:?}");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "# Mes règles\n");
+        fs::remove_dir_all(&root).ok();
     }
 
     #[test]
