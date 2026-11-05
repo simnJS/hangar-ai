@@ -102,3 +102,26 @@ fn a_failure_says_so_and_offers_to_retry() {
     });
     assert!(matches!(retry.as_slice(), [Msg::Retry]), "{retry:?}");
 }
+
+#[test]
+fn restart_can_be_clicked_again_after_a_failed_restart_and_a_retry() {
+    let mut st = state(Phase::Ready);
+    assert!(st.begin_restart());
+    st.restart_failed("install failed: administrator rights were not granted".into());
+    assert!(finds(&st, "Update failed"));
+    let retry = run(&st, |ui| {
+        ui.click("Retry").unwrap();
+    });
+    assert!(matches!(retry.as_slice(), [Msg::Retry]), "{retry:?}");
+
+    st.retry();
+    st.take(&hangar_update::State::Ready(ReleaseInfo {
+        version: "1.13.0".into(),
+        notes: None,
+        date: None,
+    }));
+    let restart = run(&st, |ui| {
+        ui.click("Restart").unwrap();
+    });
+    assert!(matches!(restart.as_slice(), [Msg::Restart]), "{restart:?}");
+}

@@ -15,6 +15,7 @@ use base64::engine::general_purpose::STANDARD;
 use minisign_verify::{PublicKey, Signature};
 
 use crate::error::{Error, Result};
+use crate::sha256::Sha256;
 
 const READ_BUFFER: usize = 64 * 1024;
 
@@ -46,31 +47,54 @@ fn parse_signature(signature: &str) -> Result<Signature> {
 /// those (`allow_legacy`), so the file is read whole in that case rather than
 /// refusing a release the old app would have installed.
 pub fn verify_file(path: &Path, pubkey: &str, signature: &str) -> Result<()> {
+    let mut file =
+        File::open(path).map_err(|e| Error::io(format!("reading {}", path.display()), e))?;
+    verify_reader(&mut file, pubkey, signature)
+        .map(|_| ())
+        .map_err(|e| match e {
+            Error::Io { source, .. } => Error::io(format!("reading {}", path.display()), source),
+            other => other,
+        })
+}
+
+/// Checks what `reader` holds against the release's signature, reading it
+/// once, and returns the SHA-256 of exactly the bytes that were checked. The
+/// install hands that digest to the privileged step, which refuses a file that
+/// is not those bytes (see `install`), so a file swapped after this check is
+/// never installed.
+pub(crate) fn verify_reader(
+    reader: &mut (impl Read + Seek),
+    pubkey: &str,
+    signature: &str,
+) -> Result<[u8; 32]> {
     let key = parse_public_key(pubkey)?;
     let signature = parse_signature(signature)?;
-    let io = |e| Error::io(format!("reading {}", path.display()), e);
-    let mut file = File::open(path).map_err(io)?;
+    let io = |e| Error::io("reading the download", e);
+    let mut digest = Sha256::new();
 
     match key.verify_stream(&signature) {
         Ok(mut verifier) => {
             let mut buffer = vec![0u8; READ_BUFFER];
             loop {
-                let read = file.read(&mut buffer).map_err(io)?;
+                let read = reader.read(&mut buffer).map_err(io)?;
                 if read == 0 {
                     break;
                 }
                 verifier.update(&buffer[..read]);
+                digest.update(&buffer[..read]);
             }
-            verifier.finalize().map_err(describe)
+            verifier.finalize().map_err(describe)?;
         }
         Err(minisign_verify::Error::UnsupportedLegacyMode) => {
-            file.seek(SeekFrom::Start(0)).map_err(io)?;
+            reader.seek(SeekFrom::Start(0)).map_err(io)?;
             let mut bytes = Vec::new();
-            file.read_to_end(&mut bytes).map_err(io)?;
-            key.verify(&bytes, &signature, true).map_err(describe)
+            reader.read_to_end(&mut bytes).map_err(io)?;
+            key.verify(&bytes, &signature, true).map_err(describe)?;
+            digest.update(&bytes);
         }
-        Err(e) => Err(describe(e)),
+        Err(e) => return Err(describe(e)),
     }
+    Ok(digest.finalize())
 }
 
 /// Checks `bytes` against the release's signature. [`verify_file`] without the
@@ -119,6 +143,21 @@ mod tests {
         let file = file_with(&data);
         verify_file(file.path(), PUBKEY, SIG_PREHASHED).unwrap();
         verify_bytes(&data, PUBKEY, SIG_PREHASHED).unwrap();
+    }
+
+    #[test]
+    fn the_digest_names_exactly_the_bytes_that_were_checked() {
+        let mut expected = crate::sha256::Sha256::new();
+        expected.update(&payload());
+        let expected = expected.finalize();
+        for signature in [SIG_PREHASHED, SIG_LEGACY] {
+            let stored = file_with(&payload());
+            let mut file = stored.reopen().unwrap();
+            assert_eq!(
+                verify_reader(&mut file, PUBKEY, signature).unwrap(),
+                expected
+            );
+        }
     }
 
     #[test]
