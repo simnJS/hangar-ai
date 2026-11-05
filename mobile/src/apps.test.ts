@@ -32,6 +32,9 @@ const ada: App = { workspaceId: "ws-iabench", workspace: "IaBench", port: 21003,
 const preview: App = { workspaceId: "ws-storefront", workspace: "storefront", port: 4173, source: "custom" };
 const all = [cora, ada, preview];
 
+/** Spaces as `text` reads them: French typography puts a narrow no-break space (U+202F) before ":", and `\s` folds it into a plain one. */
+const spaced = (s: string) => s.replace(/\s+/g, " ");
+
 /** The text a person reads, without the markup. */
 const text = (html: string) =>
   html
@@ -208,7 +211,7 @@ describe("the viewer", () => {
   it("starting: says so while the PC opens it, nothing to reload or take to Safari yet", () => {
     const html = render({ kind: "starting" });
     expect(text(html)).toContain(t("app.starting"));
-    expect(text(html)).toContain(t("app.startingHint"));
+    expect(text(html)).toContain(spaced(t("app.startingHint")));
     expect(html).toContain('role="status"');
     expect(html).not.toContain("<iframe");
     expect(html.match(/disabled=""/g)).toHaveLength(2);
