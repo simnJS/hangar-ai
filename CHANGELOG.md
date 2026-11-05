@@ -12,6 +12,7 @@ Every release, with its installers, is on the
 
 ### Changed
 
+- On relaunch, the Claude panes on screen resume their conversations first; the others follow two at a time, or at once when they come into view, so a workspace full of big sessions no longer starts every Claude Code at the same moment.
 - Less work while agents run: the session hunt lists transcript file names and dates only instead of reading the head of every transcript every few seconds, skips panes the mod already tracks, and settles to a 5 s cadence for resumed panes; the session picker reads at most 256 KB of each transcript and caches its labels.
 - The context gauge and the phone's chat read transcripts without a lock shared by every pane, stream a transcript instead of loading it whole, and find it under `CLAUDE_CONFIG_DIR` and account profiles too.
 - Kits ask again for your consent when a script, hook or MCP server file they run has changed since you allowed them, not only when their command lines change. An update is checked in full (manifest, permissions) before it replaces the installed kit, and a kit installed from a tag notices when that tag later points elsewhere.
@@ -37,6 +38,8 @@ Every release, with its installers, is on the
 - The terminal redraws the rows it scrolls to after a search, and clearing it during a synchronized update works.
 - A field focused under a dialog loses the keyboard; menus taller than the window scroll to their last entry; the palette no longer jumps to the row under a resting pointer.
 - The update banner no longer stays on "restarting" after a failed install; "Download again" repairs a damaged voice model; a voice transcription that cannot start no longer leaves the button stuck; Discord presence no longer lags one update behind.
+- A worker is never given a block of ports one of which another process already listens on.
+- Clicking a notification or a Needs-you item closes the settings cleanly, and a voice model download keeps showing its progress when you switch settings categories.
 - A dialog opened over another one, such as a kit's activation dialog over the settings, is drawn opaque and on top: the settings' scrolled content no longer shows through it.
 - A relaunch no longer leaves an agent pane on a bare prompt: its command is typed on an emptied line (keys that reached the focused pane first are no longer glued to its front) once the shell has printed its prompt and gone quiet (never before the launch delay, at most 3 s after it), is typed again if the shell runs nothing after it, and a launch lost twice is logged. A saved conversation whose transcript is not found once is started fresh but kept, and forgotten only after a second miss in a row.
 - A pane started at launch before Hangar had finished looking for the machine's shells no longer runs the default shell instead of the one it was given: its shell starts once detection has answered.
