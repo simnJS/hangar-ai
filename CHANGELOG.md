@@ -10,8 +10,33 @@ Every release, with its installers, is on the
 
 ## [Unreleased]
 
+### Changed
+
+- Less work while agents run: the session hunt lists transcript file names and dates only instead of reading the head of every transcript every few seconds, skips panes the mod already tracks, and settles to a 5 s cadence for resumed panes; the session picker reads at most 256 KB of each transcript and caches its labels.
+- The context gauge and the phone's chat read transcripts without a lock shared by every pane, stream a transcript instead of loading it whole, and find it under `CLAUDE_CONFIG_DIR` and account profiles too.
+- Kits ask again for your consent when a script, hook or MCP server file they run has changed since you allowed them, not only when their command lines change. An update is checked in full (manifest, permissions) before it replaces the installed kit, and a kit installed from a tag notices when that tag later points elsewhere.
+- Each pane can be given an API token of its own; a pane's token fixes who the caller is, so an agent can no longer act as another pane or as you through the local API.
+- The terminal's scrollback is capped so a pane cannot hold tens of MB of history; box-drawing characters are cached instead of being redrawn from scratch every frame, and an open search no longer rescans the whole history on every chunk of output.
+- The command palette filters once per keystroke instead of on every redraw; a native kit tab compiles off the UI thread; pictures, highlighted code blocks and the stats page are computed in the background.
+
+### Security
+
+- `~/.hangar/endpoint.json`, which holds the API token, is readable by its owner only (0600, folder 0700); trusting a folder keeps `~/.claude.json`'s permissions.
+- The updater keeps its download in a private folder and checks the signature again right before installing, so the file cannot be swapped in between.
+- Phone actions (send, allow, answer, land) carry a key and run once even when the phone retries; allowing a permission from the phone applies only to the prompt the phone showed.
+- Voice models are pinned and checked against their SHA-256 before use.
+- A kit tab cannot make Hangar hold unbounded logs, images or messages, or block the window with a long chain of updates.
+
 ### Fixed
 
+- Hangar no longer replaces a `CLAUDE.md`, `.gitignore`, `board.json`, `.mcp.json` or `~/.claude/settings.json` it cannot read or parse (not UTF-8, unreadable, invalid JSON): it leaves the file alone and says so; a corrupt board is kept aside as `board.json.corrupt.<time>`. Every state, board and config file is written atomically and flushed to disk.
+- One pane whose program stops reading its input no longer freezes typing in every other pane; panes get a short grace to exit on quit, so Claude Code can finish writing its transcript; on Windows, what a pane started no longer outlives Hangar.
+- A `postCreate` hook that leaves a process running no longer blocks a worker's start; Hangar's git commands never wait for a password and stop after 2 minutes on the network; the delivery reads a task's `owns` exactly as the board does; check folders of deleted workspaces are removed.
+- Copied history in resumed or forked sessions is counted once in the stats.
+- A 3D model loader that crashes, or a snapshot of a model in a sleeping workspace, no longer leaves the 3D view waiting forever; a zoomed SVG is no longer rasterised at full zoom size.
+- The terminal redraws the rows it scrolls to after a search, and clearing it during a synchronized update works.
+- A field focused under a dialog loses the keyboard; menus taller than the window scroll to their last entry; the palette no longer jumps to the row under a resting pointer.
+- The update banner no longer stays on "restarting" after a failed install; "Download again" repairs a damaged voice model; a voice transcription that cannot start no longer leaves the button stuck; Discord presence no longer lags one update behind.
 - A dialog opened over another one, such as a kit's activation dialog over the settings, is drawn opaque and on top: the settings' scrolled content no longer shows through it.
 - A relaunch no longer leaves an agent pane on a bare prompt: its command is typed on an emptied line (keys that reached the focused pane first are no longer glued to its front) once the shell has printed its prompt and gone quiet (never before the launch delay, at most 3 s after it), is typed again if the shell runs nothing after it, and a launch lost twice is logged. A saved conversation whose transcript is not found once is started fresh but kept, and forgotten only after a second miss in a row.
 - A pane started at launch before Hangar had finished looking for the machine's shells no longer runs the default shell instead of the one it was given: its shell starts once detection has answered.
