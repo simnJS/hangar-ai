@@ -332,7 +332,15 @@ fn ready<'a>(st: &'a State, ctx: Ctx<'a>, entry: &'a Entry) -> Element<'a, Messa
             )),
         );
     }
-    // Brought back at startup and not loaded yet, or on its way.
+    // Brought back at startup and not loaded yet, or its module on its way
+    // from the background compile.
+    if ctx.pkg.kit_tabs.runtime_busy() {
+        return parts::loading(
+            ctx,
+            &entry.title,
+            Some(ctx.t(Key::KitsTabLoading).into_owned()),
+        );
+    }
     stage(t)
 }
 

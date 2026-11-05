@@ -47,6 +47,8 @@ pub struct Runtime {
     /// next; none until [`Runtime::cache_in`], and none again for a runtime
     /// made without it.
     cache: Option<PathBuf>,
+    /// Files being compiled in the background.
+    pending: std::collections::HashSet<PathBuf>,
 }
 
 /// The folder of the compiled modules, under the app's cache folder: a
@@ -95,22 +97,116 @@ impl Runtime {
             .clone()
     }
 
-    /// The module of `path`, compiled once for as long as the file is not
-    /// written again. Why not, in the runtime's words, when it does not load.
-    pub fn module(&mut self, path: &Path) -> Result<KitModule, String> {
+    /// The module of `path`, if it was compiled for as long as the file has
+    /// not been written since; why not, in the runtime's words, when it does
+    /// not load. `None` while it is not: [`Runtime::job`] makes the work to
+    /// do off the window's thread.
+    pub fn module(&self, path: &Path) -> Option<Result<KitModule, String>> {
         let modified = modified(path);
-        if let Some((held, compiled)) = self.modules.get(path)
-            && *held == modified
-        {
-            return compiled.clone();
+        match self.modules.get(path) {
+            Some((held, compiled)) if *held == modified => Some(compiled.clone()),
+            _ => None,
         }
-        let compiled = self.runtime().and_then(|runtime| {
-            let bytes = std::fs::read(path).map_err(|why| format!("{}: {why}", path.display()))?;
+    }
+
+    /// The work of reading and compiling `path`, to run on a blocking thread
+    /// (the file is read and Cranelift runs in it: seconds for a large module),
+    /// unless it is already under way.
+    pub fn job(&mut self, path: &Path) -> Option<Job> {
+        if self.pending.contains(path) {
+            return None;
+        }
+        let runtime = self.runtime();
+        self.pending.insert(path.to_path_buf());
+        Some(Job {
+            path: path.to_path_buf(),
+            runtime,
+        })
+    }
+
+    /// Whether some module is being read and compiled.
+    pub fn busy(&self) -> bool {
+        !self.pending.is_empty()
+    }
+
+    /// Paths whose compile has been started and has not come back.
+    #[cfg(test)]
+    pub fn pending(&self) -> Vec<PathBuf> {
+        self.pending.iter().cloned().collect()
+    }
+
+    /// Reads and compiles `path` here and now, as the background would.
+    #[cfg(test)]
+    pub fn compile_now(&mut self, path: &Path) {
+        let runtime = self.runtime();
+        let done = Job {
+            path: path.to_path_buf(),
+            runtime,
+        }
+        .run();
+        self.finish(done);
+    }
+
+    /// Holds what a [`Job`] came to.
+    pub fn finish(&mut self, done: Compiled) {
+        self.pending.remove(&done.path);
+        self.modules.insert(done.path, (done.modified, done.result));
+    }
+}
+
+/// A module to read and compile: `Send`, made by [`Runtime::job`].
+pub struct Job {
+    path: PathBuf,
+    runtime: Result<KitRuntime, String>,
+}
+
+impl Job {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn run(self) -> Compiled {
+        // Before the read: a file written meanwhile is seen as newer than
+        // this result, and compiled again.
+        let modified = modified(&self.path);
+        let path = self.path;
+        let result = self.runtime.and_then(|runtime| {
+            let bytes = std::fs::read(&path).map_err(|why| format!("{}: {why}", path.display()))?;
             runtime.compile(&bytes).map_err(|why| why.to_string())
         });
-        self.modules
-            .insert(path.to_path_buf(), (modified, compiled.clone()));
-        compiled
+        Compiled {
+            path,
+            modified,
+            result,
+        }
+    }
+}
+
+/// What a [`Job`] came to.
+#[derive(Clone)]
+pub struct Compiled {
+    path: PathBuf,
+    modified: Option<SystemTime>,
+    result: Result<KitModule, String>,
+}
+
+impl Compiled {
+    /// The thread of the job ended without an answer.
+    pub fn lost(path: PathBuf) -> Compiled {
+        Compiled {
+            modified: modified(&path),
+            result: Err("Hangar could not compile the module".into()),
+            path,
+        }
+    }
+}
+
+impl std::fmt::Debug for Compiled {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Compiled")
+            .field("path", &self.path)
+            .field("ok", &self.result.is_ok())
+            .finish()
     }
 }
 
@@ -394,15 +490,43 @@ mod tests {
         let file = dir.join("tab.wasm");
         std::fs::write(&file, b"not a module").unwrap();
         let mut runtime = Runtime::default();
-        let refused = runtime.module(&file).err().expect("refused");
+        // Not known until it was compiled, off the window's thread.
+        assert!(runtime.module(&file).is_none());
+        runtime.compile_now(&file);
+        let refused = runtime
+            .module(&file)
+            .expect("compiled")
+            .err()
+            .expect("refused");
         assert!(refused.contains("not a WebAssembly module"), "{refused}");
         // The refusal is kept for as long as the file is not written again.
-        assert_eq!(runtime.module(&file).err(), Some(refused));
+        assert_eq!(runtime.module(&file).and_then(Result::err), Some(refused));
+        let gone = dir.join("gone.wasm");
+        runtime.compile_now(&gone);
         let missing = runtime
-            .module(&dir.join("gone.wasm"))
+            .module(&gone)
+            .expect("compiled")
             .err()
             .expect("missing");
         assert!(missing.contains("gone.wasm"), "{missing}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_module_is_read_and_compiled_by_a_job_once_at_a_time() {
+        let dir = std::env::temp_dir().join(format!("hangar-kit-job-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("tab.wasm");
+        std::fs::write(&file, b"not a module").unwrap();
+        let mut runtime = Runtime::default();
+        let job = runtime.job(&file).expect("a job");
+        assert!(runtime.busy());
+        // Asked again while it runs, there is no second one.
+        assert!(runtime.job(&file).is_none());
+        assert!(runtime.module(&file).is_none());
+        runtime.finish(job.run());
+        assert!(!runtime.busy());
+        assert!(runtime.module(&file).is_some_and(|module| module.is_err()));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

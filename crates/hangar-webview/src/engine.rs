@@ -392,6 +392,18 @@ impl Engine {
         let emitter = self.emitter.clone();
         let window_id = id.to_string();
         builder = builder.with_ipc_handler(move |request| {
+            if request.body().len() > hangar_webview::MAX_IPC_BODY_BYTES {
+                emitter.error(
+                    Some(&window_id),
+                    hangar_webview::ErrorCode::TooLarge,
+                    format!(
+                        "a page posted a message of {} bytes; the most is {}",
+                        request.body().len(),
+                        hangar_webview::MAX_IPC_BODY_BYTES
+                    ),
+                );
+                return;
+            }
             emitter.emit(Event::Ipc {
                 window: window_id.clone(),
                 uri: request.uri().to_string(),

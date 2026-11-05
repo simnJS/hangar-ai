@@ -159,6 +159,8 @@ pub enum Msg {
     Tick,
     /// What a native tab's drawing sent, or one of its calls answered.
     Native(String, KitMessage),
+    /// A module was read and compiled in the background.
+    Compiled(native::Compiled),
     /// The bar's reload: the tab starts again, as a new instance or a new
     /// window.
     Reload(String),
@@ -219,6 +221,13 @@ impl Env {
     }
 }
 
+impl State {
+    /// Some module is being compiled in the background.
+    pub(crate) fn runtime_busy(&self) -> bool {
+        self.runtime.busy()
+    }
+}
+
 pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
     step(st, m, &Env::of(sv), msg)
 }
@@ -253,6 +262,10 @@ fn post(st: &State, window: &str, messages: impl IntoIterator<Item = Value>) {
 fn handle(st: &mut State, m: &Model, msg: Msg) -> Task<Message> {
     match msg {
         Msg::Changed | Msg::Tick => Task::none(),
+        Msg::Compiled(done) => {
+            st.runtime.finish(done);
+            Task::none()
+        }
         Msg::Native(id, message) => match st.natives.get_mut(&id) {
             Some(native) => {
                 let done = native.tab.update(message);
@@ -550,7 +563,27 @@ fn reconcile(st: &mut State, m: &mut Model, env: &Env) -> Task<Message> {
                 continue;
             }
             st.runtime.cache_in(native::cache_dir(env.host.paths()));
-            match st.runtime.module(&path) {
+            let Some(compiled) = st.runtime.module(&path) else {
+                // Read and compiled off the window's thread: the tab is
+                // "loading" until the module is back, and a running
+                // instance of the old file goes on until then.
+                if let Some(job) = st.runtime.job(&path) {
+                    let lost = job.path().to_path_buf();
+                    tasks.push(Task::perform(
+                        async move {
+                            tokio::task::spawn_blocking(move || job.run())
+                                .await
+                                .unwrap_or_else(|_| native::Compiled::lost(lost))
+                        },
+                        |done| send(Msg::Compiled(done)),
+                    ));
+                }
+                if st.natives.contains_key(&entry.id) {
+                    keep_native.insert(entry.id.clone());
+                }
+                continue;
+            };
+            match compiled {
                 Ok(module) => {
                     let runtime = match st.runtime.runtime() {
                         Ok(runtime) => runtime,

@@ -27,6 +27,7 @@ pub enum Message {
     Tick,
     Copy,
     Spin,
+    Burn,
     Hog,
     Panic,
     Save,
@@ -91,6 +92,14 @@ fn spin() -> ! {
     }
 }
 
+/// About 60 ms of work, then done.
+fn burn() {
+    let until = hangar_kit_sdk::now_ms() + 60;
+    while hangar_kit_sdk::now_ms() < until {
+        black_box(0);
+    }
+}
+
 fn hog() -> ! {
     let mut held: Vec<Vec<u8>> = Vec::new();
     loop {
@@ -106,6 +115,12 @@ impl Kit for Probe {
         match start.tab.params.get("mode").map(String::as_str) {
             Some("loop") => spin(),
             Some("alloc") => hog(),
+            Some("log") => {
+                let line = "x".repeat(4096);
+                for _ in 0..20_000 {
+                    hangar_kit_sdk::log(hangar_kit_sdk::ui::abi::LogLevel::Info, &line);
+                }
+            }
             Some("panic") => panic!("the probe was told to panic"),
             _ => {}
         }
@@ -132,6 +147,7 @@ impl Kit for Probe {
             Message::Tick => self.ticks += 1,
             Message::Copy => cx.copy("from a click"),
             Message::Spin => spin(),
+            Message::Burn => burn(),
             Message::Hog => hog(),
             Message::Panic => panic!("the probe's button panics"),
             Message::Save => self.saves += 1,
@@ -163,6 +179,7 @@ impl Kit for Probe {
                 button("Copy").on_press(Message::Copy),
                 button("Spin").on_press(Message::Spin),
                 button("Hog").on_press(Message::Hog),
+                button("Burn").on_press(Message::Burn),
                 button("Panic").on_press(Message::Panic),
                 button("Pick").on_press(Message::Pick),
                 button("Paste").on_press(Message::Paste),

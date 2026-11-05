@@ -407,10 +407,22 @@ pub enum ErrorCode {
     ProtocolMismatch,
     /// A line from the helper that is not an event. Raised by the client.
     BadEvent,
+    /// A page's message, or a line of the helper's, over the size allowed.
+    /// The message is dropped.
+    TooLarge,
     /// Anything else, and any code a newer helper has that this client does not.
     #[serde(other)]
     Other,
 }
+
+/// The most a page's `window.ipc.postMessage` body may hold, in bytes: what a
+/// native tab's message is held to, so the two kinds of tab obey one rule.
+pub const MAX_IPC_BODY_BYTES: usize = 4 * 1024 * 1024;
+
+/// The longest line the client reads from the helper. A body of
+/// [`MAX_IPC_BODY_BYTES`] fits in it with its JSON escapes (most characters
+/// take one byte or two); a longer line is dropped unread.
+pub const MAX_EVENT_LINE_BYTES: usize = 12 * 1024 * 1024;
 
 /// What the helper tells the parent.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
