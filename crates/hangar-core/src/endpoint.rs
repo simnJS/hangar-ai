@@ -1,7 +1,9 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+
+use crate::store::{write_atomic, Access};
 
 /// Where the running app advertises how to reach its API.
 ///
@@ -61,17 +63,49 @@ pub fn publish(port: u16, token: &str) -> Result<(), String> {
 
     // The current location is the one that has to succeed; failing to refresh
     // the legacy copy only costs older binaries their connection.
+    let own_folders = std::env::var_os("HANGAR_ENDPOINT_FILE").is_none_or(|v| v.is_empty());
     let mut result = Ok(());
     for (nth, path) in paths.iter().enumerate() {
         if let Some(parent) = path.parent() {
-            let _ = fs::create_dir_all(parent);
+            private_folder(parent, own_folders);
         }
-        let outcome = fs::write(path, &body).map_err(|e| e.to_string());
+        let outcome = write_atomic(path, body.as_bytes(), Access::Private);
         if nth == 0 {
             result = outcome;
         }
     }
     result
+}
+
+/// The token in this file lets whoever reads it type into the person's
+/// shells (`/api/control/pane_send`), so the file is the owner's alone (0600,
+/// `Access::Private`), and so is the folder Hangar keeps it in (0700): a
+/// home that other users may list (Debian, Fedora) must not hand it out.
+///
+/// The folder is only tightened when it is Hangar's own (`~/.hangar`,
+/// `~/.iabench`, which also hold the accounts and kits): one named by
+/// `HANGAR_ENDPOINT_FILE` may be anything, `/tmp` included, and is only
+/// created, private, if missing.
+///
+/// On Windows the file sits in the user's profile, whose ACL already keeps
+/// other users out; nothing more is set there.
+fn private_folder(dir: &Path, own: bool) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+        let _ = fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir);
+        if own {
+            let _ = fs::set_permissions(dir, fs::Permissions::from_mode(0o700));
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = own;
+        let _ = fs::create_dir_all(dir);
+    }
 }
 
 pub fn read() -> Option<Endpoint> {
@@ -95,4 +129,41 @@ pub fn generate_token() -> String {
         uuid::Uuid::new_v4().simple(),
         uuid::Uuid::new_v4().simple()
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn the_endpoint_file_and_its_folder_are_the_owner_s_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let root =
+            std::env::temp_dir().join(format!("hangar-endpoint-{}", uuid::Uuid::new_v4().simple()));
+        let dir = root.join(".hangar");
+        fs::create_dir_all(&dir).unwrap();
+        // A folder made by an earlier version, readable by all.
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+        private_folder(&dir, true);
+        let path = dir.join("endpoint.json");
+        fs::write(&path, "{}").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        write_atomic(&path, b"{\"token\":\"t\"}", Access::Private).unwrap();
+
+        let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&dir), 0o700);
+        assert_eq!(mode(&path), 0o600);
+
+        // A folder Hangar does not own is created private, never changed.
+        let shared = root.join("shared");
+        fs::create_dir_all(&shared).unwrap();
+        fs::set_permissions(&shared, fs::Permissions::from_mode(0o755)).unwrap();
+        private_folder(&shared, false);
+        assert_eq!(mode(&shared), 0o755);
+        let fresh = root.join("fresh");
+        private_folder(&fresh, false);
+        assert_eq!(mode(&fresh), 0o700);
+        fs::remove_dir_all(&root).ok();
+    }
 }

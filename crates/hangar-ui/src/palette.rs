@@ -67,7 +67,7 @@ use crate::glyph::{self, GlyphState};
 use crate::icon::{Icon, icon};
 use crate::keys::on_key;
 use crate::layer::{self, Layer};
-use crate::matching::{Ranked, Searchable, filter_palette, highlight};
+use crate::matching::{Match, Ranked, Searchable, filter_palette, highlight};
 use crate::menu_nav::{Step, step_index};
 
 /// What the palette says, so that the app can translate it. The defaults are
@@ -223,6 +223,12 @@ pub enum Msg {
     PageUp,
     /// The pointer rested on a row (an index into the shown list).
     Hover(usize),
+    /// The pointer is over this row. It is a candidate only: a list that
+    /// scrolls under a resting pointer says the same, so the choice moves on
+    /// the [`Msg::Moved`] that follows a real move.
+    Over(usize),
+    /// The pointer moved over the palette.
+    Moved,
     /// A row was clicked.
     Click(usize),
     /// Enter.
@@ -230,8 +236,11 @@ pub enum Msg {
     /// Escape, the Esc cap or a click on the veil: hand this to the layer's
     /// `on_dismiss` as well.
     Dismiss,
-    /// The list was scrolled to this offset.
-    Scrolled(f32),
+    /// The list was scrolled to this offset, and is this tall on screen.
+    Scrolled {
+        offset: f32,
+        view: f32,
+    },
 }
 
 /// What the palette asks of the app.
@@ -251,6 +260,15 @@ pub struct Palette<T> {
     query: String,
     selected: usize,
     scroll: f32,
+    /// The row the pointer is over, until it is known to have moved there.
+    over: Option<usize>,
+    /// How tall the list really is on screen: a short window keeps it under
+    /// `LIST_HEIGHT`.
+    view: f32,
+    /// What the query keeps, in the order it is listed: the item's index and
+    /// how it matched. Recomputed when the query or the items change, not on
+    /// every read.
+    kept: Vec<(usize, Match)>,
 }
 
 /// The identities the view and its tasks agree on.
@@ -272,12 +290,17 @@ const PAGE: usize = 8;
 
 impl<T: Clone> Palette<T> {
     pub fn new(items: Vec<Item<T>>) -> Palette<T> {
-        Palette {
+        let mut palette = Palette {
             items,
             query: String::new(),
             selected: 0,
             scroll: 0.0,
-        }
+            over: None,
+            view: LIST_HEIGHT,
+            kept: Vec::new(),
+        };
+        palette.refilter();
+        palette
     }
 
     pub fn query(&self) -> &str {
@@ -289,19 +312,33 @@ impl<T: Clone> Palette<T> {
     /// live state while it is open, such as the agents' states.
     pub fn set_items(&mut self, items: Vec<Item<T>>) {
         self.items = items;
+        self.refilter();
+    }
+
+    /// Runs the filter again, for a new query or new items.
+    fn refilter(&mut self) {
+        self.kept = filter_palette(&self.items, &self.query)
+            .into_iter()
+            .flat_map(|group| group.entries)
+            .map(|ranked| (ranked.index, ranked.matched))
+            .collect();
     }
 
     /// The items the query keeps, flattened in the order they are listed.
     fn shown(&self) -> Vec<Ranked<'_, Item<T>>> {
-        filter_palette(&self.items, &self.query)
-            .into_iter()
-            .flat_map(|group| group.entries)
+        self.kept
+            .iter()
+            .map(|(index, matched)| Ranked {
+                index: *index,
+                entry: &self.items[*index],
+                matched: matched.clone(),
+            })
             .collect()
     }
 
     /// How many rows the query leaves.
     pub fn len(&self) -> usize {
-        self.shown().len()
+        self.kept.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -315,7 +352,8 @@ impl<T: Clone> Palette<T> {
 
     /// The item chosen, if the list is not empty.
     pub fn chosen(&self) -> Option<&Item<T>> {
-        self.shown().get(self.selected()).map(|ranked| ranked.entry)
+        let (index, _) = self.kept.get(self.selected())?;
+        self.items.get(*index)
     }
 
     pub fn update(&mut self, message: Msg) -> (Event<T>, Task<Msg>) {
@@ -323,6 +361,7 @@ impl<T: Clone> Palette<T> {
         match message {
             Msg::Query(query) => {
                 self.query = query;
+                self.refilter();
                 self.selected = 0;
                 self.scroll = 0.0;
                 (
@@ -331,6 +370,7 @@ impl<T: Clone> Palette<T> {
                 )
             }
             Msg::Next | Msg::Previous => {
+                self.over = None;
                 let step = if message == Msg::Next {
                     Step::Next
                 } else {
@@ -339,10 +379,12 @@ impl<T: Clone> Palette<T> {
                 self.go(step_index(Some(self.selected()), count, step, true))
             }
             Msg::PageDown => {
+                self.over = None;
                 let at = (self.selected() + PAGE).min(count.saturating_sub(1));
                 self.go((count > 0).then_some(at))
             }
             Msg::PageUp => {
+                self.over = None;
                 let at = self.selected().saturating_sub(PAGE);
                 self.go((count > 0).then_some(at))
             }
@@ -352,8 +394,16 @@ impl<T: Clone> Palette<T> {
                 }
                 (Event::None, Task::none())
             }
-            Msg::Click(at) => match self.shown().get(at) {
-                Some(ranked) => (Event::Run(ranked.entry.value.clone()), Task::none()),
+            Msg::Over(at) => {
+                self.over = Some(at);
+                (Event::None, Task::none())
+            }
+            Msg::Moved => match self.over.take() {
+                Some(at) => self.update(Msg::Hover(at)),
+                None => (Event::None, Task::none()),
+            },
+            Msg::Click(at) => match self.kept.get(at) {
+                Some((index, _)) => (Event::Run(self.items[*index].value.clone()), Task::none()),
                 None => (Event::None, Task::none()),
             },
             Msg::Run => match self.chosen() {
@@ -361,8 +411,11 @@ impl<T: Clone> Palette<T> {
                 None => (Event::None, Task::none()),
             },
             Msg::Dismiss => (Event::Dismiss, Task::none()),
-            Msg::Scrolled(offset) => {
+            Msg::Scrolled { offset, view } => {
                 self.scroll = offset;
+                if view > 0.0 {
+                    self.view = view;
+                }
                 (Event::None, Task::none())
             }
         }
@@ -375,7 +428,7 @@ impl<T: Clone> Palette<T> {
         };
         self.selected = to;
         let (top, bottom) = self.extent(to);
-        let view = LIST_HEIGHT;
+        let view = self.view;
         let offset = if top < self.scroll {
             top
         } else if bottom > self.scroll + view {
@@ -394,18 +447,20 @@ impl<T: Clone> Palette<T> {
     /// included when it is the first of its group.
     fn extent(&self, index: usize) -> (f32, f32) {
         let mut y = 4.0;
-        let mut at = 0;
-        for group in filter_palette(&self.items, &self.query) {
+        let mut group: Option<&str> = None;
+        for (at, (index_in_items, _)) in self.kept.iter().enumerate() {
+            let item = &self.items[*index_in_items];
             let heading_top = y;
-            y += HEADING;
-            for (n, _) in group.entries.iter().enumerate() {
-                if at == index {
-                    let top = if n == 0 { heading_top } else { y };
-                    return (top, y + ROW);
-                }
-                y += ROW;
-                at += 1;
+            let first = group != Some(item.group.as_str());
+            if first {
+                y += HEADING;
+                group = Some(item.group.as_str());
             }
+            if at == index {
+                let top = if first { heading_top } else { y };
+                return (top, y + ROW);
+            }
+            y += ROW;
         }
         (0.0, 0.0)
     }
@@ -492,7 +547,10 @@ impl<T: Clone> Palette<T> {
         };
         let list = scrollable::Scrollable::new(body)
             .id(list_id())
-            .on_scroll(|viewport| Msg::Scrolled(viewport.absolute_offset().y))
+            .on_scroll(|viewport| Msg::Scrolled {
+                offset: viewport.absolute_offset().y,
+                view: viewport.bounds().height,
+            })
             .style(style::scrollable::default(t))
             .direction(scrollable::Direction::Vertical(
                 scrollable::Scrollbar::new().width(0).scroller_width(0),
@@ -536,6 +594,10 @@ impl<T: Clone> Palette<T> {
         let panel = container(column![search, line(), list, line(), foot])
             .width(size::PALETTE_WIDTH)
             .style(style::container::palette(t));
+
+        // The panel's own box does not move when the list scrolls, so this
+        // hears the pointer and not the rows sliding under it.
+        let panel = mouse_area(panel).on_move(|_| Msg::Moved);
 
         on_key(panel, |key, modifiers| {
             use iced::keyboard::Key;
@@ -644,7 +706,9 @@ impl<T: Clone> Palette<T> {
             .height(ROW)
             .style(style::button::palette_row(t, chosen))
             .on_press(Msg::Click(at));
-        mouse_area(row).on_enter(Msg::Hover(at)).into()
+        // A list that scrolls under a pointer at rest says this too: the
+        // choice moves only when the panel hears the pointer move (`Moved`).
+        mouse_area(row).on_move(move |_| Msg::Over(at)).into()
     }
 }
 

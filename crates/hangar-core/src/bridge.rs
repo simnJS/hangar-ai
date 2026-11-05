@@ -52,11 +52,17 @@ const MOD_FILES: &[(&str, &str)] = &[
 /// How long an edit keeps its file "being edited" by the pane that made it.
 const EDIT_MEMORY_MS: u64 = 15 * 60 * 1000;
 
-/// Where the mod was written, or None when that failed: panes then start
-/// without it.
+/// Where the mod was written, or None when that failed: the pane being
+/// started then goes without it, and the next one tries again — a write that
+/// failed once (a folder locked for a moment) does not keep the mod from
+/// every pane until Hangar restarts.
 pub fn plugin_dir() -> Option<&'static Path> {
-    static DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
-    DIR.get_or_init(install).as_deref()
+    static DIR: OnceLock<PathBuf> = OnceLock::new();
+    if let Some(dir) = DIR.get() {
+        return Some(dir);
+    }
+    let dir = install()?;
+    Some(DIR.get_or_init(|| dir))
 }
 
 /// `~/.hangar/mods/`, or beside the endpoint file a development build run next
@@ -97,26 +103,19 @@ pub fn endpoint() -> Option<(u16, &'static str)> {
     ENDPOINT.get().map(|(port, token)| (*port, token.as_str()))
 }
 
-/// Everything a pane's environment needs for its Claude Code to find its way
-/// back here, and the mod's folder, which `apply_plugin_dirs` then puts on
-/// `CLAUDE_CODE_PLUGIN_DIRS` beside the workspace's kits. Nothing is set, and
-/// no folder handed back, when either half is missing — a mod with no URL
-/// would only make requests that fail — or when the machine forbids
-/// sideloading.
-pub fn apply_env(
-    cmd: &mut CommandBuilder,
-    pane_id: &str,
-    pane_name: Option<&str>,
-) -> Option<&'static Path> {
+/// What a pane's environment needs, beside the `HANGAR_PANE_ID` and
+/// `HANGAR_PANE_NAME` every pane is given (pty.rs), for its Claude Code to
+/// find its way back here, and the mod's folder, which `apply_plugin_dirs`
+/// then puts on `CLAUDE_CODE_PLUGIN_DIRS` beside the workspace's kits.
+/// Nothing is set, and no folder handed back, when either half is missing — a
+/// mod with no URL would only make requests that fail — or when the machine
+/// forbids sideloading.
+pub fn apply_env(cmd: &mut CommandBuilder) -> Option<&'static Path> {
     let (Some(dir), Some((port, token))) = (plugin_dir(), ENDPOINT.get()) else {
         return None;
     };
     if sideloading_forbidden() {
         return None;
-    }
-    cmd.env("HANGAR_PANE_ID", pane_id);
-    if let Some(name) = pane_name.filter(|name| !name.trim().is_empty()) {
-        cmd.env("HANGAR_PANE_NAME", name);
     }
     cmd.env("HANGAR_BRIDGE_URL", format!("http://127.0.0.1:{port}"));
     cmd.env("HANGAR_BRIDGE_TOKEN", token);
@@ -341,9 +340,21 @@ pub fn take_next(host: &Host, pane_id: &str, labelled: bool) -> Option<Queued> {
     next
 }
 
-/// A pane that is gone takes its queue and its edits with it.
-pub fn forget(pane_id: &str) {
+/// A pane closed for good takes its queue and its edits with it, and the
+/// window hears that nothing is queued for it any more.
+///
+/// Not for a pane that comes back under the same id — a restart, a role
+/// restart, a hibernation: what was queued for it is still for it, and
+/// `pty_kill` keeps it (`release_edits` only).
+pub fn forget(host: &Host, pane_id: &str) {
     inbox().cancel(pane_id, None);
+    edits().forget(pane_id);
+    queue_changed(host, pane_id, Vec::new());
+}
+
+/// A pane's shell ended: the files it edited are no longer being edited by
+/// it. Its queue stays, for the shell that comes back on its id.
+pub fn release_edits(pane_id: &str) {
     edits().forget(pane_id);
 }
 
@@ -518,6 +529,52 @@ mod tests {
         edits.record("a", "alice", "/repo/x", 0);
         edits.forget("a");
         assert_eq!(edits.owner("b", "/repo/x", 1), None);
+    }
+
+    fn test_host() -> Host {
+        Host::with_paths(crate::paths::Paths::rooted(&std::env::temp_dir()))
+    }
+
+    /// A restart, a role restart or a hibernation ends the shell and brings
+    /// the same id back: what was queued for the pane waits for it.
+    #[test]
+    fn a_pane_whose_shell_ends_keeps_its_queue() {
+        let host = test_host();
+        let pane = "p-bridge-restarted";
+        let queued = enqueue_from(&host, pane, "next step".into(), Some("Leo".into()));
+        record_edit(pane, "Zoe", "/repo/bridge-restarted.rs");
+
+        release_edits(pane);
+        assert_eq!(bridge_queue(pane.into()), [queued]);
+        assert_eq!(conflict("p-other", "/repo/bridge-restarted.rs"), None);
+        assert_eq!(
+            take_next(&host, pane, true).map(|q| q.text).as_deref(),
+            Some("next step")
+        );
+    }
+
+    /// A pane closed for good gives its queue up, and says so: the window
+    /// would otherwise keep showing prompts that no longer exist.
+    #[test]
+    fn a_pane_closed_for_good_forgets_its_queue_and_says_so() {
+        let host = test_host();
+        let mut events = host.subscribe();
+        let pane = "p-bridge-closed";
+        enqueue_from(&host, pane, "never sent".into(), None);
+        record_edit(pane, "Zoe", "/repo/bridge-closed.rs");
+
+        forget(&host, pane);
+        assert!(bridge_queue(pane.into()).is_empty());
+        assert_eq!(conflict("p-other", "/repo/bridge-closed.rs"), None);
+        let mut last = None;
+        while let Ok(event) = events.try_recv() {
+            if let Event::BridgeQueue(change) = event {
+                if change.pane_id == pane {
+                    last = Some(change.pending);
+                }
+            }
+        }
+        assert_eq!(last, Some(Vec::new()), "the window hears the queue emptied");
     }
 
     #[cfg(windows)]

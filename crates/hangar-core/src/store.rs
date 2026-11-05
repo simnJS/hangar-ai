@@ -255,11 +255,118 @@ pub fn save_state(host: &Host, state: serde_json::Value) -> Result<(), String> {
 }
 
 fn write_state(path: &Path, state: &serde_json::Value) -> Result<(), String> {
-    let tmp = path.with_extension("json.tmp");
     let body = serde_json::to_string_pretty(state).map_err(|e| e.to_string())?;
     // Write-then-rename so a crash mid-save cannot truncate the real file.
-    fs::write(&tmp, body).map_err(|e| e.to_string())?;
-    fs::rename(&tmp, path).map_err(|e| e.to_string())
+    write_atomic(path, body.as_bytes(), Access::Private)
+}
+
+/// Who may read a file `write_atomic` writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Access {
+    /// The owner only (0600 on Unix), from the moment it exists: for a file
+    /// that holds a token, or copies of one.
+    Private,
+    /// What the file it replaces had. A file that did not exist yet gets the
+    /// system's default (umask) mode. For a file of the person's own, such as
+    /// a `CLAUDE.md`, a `.gitignore` or a settings file kept at 0600.
+    AsBefore,
+}
+
+/// The file a write to `path` lands on: through a symbolic link, the file it
+/// points to. Renaming over the link itself would swap the person's link for
+/// a plain file and leave what it pointed to stale.
+pub(crate) fn landing(path: &Path) -> PathBuf {
+    match fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+        }
+        _ => path.to_path_buf(),
+    }
+}
+
+/// Writes `body` to a fresh temporary file beside `path`, with the access
+/// asked for and flushed to disk, and returns its name. `rename` it over
+/// `path`, or remove it.
+///
+/// The name is unique (process id and a counter), so two writers of the same
+/// file never share a temporary one. It is created private and only widened
+/// to what the old file had once written, so it is never more readable than
+/// either.
+pub(crate) fn write_temp(path: &Path, body: &[u8], access: Access) -> std::io::Result<PathBuf> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let tmp = path.with_file_name(format!(
+        ".{name}.{}-{}.tmp",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    let before = match access {
+        Access::AsBefore => fs::metadata(path).ok().map(|meta| meta.permissions()),
+        Access::Private => None,
+    };
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        if access == Access::Private || before.is_some() {
+            options.mode(0o600);
+        }
+    }
+    let written = (|| {
+        let mut file = options.open(&tmp)?;
+        file.write_all(body)?;
+        if let Some(before) = before {
+            fs::set_permissions(&tmp, before)?;
+        }
+        // Without it, a power cut right after the rename can leave an empty
+        // file on XFS, btrfs or ext4 with `noauto_da_alloc`.
+        file.sync_all()
+    })();
+    match written {
+        Ok(()) => Ok(tmp),
+        Err(err) => {
+            let _ = fs::remove_file(&tmp);
+            Err(err)
+        }
+    }
+}
+
+/// Puts the temporary file `write_temp` wrote in place of `path`.
+pub(crate) fn put_in_place(tmp: &Path, path: &Path) -> std::io::Result<()> {
+    if let Err(err) = fs::rename(tmp, path) {
+        let _ = fs::remove_file(tmp);
+        return Err(err);
+    }
+    // The rename is only durable once the folder holding it is.
+    #[cfg(unix)]
+    if let Some(dir) = path.parent() {
+        let dir = if dir.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            dir
+        };
+        if let Ok(dir) = fs::File::open(dir) {
+            let _ = dir.sync_all();
+        }
+    }
+    Ok(())
+}
+
+/// Replaces `path` with `body` in one step: a reader (or a crash) sees the
+/// old content or the new one whole, never half of it. Through a symbolic
+/// link, the file it points to is the one replaced.
+pub(crate) fn write_atomic(path: &Path, body: &[u8], access: Access) -> Result<(), String> {
+    let path = landing(path);
+    let tmp = write_temp(&path, body, access)
+        .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+    put_in_place(&tmp, &path).map_err(|e| format!("cannot replace {}: {e}", path.display()))
 }
 
 pub fn dir_exists(path: String) -> bool {
@@ -386,6 +493,80 @@ mod tests {
         save_state(&host, json!({"a": 1})).unwrap();
         assert_eq!(rescues(&path).len(), 1);
         cleanup(&path);
+    }
+
+    fn scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "hangar-atomic-{tag}-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Only the file asked for is in the folder: no temporary one left.
+    fn names(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn an_atomic_write_replaces_the_file_and_leaves_no_temporary_one() {
+        let dir = scratch("replace");
+        let path = dir.join("state.json");
+        write_atomic(&path, b"one", Access::Private).unwrap();
+        write_atomic(&path, b"two", Access::AsBefore).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"two");
+        assert_eq!(names(&dir), ["state.json"]);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_private_write_is_0600_and_an_as_before_one_keeps_the_old_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = scratch("modes");
+        let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        let token = dir.join("endpoint.json");
+        write_atomic(&token, b"secret", Access::Private).unwrap();
+        assert_eq!(mode(&token), 0o600);
+        // Even over a file that was readable by all.
+        fs::set_permissions(&token, fs::Permissions::from_mode(0o644)).unwrap();
+        write_atomic(&token, b"secret", Access::Private).unwrap();
+        assert_eq!(mode(&token), 0o600);
+
+        let kept = dir.join(".claude.json");
+        fs::write(&kept, "{}").unwrap();
+        fs::set_permissions(&kept, fs::Permissions::from_mode(0o600)).unwrap();
+        write_atomic(&kept, b"{\"a\":1}", Access::AsBefore).unwrap();
+        assert_eq!(mode(&kept), 0o600);
+        fs::set_permissions(&kept, fs::Permissions::from_mode(0o640)).unwrap();
+        write_atomic(&kept, b"{}", Access::AsBefore).unwrap();
+        assert_eq!(mode(&kept), 0o640);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A `CLAUDE.md` that links to an `AGENTS.md` stays a link.
+    #[cfg(unix)]
+    #[test]
+    fn an_atomic_write_through_a_symbolic_link_writes_its_target() {
+        let dir = scratch("link");
+        let target = dir.join("AGENTS.md");
+        let link = dir.join("CLAUDE.md");
+        fs::write(&target, "old").unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        write_atomic(&link, b"new", Access::AsBefore).unwrap();
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(fs::read_to_string(&target).unwrap(), "new");
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

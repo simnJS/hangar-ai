@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 
+use crate::store::{write_atomic, Access};
+
 pub(crate) const SERVER_KEY: &str = "hangar";
 
 /// Names this server has been registered under before, newest first.
@@ -136,12 +138,41 @@ pub(crate) fn server_entry(workspace_cwd: &str) -> Result<Value, String> {
     }))
 }
 
-fn read_json(path: &PathBuf) -> Map<String, Value> {
-    fs::read_to_string(path)
-        .ok()
-        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
-        .and_then(|v| v.as_object().cloned())
-        .unwrap_or_default()
+/// The object a config file holds: an empty one when there is no file yet,
+/// or nothing in it.
+///
+/// Anything else that is not an object (it cannot be read, it is not UTF-8,
+/// it has a trailing comma or a hand edit gone wrong) is an error, never an
+/// empty object: the caller writes the result back, and an empty object
+/// written over the person's `settings.json` would take their permissions,
+/// hooks and env with it.
+fn read_json(path: &Path) -> Result<Map<String, Value>, String> {
+    let raw = match fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Map::new()),
+        Err(err) => {
+            return Err(format!(
+                "{} cannot be read ({err}); it is left as it is",
+                path.display()
+            ))
+        }
+    };
+    // Some editors (and Claude Code, on some setups) start it with a BOM.
+    let raw = raw.trim_start_matches('\u{feff}');
+    if raw.trim().is_empty() {
+        return Ok(Map::new());
+    }
+    match serde_json::from_str::<Value>(raw) {
+        Ok(Value::Object(map)) => Ok(map),
+        Ok(_) => Err(format!(
+            "{} does not hold a JSON object; fix it first, it is left as it is",
+            path.display()
+        )),
+        Err(err) => Err(format!(
+            "{} is not valid JSON ({err}); fix it first, it is left as it is",
+            path.display()
+        )),
+    }
 }
 
 /// Keeps a one-shot copy of whatever was there before we touched it.
@@ -161,9 +192,9 @@ fn install_json(path: &PathBuf, key: &str, workspace_cwd: &str) -> Result<(), St
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
+    let mut root = read_json(path)?;
     backup(path);
 
-    let mut root = read_json(path);
     let servers = root
         .entry(key.to_string())
         .or_insert_with(|| Value::Object(Map::new()));
@@ -177,7 +208,7 @@ fn install_json(path: &PathBuf, key: &str, workspace_cwd: &str) -> Result<(), St
     servers.insert(SERVER_KEY.to_string(), server_entry(workspace_cwd)?);
 
     let body = serde_json::to_string_pretty(&Value::Object(root)).map_err(|e| e.to_string())?;
-    fs::write(path, body).map_err(|e| e.to_string())
+    write_atomic(path, body.as_bytes(), Access::AsBefore)
 }
 
 /// Claude Code gates project-scoped `.mcp.json` servers behind an approval that
@@ -192,9 +223,9 @@ fn allow_project_server_globally() -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
+    let mut root = read_json(&path)?;
     backup(&path);
 
-    let mut root = read_json(&path);
     let list = root
         .entry("enabledMcpjsonServers".to_string())
         .or_insert_with(|| Value::Array(vec![]));
@@ -214,7 +245,7 @@ fn allow_project_server_globally() -> Result<(), String> {
     }
 
     let body = serde_json::to_string_pretty(&Value::Object(root)).map_err(|e| e.to_string())?;
-    fs::write(&path, body).map_err(|e| e.to_string())
+    write_atomic(&path, body.as_bytes(), Access::AsBefore)
 }
 
 /// The entry we own in a target's config.
@@ -238,14 +269,14 @@ impl Registration {
     }
 }
 
-fn registration(path: &PathBuf) -> Option<Registration> {
+fn registration(path: &Path) -> Option<Registration> {
     let command_of = |entry: &Value| {
         entry
             .get("command")
             .and_then(Value::as_str)
             .map(str::to_string)
     };
-    let root = read_json(path);
+    let root = read_json(path).ok()?;
     let servers = root.get(SERVERS)?;
     if let Some(entry) = servers.get(SERVER_KEY) {
         return Some(Registration {
@@ -375,6 +406,44 @@ mod tests {
         fs::write(path, body.to_string()).unwrap();
     }
 
+    /// A config that does not parse (a trailing comma, a hand edit) used to be
+    /// read as `{}` and written back with our entry alone.
+    #[test]
+    fn a_config_that_does_not_parse_is_left_untouched() {
+        let path = temp_config("broken");
+        for body in [
+            b"{ \"permissions\": { \"allow\": [\"Bash\"] }, }".to_vec(),
+            b"[\"not\", \"an object\"]".to_vec(),
+            // Not UTF-8: Latin-1 text.
+            b"{ \"env\": { \"NAME\": \"Ren\xe9\" } }".to_vec(),
+        ] {
+            fs::write(&path, &body).unwrap();
+            let refused = install_json(&path, "mcpServers", "C:/ws");
+            assert!(refused.is_err(), "{refused:?}");
+            assert_eq!(fs::read(&path).unwrap(), body);
+        }
+        // No backup either: nothing was touched.
+        let names: Vec<_> = fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["mcp.json"]);
+        fs::remove_dir_all(path.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn a_missing_or_blank_config_is_written_fresh() {
+        let path = temp_config("blank");
+        install_json(&path, "mcpServers", "C:/ws").expect("missing");
+        fs::write(&path, "\u{feff}  \n").unwrap();
+        install_json(&path, "mcpServers", "C:/ws").expect("blank");
+        assert!(read_json(&path).unwrap()["mcpServers"]
+            .get(SERVER_KEY)
+            .is_some());
+        fs::remove_dir_all(path.parent().unwrap()).ok();
+    }
+
     /// Leaving the old entry behind would declare a second server pointing at a
     /// binary from before the rename, which fails on every agent launch.
     #[test]
@@ -390,7 +459,7 @@ mod tests {
 
         install_json(&path, "mcpServers", "C:/ws").expect("install");
 
-        let root = read_json(&path);
+        let root = read_json(&path).unwrap();
         let servers = root.get("mcpServers").unwrap();
         assert!(servers.get("iabench").is_none());
         assert!(servers.get(SERVER_KEY).is_some());

@@ -28,16 +28,22 @@
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
 
+/// A pane's input, shared out of the registry: `pty_write` takes a clone of
+/// it under the registry's lock and writes once that lock is released, so a
+/// program that does not read its input — a long paste into a busy agent, a
+/// shell running `sleep` — blocks the writes to its own pane and nothing else.
+type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
+
 /// One live pseudo-terminal, owned by the manager for the lifetime of a pane.
 struct PtySession {
     master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn Write + Send>,
+    writer: SharedWriter,
     child: Box<dyn Child + Send + Sync>,
     /// Cleared when the pane is killed. The reader thread outlives the kill by
     /// a moment — it can be holding a chunk read just before it — and this is
@@ -95,9 +101,9 @@ pub struct PtyHistory {
     pub account: Option<String>,
 }
 
-/// Everything the manager tracks, behind one lock: an id is live, being reaped,
-/// or free, and it can never be seen as free while it is still one of the
-/// other two.
+/// Everything the manager tracks, behind one lock: an id is starting, live,
+/// being reaped, or free, and it can never be seen as free while it is still
+/// one of the other three.
 #[derive(Default)]
 struct Registry {
     sessions: HashMap<String, PtySession>,
@@ -105,6 +111,10 @@ struct Registry {
     /// their id as much as a live session does: until the old child is really
     /// gone, spawning into that id would put two shells on one pane.
     dying: HashSet<String>,
+    /// Ids a `pty_spawn` has booked and is still starting a shell for, with
+    /// the lock released: a second spawn of one of them fails instead of
+    /// starting a second shell that would replace the first in `sessions`.
+    starting: HashSet<String>,
 }
 
 #[derive(Default)]
@@ -116,9 +126,65 @@ pub struct PtyManager {
 }
 
 impl PtyManager {
+    /// Never a panic for a poisoned lock: one pane's thread that panicked
+    /// while holding it would otherwise fail every pane from then on.
     fn lock(&self) -> MutexGuard<'_, Registry> {
-        self.registry.lock().unwrap()
+        self.registry.lock().unwrap_or_else(PoisonError::into_inner)
     }
+}
+
+/// Holds an id in `starting` while `pty_spawn` starts its shell, and hands it
+/// back on the way out, whether the spawn succeeded or failed.
+struct Starting<'a> {
+    manager: &'a PtyManager,
+    id: String,
+}
+
+impl Starting<'_> {
+    /// The shell is up: the id goes from `starting` to `sessions` under one
+    /// lock, so it is never seen free in between.
+    fn install(self, session: PtySession) {
+        let mut registry = self.manager.lock();
+        registry.starting.remove(&self.id);
+        registry.sessions.insert(self.id.clone(), session);
+    }
+}
+
+impl Drop for Starting<'_> {
+    fn drop(&mut self) {
+        self.manager.lock().starting.remove(&self.id);
+    }
+}
+
+/// Books `id` for a spawn, in one go under the lock: once booked, it is the
+/// caller's until the `Starting` is installed or dropped. One still being
+/// reaped is waited out (see `pty_spawn_with`); one live or being started
+/// fails.
+fn reserve<'a>(manager: &'a PtyManager, id: &str) -> Result<Starting<'a>, String> {
+    let taken = |registry: &Registry| {
+        if registry.sessions.contains_key(id) {
+            Err(format!("pty {id} already running"))
+        } else if registry.starting.contains(id) {
+            Err(format!("pty {id} is already starting"))
+        } else {
+            Ok(())
+        }
+    };
+    let registry = manager.lock();
+    taken(&registry)?;
+    let (mut registry, wait) = manager
+        .reaped
+        .wait_timeout_while(registry, REAP_TIMEOUT, |r| r.dying.contains(id))
+        .unwrap_or_else(PoisonError::into_inner);
+    if wait.timed_out() {
+        return Err(format!("pty {id} is still shutting down"));
+    }
+    taken(&registry)?;
+    registry.starting.insert(id.to_string());
+    Ok(Starting {
+        manager,
+        id: id.to_string(),
+    })
 }
 
 /// Holds an id in `dying` for as long as its shell is being reaped and hands it
@@ -176,32 +242,45 @@ pub enum PtyEvent {
 /// for as long as the shell prints (see the top of this file).
 pub type PtySink = Box<dyn FnMut(PtyEvent) + Send + 'static>;
 
-/// Pulls every complete UTF-8 sequence out of `pending`, leaving a partial
-/// trailing codepoint in place so it can be completed by the next read.
+/// Decodes all of `pending`, each invalid sequence turned into U+FFFD as
+/// `String::from_utf8_lossy` does, and leaves in place only a codepoint cut
+/// off at the very end, for the next read to complete. What follows an
+/// invalid byte is never held back: it is shown with the chunk it came in.
 fn take_utf8(pending: &mut Vec<u8>) -> String {
-    match std::str::from_utf8(pending) {
-        Ok(s) => {
-            let out = s.to_string();
-            pending.clear();
-            out
-        }
-        Err(err) => {
-            let valid = err.valid_up_to();
-            let out = String::from_utf8_lossy(&pending[..valid]).into_owned();
-            match err.error_len() {
-                // Genuinely invalid bytes: drop them and move on.
-                Some(len) => {
-                    pending.drain(..valid + len);
-                    out + "\u{FFFD}"
-                }
-                // Truncated codepoint: keep the tail for the next read.
-                None => {
-                    pending.drain(..valid);
-                    out
+    // The usual case, a chunk of valid text: handed over without a copy.
+    let bytes = match String::from_utf8(std::mem::take(pending)) {
+        Ok(text) => return text,
+        Err(err) => err.into_bytes(),
+    };
+    let mut out = String::with_capacity(bytes.len());
+    let mut rest = &bytes[..];
+    loop {
+        match std::str::from_utf8(rest) {
+            Ok(text) => {
+                out.push_str(text);
+                rest = &[];
+                break;
+            }
+            Err(err) => {
+                let (valid, after) = rest.split_at(err.valid_up_to());
+                out.push_str(&String::from_utf8_lossy(valid));
+                match err.error_len() {
+                    // Genuinely invalid bytes: one replacement, and on.
+                    Some(len) => {
+                        out.push('\u{FFFD}');
+                        rest = &after[len..];
+                    }
+                    // A codepoint cut off by the end of the read.
+                    None => {
+                        rest = after;
+                        break;
+                    }
                 }
             }
         }
     }
+    *pending = rest.to_vec();
+    out
 }
 
 /// Session markers an agent CLI leaves in the environment of anything it spawns.
@@ -457,26 +536,13 @@ pub fn pty_spawn_with(
 ) -> Result<Spawned, String> {
     // An id belongs to one shell at a time, and one being reaped by `pty_kill`
     // still counts: its child is alive and its reader thread still speaks under
-    // that id. A live session is a caller mistake and fails, but a dying one is
-    // routine — the frontend kills and respawns a pane without awaiting the
-    // kill — so it is waited out. The lock is released while waiting, here and
-    // during the reap itself, so no other pane stalls behind it.
-    {
-        let registry = manager.lock();
-        if registry.sessions.contains_key(&id) {
-            return Err(format!("pty {id} already running"));
-        }
-        let (registry, wait) = manager
-            .reaped
-            .wait_timeout_while(registry, REAP_TIMEOUT, |r| r.dying.contains(&id))
-            .unwrap();
-        if wait.timed_out() {
-            return Err(format!("pty {id} is still shutting down"));
-        }
-        if registry.sessions.contains_key(&id) {
-            return Err(format!("pty {id} already running"));
-        }
-    }
+    // that id. A live session, or one another spawn is starting, is a caller
+    // mistake and fails, but a dying one is routine — the frontend kills and
+    // respawns a pane without awaiting the kill — so it is waited out. The
+    // lock is released while waiting, while the shell starts and during the
+    // reap itself, so no other pane stalls behind it; the id stays booked in
+    // `starting` meanwhile.
+    let slot = reserve(manager, &id)?;
 
     // The pane inherits our environment, so the PATH it starts with is the one
     // we were fixed with — which matters for the shells that are not opened as
@@ -527,7 +593,7 @@ pub fn pty_spawn_with(
     // Lets a Claude Code started in this pane load the hangar-bridge mod, and
     // the plugins of its workspace's kits.
     let bridge_dir = if bridge != Some(false) {
-        crate::bridge::apply_env(&mut cmd, &id, name.as_deref())
+        crate::bridge::apply_env(&mut cmd)
     } else {
         None
     };
@@ -555,26 +621,31 @@ pub fn pty_spawn_with(
         None => (None, Vec::new()),
     };
 
-    let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
-    let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
-    let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
+    let mut child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+    let ends = (pair.master.try_clone_reader(), pair.master.take_writer());
+    let (mut reader, writer) = match ends {
+        (Ok(reader), Ok(writer)) => (reader, writer),
+        // The shell runs already: not left behind with no pane to own it.
+        (Err(e), _) | (_, Err(e)) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(e.to_string());
+        }
+    };
 
     // Dropping the slave handle is what lets the reader see EOF on exit.
     drop(pair.slave);
 
     let live = Arc::new(AtomicBool::new(true));
     let history = Arc::new(Mutex::new(History::default()));
-    manager.lock().sessions.insert(
-        id.clone(),
-        PtySession {
-            master: pair.master,
-            writer,
-            child,
-            live: live.clone(),
-            history: history.clone(),
-            account: account.clone(),
-        },
-    );
+    slot.install(PtySession {
+        master: pair.master,
+        writer: Arc::new(Mutex::new(writer)),
+        child,
+        live: live.clone(),
+        history: history.clone(),
+        account: account.clone(),
+    });
 
     let mut output = output;
     let reader_id = id.clone();
@@ -595,15 +666,7 @@ pub fn pty_spawn_with(
                     pending.extend_from_slice(&buf[..n]);
                     let text = take_utf8(&mut pending);
                     if !text.is_empty() {
-                        // Recorded before it is sent: a window reading the
-                        // history in between finds the chunk there, and drops
-                        // the event when it arrives.
-                        let seq = history.lock().unwrap().push(&text);
-                        output(PtyEvent::Output(PtyOutput {
-                            id: reader_id.clone(),
-                            data: text,
-                            seq,
-                        }));
+                        emit(&mut output, &history, &reader_id, text);
                     }
                 }
                 Err(_) => break,
@@ -613,6 +676,12 @@ pub fn pty_spawn_with(
         // pane is already gone as far as the frontend is concerned, and the id
         // may have been handed to a new shell in the meantime.
         if reader_live.load(Ordering::Relaxed) {
+            // A codepoint the output ended in the middle of: shown as what it
+            // is rather than dropped.
+            if !pending.is_empty() {
+                let text = String::from_utf8_lossy(&pending).into_owned();
+                emit(&mut output, &history, &reader_id, text);
+            }
             output(PtyEvent::Exit(PtyExit {
                 id: reader_id,
                 code: None,
@@ -627,14 +696,38 @@ pub fn pty_spawn_with(
     })
 }
 
+/// Records a chunk in the pane's history, then hands it to its sink:
+/// recorded before it is sent, so a window reading the history in between
+/// finds the chunk there and drops the event when it arrives.
+fn emit(output: &mut PtySink, history: &Mutex<History>, id: &str, text: String) {
+    let seq = history
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .push(&text);
+    output(PtyEvent::Output(PtyOutput {
+        id: id.to_string(),
+        data: text,
+        seq,
+    }));
+}
+
+/// Writes to a pane's input. Blocks while the pane's program does not read —
+/// the pty's buffer is a few kilobytes — but only the writes to that pane:
+/// the registry's lock is released before the write starts (`SharedWriter`).
+/// Writes to one pane still go one at a time, in the order they come.
 pub fn pty_write(manager: &PtyManager, id: String, data: String) -> Result<(), String> {
-    let mut registry = manager.lock();
-    let session = registry.sessions.get_mut(&id).ok_or("pty not found")?;
-    session
+    let writer = manager
+        .lock()
+        .sessions
+        .get(&id)
+        .ok_or("pty not found")?
         .writer
+        .clone();
+    let mut writer = writer.lock().unwrap_or_else(PoisonError::into_inner);
+    writer
         .write_all(data.as_bytes())
         .map_err(|e| e.to_string())?;
-    session.writer.flush().map_err(|e| e.to_string())
+    writer.flush().map_err(|e| e.to_string())
 }
 
 pub fn pty_resize(manager: &PtyManager, id: String, cols: u16, rows: u16) -> Result<(), String> {
@@ -659,10 +752,17 @@ pub fn pty_resize(manager: &PtyManager, id: String, cols: u16, rows: u16) -> Res
 /// leaves alone what the user deliberately started out of it, an editor or a
 /// browser.
 ///
+/// The pane's prompt inbox (bridge.rs) is kept: a restart, a role restart and
+/// a hibernation all come through here and bring the same id back, and what
+/// was queued for it is still for it. A pane closed for good gives its inbox
+/// up with `bridge::forget`.
+///
 /// The manager comes as an `Arc` because the reap outlives the call, on a
 /// thread of its own that holds on to it.
 pub fn pty_kill(manager: &Arc<PtyManager>, id: String, tree: Option<bool>) -> Result<(), String> {
-    crate::bridge::forget(&id);
+    // Who edited what is the session's, which ends here; a respawned one
+    // starts its own.
+    crate::bridge::release_edits(&id);
     // Taken out under the lock, reaped outside it: `wait` blocks until the
     // shell is really gone, and a shell that takes its time — one still
     // tearing down a child agent — would otherwise hold the manager and
@@ -681,13 +781,12 @@ pub fn pty_kill(manager: &Arc<PtyManager>, id: String, tree: Option<bool>) -> Re
     };
     session.live.store(false, Ordering::Relaxed);
 
-    // Off this thread, and not as a courtesy: a command that is not `async`
-    // runs where it is called — the main thread, as Tauri called it — so
-    // every millisecond spent in `wait` here is a millisecond the window does
-    // not repaint, scroll or answer a key. That bill is never zero on unix — `kill` sends SIGHUP first and
-    // waits out a grace period, and an interactive shell installs a handler
-    // for SIGHUP rather than dying on it — and a shell that hangs on the way
-    // out froze the window for good.
+    // Off the caller's thread, and not as a courtesy: the caller may be the
+    // one the window repaints on, and every millisecond spent here would be
+    // a millisecond the window does not scroll or answer a key. That bill is
+    // never zero on unix — the pane's programs are given `HANGUP_GRACE` to
+    // end on the hangup — and a shell that hangs on the way out would freeze
+    // it for good.
     //
     // Nothing waits on this thread. `dying` already holds the id, and the
     // spawn that wants it back blocks on the condvar until the reap ends.
@@ -697,19 +796,7 @@ pub fn pty_kill(manager: &Arc<PtyManager>, id: String, tree: Option<bool>) -> Re
             manager: &manager,
             id,
         };
-
-        // Listed before the shell goes, while the tree still hangs off it.
-        let below = tree
-            .filter(|&tree| tree)
-            .and_then(|_| Some((session.child.process_id()?, crate::procs::table()?)))
-            .map(|(pid, table)| crate::procs::descendants(&table, pid, crate::procs::started))
-            .unwrap_or_default();
-        // So is the group: a shell that ends on the hangup is reaped inside
-        // `kill`, and a reaped shell's group can no longer be asked for.
-        let group = process_group(&session);
-        let _ = session.child.kill();
-        crate::procs::terminate(&below);
-        kill_group(group);
+        end(std::slice::from_mut(&mut session), tree == Some(true));
         let _ = session.child.wait();
         // Closing the master is what ends the reader thread, so it happens
         // before the id is handed back rather than at the end of the scope.
@@ -718,6 +805,123 @@ pub fn pty_kill(manager: &Arc<PtyManager>, id: String, tree: Option<bool>) -> Re
 
     Ok(())
 }
+
+/// How long the programs of the panes being ended get, all at once, to end
+/// on the hangup — Claude Code writing the last of its transcript — before
+/// what is left is killed outright. Polled: panes that end sooner are not
+/// waited for.
+#[cfg(unix)]
+const HANGUP_GRACE: Duration = Duration::from_millis(300);
+#[cfg(unix)]
+const HANGUP_POLL: Duration = Duration::from_millis(20);
+
+/// A pane's process group (unix), or nothing.
+#[cfg(unix)]
+type Group = libc::pid_t;
+#[cfg(not(unix))]
+type Group = i32;
+
+/// A pane on its way out, with what to end beside its shell, read while the
+/// shell still runs.
+struct Ending<'a> {
+    session: &'a mut PtySession,
+    group: Option<Group>,
+    /// The processes below the shell, each with its start time where the
+    /// system tells it (`procs::started`).
+    below: Vec<(u32, Option<u64>)>,
+    /// The shell is gone and reaped: its pid is no longer ours to signal.
+    exited: bool,
+}
+
+/// Ends panes taken out of the registry: each one's group is hung up, as a
+/// terminal that closes would, and given `HANGUP_GRACE` (in all, not each) to
+/// end; then what is left — what ignored the hangup, an agent started with
+/// `nohup` — is killed outright, the group, the processes listed below each
+/// shell with `tree`, and the shell. Does not wait for the shells.
+fn end(sessions: &mut [PtySession], tree: bool) {
+    let table = if tree { crate::procs::table() } else { None };
+    let mut ending: Vec<Ending<'_>> = sessions
+        .iter_mut()
+        .map(|session| {
+            // Listed before anything goes, while the tree still hangs off
+            // the shell. So is the group: a reaped shell's group can no
+            // longer be asked for.
+            let below = match (&table, session.child.process_id()) {
+                (Some(table), Some(pid)) => {
+                    crate::procs::descendants(table, pid, crate::procs::started)
+                        .into_iter()
+                        .map(|pid| (pid, crate::procs::started(pid)))
+                        .collect()
+                }
+                _ => Vec::new(),
+            };
+            let group = process_group(session);
+            Ending {
+                session,
+                group,
+                below,
+                exited: false,
+            }
+        })
+        .collect();
+
+    hang_up(&mut ending);
+
+    for pane in &ending {
+        kill_group(pane.group);
+        // A process whose start time no longer matches is another one that
+        // was given its id since it was listed.
+        let still: Vec<u32> = pane
+            .below
+            .iter()
+            .filter(|(pid, born)| crate::procs::started(*pid) == *born)
+            .map(|(pid, _)| *pid)
+            .collect();
+        crate::procs::terminate(&still);
+    }
+    for pane in &mut ending {
+        if !pane.exited {
+            let _ = pane.session.child.kill();
+        }
+    }
+}
+
+/// Hangs up every pane's group, then polls until each pane's shell has ended
+/// and its group is empty, for `HANGUP_GRACE` at most.
+#[cfg(unix)]
+fn hang_up(ending: &mut [Ending<'_>]) {
+    for pane in ending.iter() {
+        match pane.group {
+            Some(group) => signal_group(Some(group), libc::SIGHUP),
+            // No group of its own: the shell alone, still ours to signal.
+            None => {
+                if let Some(pid) = pane.session.child.process_id() {
+                    unsafe {
+                        libc::kill(pid as libc::pid_t, libc::SIGHUP);
+                    }
+                }
+            }
+        }
+    }
+    let deadline = std::time::Instant::now() + HANGUP_GRACE;
+    loop {
+        let mut over = true;
+        for pane in ending.iter_mut() {
+            if !pane.exited {
+                pane.exited = matches!(pane.session.child.try_wait(), Ok(Some(_)));
+            }
+            over &= pane.exited && !group_alive(pane.group);
+        }
+        if over || std::time::Instant::now() >= deadline {
+            return;
+        }
+        std::thread::sleep(HANGUP_POLL);
+    }
+}
+
+/// Windows has no hangup to send: the shells are terminated straight away.
+#[cfg(not(unix))]
+fn hang_up(_ending: &mut [Ending<'_>]) {}
 
 /// A pane's process group, to kill whatever the shell left running behind it.
 ///
@@ -731,19 +935,19 @@ pub fn pty_kill(manager: &Arc<PtyManager>, id: String, tree: Option<bool>) -> Re
 /// somehow did not get its own session would otherwise make the kill the last
 /// thing the app does.
 #[cfg(unix)]
-fn process_group(session: &PtySession) -> Option<libc::pid_t> {
+fn process_group(session: &PtySession) -> Option<Group> {
     let pid = session.child.process_id()?;
     let group = unsafe { libc::getpgid(pid as libc::pid_t) };
     (group > 0 && group != unsafe { libc::getpgrp() }).then_some(group)
 }
 
 #[cfg(not(unix))]
-fn process_group(_session: &PtySession) -> Option<i32> {
+fn process_group(_session: &PtySession) -> Option<Group> {
     None
 }
 
 #[cfg(unix)]
-fn signal_group(group: Option<libc::pid_t>, signal: libc::c_int) {
+fn signal_group(group: Option<Group>, signal: libc::c_int) {
     if let Some(group) = group {
         unsafe {
             libc::killpg(group, signal);
@@ -751,14 +955,20 @@ fn signal_group(group: Option<libc::pid_t>, signal: libc::c_int) {
     }
 }
 
+/// Whether anything is left in a pane's group.
+#[cfg(unix)]
+fn group_alive(group: Option<Group>) -> bool {
+    group.is_some_and(|group| unsafe { libc::killpg(group, 0) } == 0)
+}
+
 /// Kills what is left of a pane's group, outright.
 #[cfg(unix)]
-fn kill_group(group: Option<libc::pid_t>) {
+fn kill_group(group: Option<Group>) {
     signal_group(group, libc::SIGKILL);
 }
 
 #[cfg(not(unix))]
-fn kill_group(_group: Option<i32>) {}
+fn kill_group(_group: Option<Group>) {}
 
 /// The tail of a live pane's output, for a window taking the pane over.
 pub fn pty_history(manager: &PtyManager, id: String) -> Result<PtyHistory, String> {
@@ -813,15 +1023,19 @@ pub async fn pty_has_children(
     .map_err(|e| e.to_string())?
 }
 
+/// How long quitting waits for the panes `pty_kill` is still reaping.
+const QUIT_REAP_WAIT: Duration = Duration::from_secs(1);
+
 /// Kills every live pane, with everything running in it: the app is ending
 /// (`Core::shutdown`), and nothing a pane started is to outlive it.
 ///
-/// Every pane's group is hung up first, all at once, as a terminal that
-/// closes would: what handles the hangup ends cleanly, and the shells that
-/// end on it are gone before each one's `kill` waits out its grace. Then each
-/// shell is killed (`Child::kill`), and what is left in the groups — what
-/// ignored the hangup, an agent started with `nohup` — is killed outright, as
-/// `pty_kill` does for one pane.
+/// As `pty_kill` with `tree`, for all the panes at once (`end`): hung up
+/// together and given one short grace, so Claude Code can write the last of
+/// its transcript and quitting stays quick, then killed — their groups, the
+/// shells, and the processes below each shell read off one process table,
+/// which is what reaches, on Windows, the ones a pane's console does not.
+/// Then the panes `pty_kill` was still reaping are waited for, a bounded
+/// moment, so their own last kill is not cut short by the app's exit.
 pub fn kill_all(manager: &PtyManager) {
     // Out of the registry and its lock: the kills wait, and nothing else
     // needs the panes now.
@@ -831,20 +1045,15 @@ pub fn kill_all(manager: &PtyManager) {
         .drain()
         .map(|(_, session)| session)
         .collect();
-    let groups: Vec<_> = sessions.iter().map(process_group).collect();
     for session in &sessions {
         session.live.store(false, Ordering::Relaxed);
     }
-    #[cfg(unix)]
-    for group in &groups {
-        signal_group(*group, libc::SIGHUP);
-    }
-    for session in &mut sessions {
-        let _ = session.child.kill();
-    }
-    for group in groups {
-        kill_group(group);
-    }
+    end(&mut sessions, true);
+    drop(sessions);
+    let registry = manager.lock();
+    let _ = manager
+        .reaped
+        .wait_timeout_while(registry, QUIT_REAP_WAIT, |r| !r.dying.is_empty());
 }
 
 #[cfg(test)]
@@ -1378,5 +1587,231 @@ mod tests {
         );
         pty_kill(&manager, "p-close".into(), None).unwrap();
         assert!(ends(pid), "sleep {pid} outlived its pane");
+    }
+
+    fn decode(chunks: &[&[u8]]) -> (Vec<String>, Vec<u8>) {
+        let mut pending = Vec::new();
+        let texts = chunks
+            .iter()
+            .map(|chunk| {
+                pending.extend_from_slice(chunk);
+                take_utf8(&mut pending)
+            })
+            .collect();
+        (texts, pending)
+    }
+
+    #[test]
+    fn utf8_after_an_invalid_byte_is_shown_with_its_chunk() {
+        // Latin-1 "café" then a prompt: nothing held back behind the é.
+        let (texts, pending) = decode(&[b"caf\xe9 done\n$ "]);
+        assert_eq!(texts, ["caf\u{FFFD} done\n$ "]);
+        assert!(pending.is_empty());
+
+        // Several invalid sequences, each replaced as from_utf8_lossy does.
+        let bytes = b"a\xffb\xc3(c\xe2\x82d\xf0\x9f\x98\x80e";
+        let (texts, pending) = decode(&[bytes]);
+        assert_eq!(texts, [String::from_utf8_lossy(bytes).into_owned()]);
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn utf8_cut_by_a_read_waits_for_the_next_one() {
+        let smile = "😀".as_bytes();
+        let (texts, pending) = decode(&[b"ok \xff ", &smile[..2]]);
+        assert_eq!(texts, ["ok \u{FFFD} ", ""]);
+        assert_eq!(pending, &smile[..2]);
+
+        let (texts, pending) = decode(&[&[b"x".as_slice(), &smile[..3]].concat(), &smile[3..]]);
+        assert_eq!(texts, ["x", "😀"]);
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn a_booked_id_is_nobody_elses_until_handed_back() {
+        let manager = PtyManager::default();
+        let first = reserve(&manager, "p-book").expect("free");
+        let second = reserve(&manager, "p-book").err().expect("booked");
+        assert!(second.contains("already starting"), "{second}");
+        assert!(!pane_alive(&manager, "p-book"), "booked is not alive");
+        // Another id is not held up by it.
+        drop(reserve(&manager, "p-other").expect("free"));
+        // A spawn that fails hands the id back.
+        drop(first);
+        assert!(manager.lock().starting.is_empty());
+        drop(reserve(&manager, "p-book").expect("free again"));
+    }
+
+    #[cfg(unix)]
+    fn sh(script: &str) -> crate::shells::ShellInfo {
+        crate::shells::ShellInfo {
+            id: "sh".into(),
+            label: "sh".into(),
+            program: "/bin/sh".into(),
+            args: args(&["-c", script]),
+        }
+    }
+
+    #[cfg(unix)]
+    fn spawn_sh(manager: &PtyManager, id: &str, script: &str) -> Result<Spawned, String> {
+        pty_spawn(
+            manager,
+            Box::new(|_| {}),
+            id.into(),
+            std::env::temp_dir().to_string_lossy().into_owned(),
+            Some(sh(script)),
+            80,
+            24,
+            None,
+            Some(false),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+    }
+
+    /// Two spawns of one id racing — a restart from the window and one from
+    /// the control API — start one shell, never two under one id.
+    #[cfg(unix)]
+    #[test]
+    fn two_spawns_of_one_id_start_one_shell() {
+        let manager = Arc::new(PtyManager::default());
+        let barrier = Arc::new(std::sync::Barrier::new(4));
+        let spawns: Vec<_> = (0..4)
+            .map(|_| {
+                let (manager, barrier) = (manager.clone(), barrier.clone());
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    spawn_sh(&manager, "p-race", "sleep 60")
+                })
+            })
+            .collect();
+        let results: Vec<_> = spawns.into_iter().map(|s| s.join().unwrap()).collect();
+        assert_eq!(
+            results.iter().filter(|r| r.is_ok()).count(),
+            1,
+            "{:?}",
+            results.iter().map(|r| r.as_ref().err()).collect::<Vec<_>>()
+        );
+        assert!(pty_alive(&manager, "p-race".into()));
+        assert!(manager.lock().starting.is_empty());
+        kill_all(&manager);
+    }
+
+    /// A writer that blocks until told to go on, as a pty does whose program
+    /// does not read.
+    #[cfg(unix)]
+    struct Stuck {
+        entered: std::sync::mpsc::Sender<()>,
+        release: Arc<(Mutex<bool>, Condvar)>,
+    }
+
+    #[cfg(unix)]
+    impl Write for Stuck {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            let _ = self.entered.send(());
+            let (go, moved) = &*self.release;
+            let go = go.lock().unwrap();
+            let _go = moved.wait_while(go, |go| !*go).unwrap();
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// One pane whose program does not read its input — a big paste into a
+    /// busy agent — blocks the writes to that pane, never another pane's
+    /// typing, nor a resize, a spawn or a check of who is alive.
+    #[cfg(unix)]
+    #[test]
+    fn a_pane_that_does_not_read_blocks_no_other_pane() {
+        let manager = Arc::new(PtyManager::default());
+        spawn_sh(&manager, "p-stuck", "sleep 60").expect("spawned");
+        spawn_sh(&manager, "p-free", "cat >/dev/null").expect("spawned");
+
+        let (entered, entering) = std::sync::mpsc::channel();
+        let release = Arc::new((Mutex::new(false), Condvar::new()));
+        let stuck: Box<dyn Write + Send> = Box::new(Stuck {
+            entered,
+            release: release.clone(),
+        });
+        manager
+            .lock()
+            .sessions
+            .get_mut("p-stuck")
+            .expect("live")
+            .writer = Arc::new(Mutex::new(stuck));
+
+        let blocked = {
+            let manager = manager.clone();
+            std::thread::spawn(move || pty_write(&manager, "p-stuck".into(), "x".repeat(65536)))
+        };
+        entering
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the write to the stuck pane started");
+
+        let (done, finished) = std::sync::mpsc::channel();
+        {
+            let manager = manager.clone();
+            std::thread::spawn(move || {
+                let wrote = pty_write(&manager, "p-free".into(), "hello\n".into());
+                let resized = pty_resize(&manager, "p-free".into(), 100, 30);
+                let alive = pty_alive(&manager, "p-free".into());
+                let _ = done.send((wrote, resized, alive));
+            });
+        }
+        let (wrote, resized, alive) = finished
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the other pane was not held up");
+        assert_eq!((wrote, resized, alive), (Ok(()), Ok(()), true));
+
+        *release.0.lock().unwrap() = true;
+        release.1.notify_all();
+        assert_eq!(blocked.join().unwrap(), Ok(()));
+        kill_all(&manager);
+    }
+
+    /// Quitting hangs the panes up and gives them a moment before the kill:
+    /// what writes something on the way out — Claude Code its transcript —
+    /// has the time to, and quitting stays quick.
+    #[cfg(unix)]
+    #[test]
+    fn quitting_gives_the_panes_a_moment_to_finish_writing() {
+        let file = std::env::temp_dir().join(format!("hangar-pty-flush-{}", std::process::id()));
+        let _ = std::fs::remove_file(&file);
+        let manager = PtyManager::default();
+        spawn_printing_a_pid(
+            &manager,
+            "p-flush",
+            &format!(
+                "trap 'sleep 0.1; echo flushed > {}; exit 0' HUP; echo started:$$; while :; do sleep 1; done",
+                file.display()
+            ),
+        );
+        let started = std::time::Instant::now();
+        kill_all(&manager);
+        let took = started.elapsed();
+        let written = std::fs::read_to_string(&file).unwrap_or_default();
+        let _ = std::fs::remove_file(&file);
+        assert_eq!(written.trim(), "flushed");
+        assert!(took < Duration::from_secs(1), "quitting took {took:?}");
+    }
+
+    /// Quitting does not leave behind a pane `pty_kill` was still reaping.
+    #[cfg(unix)]
+    #[test]
+    fn quitting_waits_for_the_panes_being_reaped() {
+        let manager = Arc::new(PtyManager::default());
+        spawn_printing_a_pid(
+            &manager,
+            "p-reaping",
+            "trap '' HUP; sleep 60 & echo started:$!; wait",
+        );
+        pty_kill(&manager, "p-reaping".into(), None).unwrap();
+        kill_all(&manager);
+        assert!(manager.lock().dying.is_empty());
     }
 }
