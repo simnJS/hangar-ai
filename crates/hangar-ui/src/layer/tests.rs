@@ -241,3 +241,67 @@ mod dock_interaction {
         assert!(!messages(ui).contains(&Msg::Page));
     }
 }
+
+mod stacking {
+    use iced::widget::{container, scrollable};
+    use iced::{Color, Element, Length};
+
+    use super::*;
+    use crate::testing::simulate;
+
+    fn block<'a>(color: Color, width: f32, height: f32) -> Element<'a, ()> {
+        container("")
+            .width(width)
+            .height(height)
+            .style(move |_| container::background(color))
+            .into()
+    }
+
+    /// A dialog opened over a dialog that holds a scrollable is drawn over
+    /// the scrollable's content, which iced draws in a render layer of its own.
+    #[test]
+    fn a_dialog_over_a_dialog_with_a_scrollable_hides_the_scrolled_content() {
+        const RED: Color = Color::from_rgb(1.0, 0.0, 0.0);
+        const BLUE: Color = Color::from_rgb(0.0, 0.0, 1.0);
+
+        let lower = scrollable(block(RED, 400.0, 800.0))
+            .width(Length::Fixed(400.0))
+            .height(Length::Fixed(400.0));
+        let under = modal(Element::from(container("")), Some(Element::from(lower)));
+        let over = modal(Element::from(under), Some(block(BLUE, 100.0, 100.0)));
+
+        let mut ui = simulate(Element::from(over));
+        let snapshot = ui.snapshot(&iced::Theme::Dark).expect("it draws");
+        let dir = std::env::temp_dir().join(format!("hangar-layer-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        snapshot
+            .matches_image(dir.join("stacked"))
+            .expect("written");
+        let file = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .next()
+            .expect("the png")
+            .path();
+        let mut reader =
+            png::Decoder::new(std::io::BufReader::new(std::fs::File::open(file).unwrap()))
+                .read_info()
+                .unwrap();
+        let mut bytes = vec![0; reader.output_buffer_size().unwrap()];
+        let info = reader.next_frame(&mut bytes).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // The snapshot is drawn at twice the size; the dialog is at the centre.
+        let pixel = |x: u32, y: u32| {
+            let at = (y as usize * info.width as usize + x as usize) * 4;
+            &bytes[at..at + 3]
+        };
+        let (cx, cy) = (info.width / 2, info.height / 2);
+        // Inside the upper dialog: blue, never the red of the one under it.
+        assert_eq!(pixel(cx, cy), [0, 0, 255], "the upper dialog is opaque");
+        assert_eq!(pixel(cx + 60, cy), [0, 0, 255]);
+        // Beside it, the lower dialog's content is under the veil.
+        let beside = pixel(cx + 2 * 150, cy);
+        assert!(beside[0] > beside[2], "the lower dialog shows around it");
+    }
+}

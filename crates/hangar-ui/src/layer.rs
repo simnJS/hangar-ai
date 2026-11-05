@@ -718,18 +718,23 @@ impl<M: Clone> overlay::Overlay<M, iced::Theme, iced::Renderer> for LayerOverlay
         layout: Layout<'_>,
         cursor: mouse::Cursor,
     ) {
-        if let Some(veil) = self.settings.veil {
-            container::draw_background(renderer, &veil(theme), layout.bounds());
-        }
-        self.content.as_widget().draw(
-            self.tree,
-            renderer,
-            theme,
-            style,
-            Self::panel(layout),
-            cursor,
-            &Rectangle::with_size(Size::INFINITE),
-        );
+        // A render layer of its own: iced draws the overlays of one level in
+        // the same layer, quads before text, and a scrollable in a lower
+        // overlay opens a layer after it, which would land over this one.
+        iced::advanced::Renderer::with_layer(renderer, layout.bounds(), |renderer| {
+            if let Some(veil) = self.settings.veil {
+                container::draw_background(renderer, &veil(theme), layout.bounds());
+            }
+            self.content.as_widget().draw(
+                self.tree,
+                renderer,
+                theme,
+                style,
+                Self::panel(layout),
+                cursor,
+                &Rectangle::with_size(Size::INFINITE),
+            );
+        });
     }
 
     fn operate(

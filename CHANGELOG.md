@@ -8,6 +8,12 @@ change behaviour as well as add to it. The 0.x history is grouped by minor versi
 Every release, with its installers, is on the
 [releases page](https://github.com/hangar-ai/hangar/releases).
 
+## [Unreleased]
+
+### Fixed
+
+- A dialog opened over another one, such as a kit's activation dialog over the settings, is drawn opaque and on top: the settings' scrolled content no longer shows through it.
+
 ## [2.0.0] - 2026-11-05
 
 Hangar, rewritten as a native app. It keeps your data, your workspaces and the features
