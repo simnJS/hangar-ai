@@ -456,20 +456,22 @@ impl<M: Clone> Menu<'_, M> {
         self.content_height().min(self.max_height)
     }
 
-    fn max_scroll(&self) -> f32 {
-        (self.content_height() - self.visible_height()).max(0.0)
+    /// How far the content can scroll in a box `view` tall: the height the
+    /// menu was really given, which a short window keeps under
+    /// `visible_height`.
+    fn max_scroll(&self, view: f32) -> f32 {
+        (self.content_height() - view).max(0.0)
     }
 
     /// Scrolls just far enough for a line to be in view.
-    fn reveal(&self, state: &mut State, index: usize) {
+    fn reveal(&self, state: &mut State, index: usize, view: f32) {
         let (top, height) = self.extent(index);
-        let view = self.visible_height();
         if top - PAD < state.scroll {
             state.scroll = (top - PAD).max(0.0);
         } else if top + height + PAD > state.scroll + view {
             state.scroll = top + height + PAD - view;
         }
-        state.scroll = state.scroll.clamp(0.0, self.max_scroll());
+        state.scroll = state.scroll.clamp(0.0, self.max_scroll(view));
     }
 
     /// What picking the line (or one of its actions) sends.
@@ -530,6 +532,8 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Menu<'_, M> {
     ) {
         let state = tree.state.downcast_mut::<State>();
         let bounds = layout.bounds();
+        // The entries may have shrunk under a scrolled menu.
+        state.scroll = state.scroll.clamp(0.0, self.max_scroll(bounds.height));
         let at = cursor.position_in(bounds);
         let hit =
             at.and_then(|point| self.hit(point, state.scroll, bounds.width, state.highlighted));
@@ -567,12 +571,12 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Menu<'_, M> {
                 }
             }
             Event::Mouse(mouse::Event::WheelScrolled { delta }) if at.is_some() => {
-                if self.max_scroll() > 0.0 {
+                if self.max_scroll(bounds.height) > 0.0 {
                     let lines = match delta {
                         mouse::ScrollDelta::Lines { y, .. } => y * LINE,
                         mouse::ScrollDelta::Pixels { y, .. } => *y,
                     };
-                    state.scroll = (state.scroll - lines).clamp(0.0, self.max_scroll());
+                    state.scroll = (state.scroll - lines).clamp(0.0, self.max_scroll(bounds.height));
                     shell.request_redraw();
                 }
                 shell.capture_event();
@@ -583,7 +587,7 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Menu<'_, M> {
                         move_selectable(state.highlighted, &self.selectable(), movement, true);
                     if let Some(next) = next {
                         state.highlighted = Some(next);
-                        self.reveal(state, next);
+                        self.reveal(state, next, bounds.height);
                     }
                     shell.request_redraw();
                     shell.capture_event();
@@ -632,6 +636,7 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Menu<'_, M> {
         let state = tree.state.downcast_ref::<State>();
         let bounds = layout.bounds();
         let c = &self.theme.colors;
+        let scroll = state.scroll.clamp(0.0, self.max_scroll(bounds.height));
 
         container::draw_background(
             renderer,
@@ -648,7 +653,7 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Menu<'_, M> {
         let icons = self.has_icons();
         let checks = self.has_checks();
         renderer.with_layer(inner, |renderer| {
-            let mut top = bounds.y + PAD - state.scroll;
+            let mut top = bounds.y + PAD - scroll;
             for (index, entry) in self.entries.iter().enumerate() {
                 let height = entry.height();
                 let row = Rectangle {
@@ -718,7 +723,7 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Menu<'_, M> {
         let (top, height) = self.extent(index);
         let line = Rectangle {
             x: bounds.x + translation.x,
-            y: bounds.y + translation.y + top - state.scroll,
+            y: bounds.y + translation.y + top - state.scroll.clamp(0.0, self.max_scroll(bounds.height)),
             width: bounds.width,
             height,
         };
