@@ -33,7 +33,11 @@ pub(crate) fn encode_project_dir(cwd: &str) -> String {
 const LABEL_HEAD_BYTES: u64 = 256 * 1024;
 
 /// Labels already read, by transcript: valid while its size and mtime hold.
-type LabelCache = HashMap<PathBuf, (u64, u64, String)>;
+/// The last field is when it was stored, to drop the oldest first.
+type LabelCache = HashMap<PathBuf, (u64, u64, String, u64)>;
+
+/// Labels kept at most; the oldest stored go first.
+const LABEL_CACHE_MAX: usize = 2000;
 
 fn label_cache() -> &'static Mutex<LabelCache> {
     static CACHE: OnceLock<Mutex<LabelCache>> = OnceLock::new();
@@ -86,19 +90,36 @@ fn label_from_jsonl(path: &Path) -> String {
     String::new()
 }
 
+fn insert_label(cache: &mut LabelCache, path: &Path, size: u64, modified_ms: u64, label: &str) {
+    if cache.len() >= LABEL_CACHE_MAX && !cache.contains_key(path) {
+        let oldest = cache
+            .iter()
+            .min_by_key(|(_, (_, _, _, stored))| *stored)
+            .map(|(key, _)| key.clone());
+        if let Some(key) = oldest {
+            cache.remove(&key);
+        }
+    }
+    let stored = cache.values().map(|v| v.3).max().map_or(0, |max| max + 1);
+    cache.insert(
+        path.to_path_buf(),
+        (size, modified_ms, label.to_string(), stored),
+    );
+}
+
 /// `label_from_jsonl`, not read again while the file's size and mtime hold.
 fn cached_label(path: &Path, size: u64, modified_ms: u64) -> String {
     let hit = label_cache()
         .lock()
         .ok()
         .and_then(|c| c.get(path).cloned())
-        .filter(|(s, m, _)| *s == size && *m == modified_ms);
-    if let Some((_, _, label)) = hit {
+        .filter(|(s, m, _, _)| *s == size && *m == modified_ms);
+    if let Some((_, _, label, _)) = hit {
         return label;
     }
     let label = label_from_jsonl(path);
     if let Ok(mut cache) = label_cache().lock() {
-        cache.insert(path.to_path_buf(), (size, modified_ms, label.clone()));
+        insert_label(&mut cache, path, size, modified_ms, &label);
     }
     label
 }
@@ -432,6 +453,18 @@ mod tests {
         }
         fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).expect("chmod");
         fs::remove_dir_all(&projects).ok();
+    }
+
+    #[test]
+    fn the_label_cache_drops_its_oldest_entry_when_full() {
+        let mut cache = LabelCache::new();
+        for i in 0..LABEL_CACHE_MAX {
+            insert_label(&mut cache, Path::new(&format!("/t/{i}")), 1, 1, "l");
+        }
+        insert_label(&mut cache, Path::new("/t/new"), 1, 1, "l");
+        assert_eq!(cache.len(), LABEL_CACHE_MAX);
+        assert!(!cache.contains_key(Path::new("/t/0")));
+        assert!(cache.contains_key(Path::new("/t/new")));
     }
 
     #[test]
