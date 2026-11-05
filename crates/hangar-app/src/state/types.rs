@@ -313,8 +313,11 @@ pub struct OrchestrationSettings {
     /// workspace's own (`hangar_core::build_cache`); the delivery checks have
     /// a folder of theirs whatever this says. Off by default: worktrees
     /// building different branches in one folder can mix their builds.
-    /// Missing reads false. Hangar 1.x does not know the key and, like any other it
-    /// does not read, leaves it alone.
+    /// Missing reads false, and false is not written: a file that never turned
+    /// it on stays as it was (what 1.x and the round-trip tests expect). Hangar
+    /// 1.x does not know the key and, like any other it does not read, leaves
+    /// it alone.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub shared_build_cache: bool,
 }
 
