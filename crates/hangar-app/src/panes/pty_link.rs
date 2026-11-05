@@ -402,13 +402,26 @@ mod tests {
 
         // A command typed for an agent is followed until its echo shows.
         assert!(link.last_output().is_some(), "the shell's output is dated");
+        // Keys that reached the pane first are wiped off the line, and the
+        // command runs as typed.
+        link.write(b"etc".to_vec());
         let command = "echo launched-$((6*7))";
-        link.type_command(command, format!("{command}\r"));
+        link.type_command(
+            command,
+            format!("{}{command}\r", crate::panes::launch::CLEAR_LINE),
+        );
         let deadline = Instant::now() + Duration::from_secs(10);
-        while Instant::now() < deadline && !link.echoed() {
+        let ran = || {
+            link.lock()
+                .read_lines(50)
+                .iter()
+                .any(|line| line.trim_end() == "launched-42")
+        };
+        while Instant::now() < deadline && !(link.echoed() && ran()) {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert!(link.echoed(), "the command's echo was seen");
+        assert!(ran(), "the command ran, without the keys typed before it");
         let _ = hangar_core::pty::pty_kill(&pty, id, None);
     }
 }

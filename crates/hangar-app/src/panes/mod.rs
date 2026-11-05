@@ -31,7 +31,7 @@ mod gauge;
 mod grid;
 mod header;
 mod hub;
-mod launch;
+pub(crate) mod launch;
 mod look;
 mod press;
 mod pty_link;
@@ -185,8 +185,8 @@ pub enum Msg {
     /// The machine's shells are known: the shells that were due start.
     ShellsDetected,
     /// The check of a launch: the attempt it checked (from 0), whether the
-    /// command was echoed, whether the shell runs something.
-    LaunchChecked(PaneId, u8, bool, bool),
+    /// shell runs something.
+    LaunchChecked(PaneId, u8, bool),
     /// Whether the session a role's restart resumes exists.
     RoleRestart(WsId, PaneId, String, bool),
     FlushDrops,
@@ -296,8 +296,8 @@ fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Messag
             Some(rt) => controller::launch_ready(rt, m, sv, exists, known),
             None => Task::none(),
         },
-        Msg::LaunchChecked(pane, attempt, echoed, running) => match st.panes.get_mut(&pane) {
-            Some(rt) => controller::launch_checked(rt, sv, attempt, echoed, running),
+        Msg::LaunchChecked(pane, attempt, running) => match st.panes.get_mut(&pane) {
+            Some(rt) => controller::launch_checked(rt, sv, attempt, running),
             None => Task::none(),
         },
         Msg::ShellsDetected => {

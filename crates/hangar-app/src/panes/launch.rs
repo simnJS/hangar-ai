@@ -12,10 +12,15 @@
 //! `launchDelayMs`, never later than [`MAX_EXTRA`] after it, so a shell that
 //! prints nothing still gets its command.
 //!
-//! Typed, the command has to show: the shell echoes what it reads. When no
-//! echo comes and the shell runs nothing either, it is typed once more; when
-//! that is lost too, the pane says so in the log instead of sitting on a
-//! bare prompt.
+//! The line is emptied first (`^U`, [`CLEAR_LINE`]): keys that reached the
+//! pane before the launch (the focused pane of a window that opens takes
+//! what is being typed) would otherwise be glued to the command's front.
+//!
+//! Typed, the command has to run: the shell then runs a program of its own.
+//! Its echo only says when to look ([`RUN_WAIT`] after it, [`ECHO_WAIT`] at
+//! most): an echoed command can still fail. When the shell runs nothing, the
+//! command is typed once more; when that is lost too, the pane says so in
+//! the log instead of sitting on a bare prompt.
 
 use std::time::Duration;
 
@@ -29,6 +34,13 @@ pub const MAX_EXTRA: Duration = Duration::from_secs(3);
 /// How long the echo of a typed command is waited for before the shell is
 /// asked whether it runs something.
 pub const ECHO_WAIT: Duration = Duration::from_secs(3);
+
+/// How long after the echo the shell is given to start the program.
+pub const RUN_WAIT: Duration = Duration::from_millis(500);
+
+/// What empties the shell's line before a command: the line kill of a
+/// terminal and of the unix line editors. PowerShell's has no such key.
+pub const CLEAR_LINE: &str = if cfg!(unix) { "\x15" } else { "" };
 
 /// How often a wait looks again.
 pub const POLL: Duration = Duration::from_millis(25);
@@ -68,17 +80,18 @@ pub fn settle(since_spawn: Duration, since_output: Option<Duration>, min: Durati
 /// What a launch's check found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Check {
-    /// The command was echoed, or the shell runs something: it was read.
+    /// The shell runs a program: the command was read.
     Ran,
-    /// Neither, on the first attempt: type it again.
+    /// Nothing runs, on the first attempt: type it again.
     Retry,
-    /// Neither, twice: say so.
+    /// Nothing runs, twice: say so.
     Lost,
 }
 
-/// What to do once the echo was waited for. `attempt` counts from 0.
-pub fn check(echoed: bool, running: bool, attempt: u8) -> Check {
-    if echoed || running {
+/// What to do once the shell was asked whether it runs something.
+/// `attempt` counts from 0.
+pub fn check(running: bool, attempt: u8) -> Check {
+    if running {
         Check::Ran
     } else if attempt == 0 {
         Check::Retry
@@ -225,11 +238,10 @@ mod tests {
 
     #[test]
     fn a_lost_command_is_typed_again_once_then_reported() {
-        assert_eq!(check(true, false, 0), Check::Ran);
-        assert_eq!(check(false, true, 0), Check::Ran);
-        assert_eq!(check(false, false, 0), Check::Retry);
-        assert_eq!(check(false, false, 1), Check::Lost);
-        assert_eq!(check(true, false, 1), Check::Ran);
+        assert_eq!(check(true, 0), Check::Ran);
+        assert_eq!(check(false, 0), Check::Retry);
+        assert_eq!(check(false, 1), Check::Lost);
+        assert_eq!(check(true, 1), Check::Ran);
     }
 
     const COMMAND: &str =

@@ -757,8 +757,9 @@ async fn transcript_exists(session: String) -> Option<bool> {
     }
 }
 
-/// Waits for the echo of the command just typed, and asks the shell whether
-/// it runs something when none came.
+/// Waits for the echo of the command just typed (a little longer once it
+/// shows, for the program to start), then asks the shell whether it runs
+/// something.
 fn check_launch(rt: &mut PaneRt, sv: &Services, attempt: u8) -> Task<Message> {
     let link = rt.link.clone();
     let pty = sv.core().pty().clone();
@@ -766,63 +767,56 @@ fn check_launch(rt: &mut PaneRt, sv: &Services, attempt: u8) -> Task<Message> {
     let (task, handle) = Task::perform(
         async move {
             let deadline = Instant::now() + launch::ECHO_WAIT;
-            while Instant::now() < deadline {
-                if link.echoed() {
-                    return (true, true);
-                }
+            while Instant::now() < deadline && !link.echoed() {
                 tokio::time::sleep(launch::POLL).await;
+            }
+            if link.echoed() {
+                tokio::time::sleep(launch::RUN_WAIT).await;
             }
             // Unreadable is not "nothing runs": the command is not typed
             // into an agent that may have started.
-            let running = hangar_core::pty::pty_has_children(pty, vec![link.id.clone()])
+            hangar_core::pty::pty_has_children(pty, vec![link.id.clone()])
                 .await
-                .map_or(true, |running| !running.is_empty());
-            (link.echoed(), running)
+                .map_or(true, |running| !running.is_empty())
         },
-        move |(echoed, running)| {
-            Message::Panes(Msg::LaunchChecked(id.clone(), attempt, echoed, running))
-        },
+        move |running| Message::Panes(Msg::LaunchChecked(id.clone(), attempt, running)),
     )
     .abortable();
     rt.launch = Some(handle.abort_on_drop());
     task
 }
 
+/// Types `command` on an emptied line.
+fn type_line(rt: &PaneRt, command: &str) {
+    rt.link
+        .type_command(command, format!("{}{command}\r", launch::CLEAR_LINE));
+}
+
 /// What the check of a launch found: nothing to do, the command typed once
 /// more, or the loss said.
-pub fn launch_checked(
-    rt: &mut PaneRt,
-    sv: &Services,
-    attempt: u8,
-    echoed: bool,
-    running: bool,
-) -> Task<Message> {
+pub fn launch_checked(rt: &mut PaneRt, sv: &Services, attempt: u8, running: bool) -> Task<Message> {
     rt.launch = None;
     let Some(command) = rt.typed.clone() else {
         return Task::none();
     };
-    match launch::check(echoed, running, attempt) {
+    match launch::check(running, attempt) {
         Check::Ran => {
             rt.typed = None;
             Task::none()
         }
         Check::Retry => {
             eprintln!(
-                "pane {}: the agent's command did not show in {:?}; typing it again",
+                "pane {}: the agent's command did not start (echoed: {}); typing it again",
                 rt.link.id,
-                launch::ECHO_WAIT
+                rt.link.echoed()
             );
-            // What the shell may hold of the first attempt goes first (^U,
-            // the line kill of a terminal and of the line editors).
-            let clear = if cfg!(unix) { "\x15" } else { "" };
-            rt.link
-                .type_command(&command, format!("{clear}{command}\r"));
+            type_line(rt, &command);
             check_launch(rt, sv, attempt + 1)
         }
         Check::Lost => {
             rt.typed = None;
             eprintln!(
-                "pane {}: the agent's command was typed twice and never ran: {command}",
+                "pane {}: the agent's command was typed twice and never started: {command}",
                 rt.link.id
             );
             Task::none()
@@ -886,7 +880,7 @@ pub fn launch_ready(
         if let Some(id) = &resume {
             m.live.panes_logic.claim_session(id);
         }
-        rt.link.type_command(&command, format!("{command}\r"));
+        type_line(rt, &command);
         rt.typed = Some(command);
         check = check_launch(rt, sv, 0);
         // Dates the launch for the pane's agent state (P4 ignores it where
@@ -926,8 +920,7 @@ pub fn launch_ready(
 /// The login pane's shell has settled.
 pub fn login_ready(rt: &mut PaneRt) {
     rt.launch = None;
-    let command = crate::accounts::LOGIN_COMMAND;
-    rt.link.type_command(command, format!("{command}\r"));
+    type_line(rt, crate::accounts::LOGIN_COMMAND);
 }
 
 /// The workspace and the pane of `pane`, if both still exist.
