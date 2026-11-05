@@ -1379,7 +1379,7 @@
   "orch.permission.bypassPermissions": "Allow everything",
   "orch.permissionHint": "For the orchestrator and its workers. A worker nobody watches stops at every question this mode leaves it; Hangar's own tools are always allowed.",
   "orch.buildCache": "Shared build cache",
-  "orch.buildCacheHint": "Workers and delivery checks build into one folder of this workspace, so dependencies are compiled once. Applies to new workers; Cargo projects only.",
+  "orch.buildCacheHint": "Workers and delivery checks build into one folder of this workspace, so dependencies are compiled once. Applies to new workers; Cargo projects only. Workers building different branches in one shared folder can mix their builds: turn it on only if they rarely build at once. Delivery checks always have a build folder of their own.",
   "orch.buildCacheSize": "Build cache size",
   "orch.buildCacheMeasuring": "Measuring…",
   "orch.buildCacheEmpty": "Empty",

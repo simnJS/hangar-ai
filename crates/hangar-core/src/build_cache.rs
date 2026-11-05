@@ -1,4 +1,5 @@
-//! One build cache per workspace, shared by its workers and its delivery checks.
+//! One build cache per workspace for its workers (off unless the person turns it on),
+//! and one folder of its own for its delivery checks (`check_dir_for`).
 //!
 //! Why:
 //! - **Dependencies once.** A worker used to build in its own target folder and
@@ -76,6 +77,40 @@ pub fn env_for(workspace_root: &Path, workspace_id: &str, enabled: bool) -> Vec<
     env
 }
 
+/// The folder the delivery checks of a workspace build in: a sibling of
+/// `dir_for`'s, `%LOCALAPPDATA%\hangar\k\<8 hex>`, short for the same reason.
+///
+/// Never the workers' folder. Worktrees of one workspace that share a target
+/// folder give their workspace crates the same artifact names, and Cargo only
+/// compares source mtimes by package-relative path, so a tree can silently
+/// reuse another branch's build of the same crate. The check runs in one
+/// folder of its own that no worker builds in, always on the same path.
+pub fn check_dir_for(workspace_id: &str) -> PathBuf {
+    let base = match std::env::var_os("HANGAR_DATA_ROOT").filter(|value| !value.is_empty()) {
+        Some(root) => PathBuf::from(root),
+        None => system_base(),
+    };
+    base.join("hangar").join("k").join(key_for(workspace_id))
+}
+
+/// What a delivery check starts with so that it builds into its own folder
+/// (`check_dir_for`): used always, whatever the workers' cache toggle says,
+/// because that folder is shared with nothing. Empty when the root holds
+/// nothing a cache is known for.
+pub fn check_env_for(workspace_root: &Path, workspace_id: &str) -> Vec<(String, String)> {
+    let mut env = Vec::new();
+    if workspace_root.join("Cargo.toml").is_file() {
+        env.push((
+            "CARGO_TARGET_DIR".to_string(),
+            check_dir_for(workspace_id)
+                .join("target")
+                .to_string_lossy()
+                .into_owned(),
+        ));
+    }
+    env
+}
+
 /// The bytes under `dir`, 0 when it does not exist. Walks the folder: call it
 /// off the UI thread. Links are not followed.
 pub fn size_of(dir: &Path) -> u64 {
@@ -111,6 +146,23 @@ pub fn empty(dir: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_check_builds_in_a_folder_the_workers_never_share() {
+        let root = std::env::temp_dir().join(format!("hangar-check-env-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        assert!(check_env_for(&root, "w1").is_empty());
+        std::fs::write(root.join("Cargo.toml"), "[workspace]\n").unwrap();
+        let env = check_env_for(&root, "w1");
+        assert_eq!(env.len(), 1);
+        assert_eq!(env[0].0, "CARGO_TARGET_DIR");
+        let target = PathBuf::from(&env[0].1);
+        assert!(target.starts_with(check_dir_for("w1")));
+        assert_ne!(check_dir_for("w1"), dir_for("w1"));
+        assert!(!target.starts_with(dir_for("w1")));
+        assert_ne!(check_dir_for("w1"), check_dir_for("w2"));
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     #[test]
     fn the_key_is_stable_and_eight_hex() {

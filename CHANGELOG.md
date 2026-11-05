@@ -112,12 +112,15 @@ around the terminals, and needs a fraction of the memory and processor it did.
   defaults, 3 workers and 2 attempts.
 - **Faster orchestration.** The delivery check was the slowest step, and most of it was
   rebuilding the same code.
-  - **A shared build cache.** The workers of a workspace and its delivery check build into
-    one cache folder, so a build one of them did is not done again by the next. It has a
-    toggle in the orchestration settings, shows its size, and can be emptied there.
-  - **The check runs in a folder of its own that stays.** One per workspace, with a short
-    path, put back on each merge's files and cleaned of what the last check left. Rust
-    keys a workspace's own crates by their path, so only what changed is rebuilt now.
+  - **The check has a build folder of its own.** Every check of a workspace runs in one
+    folder with a short path (no more paths too long to build in on Windows), put back on
+    each merge's files and cleaned of what the last check left, and builds into a target
+    folder only checks use. Rust keys a workspace's own crates by their path, so only what
+    changed is rebuilt now.
+  - **A shared build cache for the workers, if you want it.** It is off by default:
+    workers building different branches in one shared folder can mix their builds, so turn
+    it on in the orchestration settings only if they rarely build at once. The settings
+    show its size and can empty it.
   - **Workers build what they touch.** They iterate with targeted builds and tests, and
     the full check runs once per delivery.
   - **A check that could not fail is skipped.** A delivery that changes only

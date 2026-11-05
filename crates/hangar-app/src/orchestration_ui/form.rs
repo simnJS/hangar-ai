@@ -228,7 +228,7 @@ mod tests {
             draft_of(&Workspace::default()),
             Draft {
                 auto_merge: base.auto_merge,
-                shared_build_cache: true,
+                shared_build_cache: false,
                 check_command: String::new(),
                 orchestrator_model: base.orchestrator_model,
                 worker_model: base.worker_model,

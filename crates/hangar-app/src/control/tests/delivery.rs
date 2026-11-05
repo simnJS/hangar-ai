@@ -547,7 +547,7 @@ async fn answers_at_once_and_runs_the_delivery_with_the_workspaces_settings() {
 }
 
 #[tokio::test]
-async fn hands_the_check_the_shared_build_cache_unless_it_is_off() {
+async fn hands_the_check_its_own_build_folder_whatever_the_workers_cache_says() {
     let s = setup();
     let dir = std::env::temp_dir().join(format!("hangar-build-env-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -555,22 +555,17 @@ async fn hands_the_check_the_shared_build_cache_unless_it_is_off() {
     let cwd = dir.to_string_lossy().into_owned();
     s.fake.patch("w1", |ws| ws.cwd = cwd.clone());
     s.now(Kind::Conflict, "conflict", |_| {});
+    let own = hangar_core::build_cache::check_env_for(&dir, "w1");
+    assert_eq!(own.len(), 1);
 
-    s.submit(json!({})).await.unwrap();
-    s.fake.settle().await;
-    let on = s.runs().last().unwrap().build_env.clone();
-    assert_eq!(
-        on,
-        hangar_core::build_cache::env_for(&dir, "w1", true),
-        "{on:?}"
-    );
-    assert_eq!(on.len(), 1);
-    assert_eq!(on[0].0, "CARGO_TARGET_DIR");
-
-    s.settings(|settings| settings.shared_build_cache = false);
-    s.submit(json!({})).await.unwrap();
-    s.fake.settle().await;
-    assert!(s.runs().last().unwrap().build_env.is_empty());
+    for shared in [false, true] {
+        s.settings(|settings| settings.shared_build_cache = shared);
+        s.submit(json!({})).await.unwrap();
+        s.fake.settle().await;
+        let env = s.runs().last().unwrap().build_env.clone();
+        assert_eq!(env, own, "toggle {shared}");
+        assert_ne!(env, hangar_core::build_cache::env_for(&dir, "w1", true));
+    }
     let _ = std::fs::remove_dir_all(dir);
 }
 

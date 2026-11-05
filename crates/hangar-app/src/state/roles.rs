@@ -149,21 +149,21 @@ mod tests {
     }
 
     #[test]
-    fn a_file_without_the_build_cache_field_reads_true() {
+    fn a_file_without_the_build_cache_field_reads_false() {
         let saved: OrchestrationSettings = serde_json::from_str(r#"{"autoMerge": false}"#).unwrap();
-        assert!(saved.shared_build_cache);
+        assert!(!saved.shared_build_cache);
         assert!(!saved.auto_merge);
         let mut w = ws(vec![]);
         w.orchestration = Some(saved);
-        assert!(orchestration_of(&w).shared_build_cache);
+        assert!(!orchestration_of(&w).shared_build_cache);
 
         w.orchestration = Some(OrchestrationSettings {
-            shared_build_cache: false,
+            shared_build_cache: true,
             ..OrchestrationSettings::default()
         });
-        assert!(!orchestration_of(&w).shared_build_cache);
+        assert!(orchestration_of(&w).shared_build_cache);
         let json = serde_json::to_value(orchestration_of(&w)).unwrap();
-        assert_eq!(json["sharedBuildCache"], false);
+        assert_eq!(json["sharedBuildCache"], true);
     }
 
     #[test]

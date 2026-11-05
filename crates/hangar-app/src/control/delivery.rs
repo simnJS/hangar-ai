@@ -840,11 +840,9 @@ async fn deliver(
         reuse: landing,
         port_base: pane.port_base,
         workspace_id: ws.id.clone(),
-        build_env: hangar_core::build_cache::env_for(
-            std::path::Path::new(&ws.cwd),
-            &ws.id,
-            settings.shared_build_cache,
-        ),
+        // The check's own build folder, whatever the workers' cache toggle
+        // says: it is shared with no worker, so it cannot mix their builds.
+        build_env: hangar_core::build_cache::check_env_for(std::path::Path::new(&ws.cwd), &ws.id),
         check_root: None,
         data_dir: None,
     };

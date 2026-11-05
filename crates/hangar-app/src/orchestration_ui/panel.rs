@@ -711,14 +711,14 @@ mod tests {
     }
 
     #[test]
-    fn the_switch_is_part_of_the_draft_and_off_is_what_gets_saved() {
+    fn the_switch_is_part_of_the_draft_and_on_is_what_gets_saved() {
         let mut model = shop(false);
         let mut st = opened(&model);
-        assert!(st.panel.as_ref().unwrap().draft.shared_build_cache);
-        let _ = update(&mut st, &mut model, PanelMsg::BuildCache(false));
+        assert!(!st.panel.as_ref().unwrap().draft.shared_build_cache);
+        let _ = update(&mut st, &mut model, PanelMsg::BuildCache(true));
         let draft = &st.panel.as_ref().unwrap().draft;
-        assert!(!draft.shared_build_cache);
-        assert!(!normalize_draft(draft).shared_build_cache);
+        assert!(draft.shared_build_cache);
+        assert!(normalize_draft(draft).shared_build_cache);
         // It is a change to save, and not the defaults any more.
         assert!(!same_settings(
             &normalize_draft(draft),
