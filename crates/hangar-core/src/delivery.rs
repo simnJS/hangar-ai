@@ -960,7 +960,7 @@ fn remember_passed(request: &Delivery, repo: &str, tree: &str, line: &str) {
 
 /* ── What a task owns ──────────────────────────────────────────── */
 
-mod owns;
+pub(crate) mod owns;
 
 /* ── The check ─────────────────────────────────────────────────── */
 

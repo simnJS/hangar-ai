@@ -7,11 +7,10 @@
 //! (`src/{lib,components}`), `[…]` classes, case, and a folder owning what is
 //! under it.
 //!
-//! The pattern rules below are a faithful copy of the board's
-//! (`expand_braces`, `owned_segments`, `glob_from`, `char_class` in board.rs,
-//! which another task owned when this was written): `board.rs` should call
-//! this module instead, and drop its copy of them. `tests::agrees_with_the_board`
-//! runs one table through both until it does.
+//! The board (`board::owns_overlap`) reads patterns with the functions of this
+//! module (`expand_braces`, `owned_segments`, `glob_matches`): there is one
+//! copy of the rules. `tests::agrees_with_the_board` keeps the delivery's
+//! `covers` and the board's `owns_overlap` answering one table the same way.
 
 /// Past this many alternatives a brace pattern is read no further: a pattern
 /// that large is a mistake, and the ones read already decide most overlaps.
@@ -22,7 +21,7 @@ const MAX_ALTERNATIVES: usize = 64;
 const MAX_SEGMENTS: usize = 32;
 
 /// `src/{lib,components}/x` as the two patterns it stands for.
-fn expand_braces(pattern: &str) -> Vec<String> {
+pub(crate) fn expand_braces(pattern: &str) -> Vec<String> {
     let chars: Vec<char> = pattern.chars().collect();
     let mut depth = 0;
     let mut open = 0;
@@ -86,7 +85,7 @@ fn split_alternatives(inner: &[char]) -> Vec<String> {
 /// an extension reads as a file and does not: `src/app.ts` is not where
 /// `**/*.test.ts` lives. A folder whose name has a dot in it is written with a
 /// trailing slash, or as `name/**`.
-fn owned_segments(pattern: &str) -> Option<Vec<String>> {
+pub(crate) fn owned_segments(pattern: &str) -> Option<Vec<String>> {
     let normalized = pattern.trim().replace('\\', "/").to_lowercase();
     let mut segments: Vec<String> = normalized
         .split('/')
@@ -104,7 +103,7 @@ fn owned_segments(pattern: &str) -> Option<Vec<String>> {
 
 /// One name against one segment pattern: `*`, `?` and `[…]` (`[!…]` or
 /// `[^…]` negated, with ranges). None of them crosses a separator.
-fn glob_matches(pattern: &str, name: &str) -> bool {
+pub(crate) fn glob_matches(pattern: &str, name: &str) -> bool {
     let pattern: Vec<char> = pattern.chars().collect();
     let name: Vec<char> = name.chars().collect();
     glob_from(&pattern, &name)
@@ -161,7 +160,7 @@ fn char_class(pattern: &[char]) -> Option<(usize, Box<dyn Fn(char) -> bool>)> {
 
 /// Whether `owns` names any file at all. A task whose patterns name nothing
 /// (empty, blank, `.`) states no files, as far as the board is concerned.
-pub(super) fn scoped(owns: &[String]) -> bool {
+pub(crate) fn scoped(owns: &[String]) -> bool {
     owns.iter().any(|pattern| owned_segments(pattern).is_some())
 }
 

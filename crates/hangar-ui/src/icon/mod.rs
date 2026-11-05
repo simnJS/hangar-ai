@@ -47,8 +47,6 @@ use iced::{Color, Element, Length, Radians, Rectangle, Size};
 
 pub use data::Icon;
 
-use hangar_theme::tokens::size;
-
 /// A glyph as a whole SVG document: the shared stroke around its elements.
 fn document(icon: Icon) -> String {
     format!(
@@ -99,11 +97,6 @@ pub fn icon(icon: Icon, side: f32) -> IconView {
         color: None,
         rotation: Radians(0.0),
     }
-}
-
-/// A square of the icon at 14 px, [`size::ICON`]: what most icons are.
-pub fn icon_default(which: Icon) -> IconView {
-    icon(which, size::ICON)
 }
 
 /// The widget [`icon`] makes.

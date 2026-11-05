@@ -16,11 +16,12 @@
 //! the end, so this widget measures the text with the renderer's shaper at
 //! layout time and keeps the longest tail that fits after an ellipsis.
 
+use crate::text_metrics::text_width;
 use iced::advanced::Widget;
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer;
-use iced::advanced::text::{self, Paragraph as _, Renderer as _, Text};
-use iced::advanced::widget::Tree;
+use iced::advanced::text::{self, Renderer as _, Text};
+use iced::advanced::widget::{Tree, tree};
 use iced::{Color, Element, Font, Length, Pixels, Point, Rectangle, Size, alignment, mouse};
 
 /// The mark that stands for the part that was cut.
@@ -166,22 +167,16 @@ impl TailText {
     }
 }
 
-/// The width of `content` set in this size and face.
-fn text_width(content: &str, size: f32, font: Font) -> f32 {
-    type Paragraph = <iced::Renderer as text::Renderer>::Paragraph;
-    Paragraph::with_text(Text {
-        content,
-        bounds: Size::INFINITE,
-        size: Pixels(size),
-        line_height: text::LineHeight::default(),
-        font,
-        align_x: text::Alignment::Default,
-        align_y: alignment::Vertical::Top,
-        shaping: text::Shaping::Advanced,
-        wrapping: text::Wrapping::None,
-    })
-    .min_bounds()
-    .width
+/// What a [`TailText`] measured, kept in the widget tree between views.
+#[derive(Default)]
+struct Memo {
+    /// (content, suffix, size, face, cut) the numbers below are for.
+    key: Option<(String, Option<String>, u32, Font, Cut)>,
+    /// The whole text and its suffix, set in one line.
+    natural: f32,
+    suffix_width: f32,
+    /// (room for the text, what is shown in it, how wide that came out).
+    fitted: Option<(f32, String, f32)>,
 }
 
 impl<Message, Theme> Widget<Message, Theme, iced::Renderer> for TailText {
@@ -189,19 +184,43 @@ impl<Message, Theme> Widget<Message, Theme, iced::Renderer> for TailText {
         Size::new(self.width, Length::Fixed(self.line_height()))
     }
 
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<Memo>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(Memo::default())
+    }
+
     fn layout(
         &mut self,
-        _tree: &mut Tree,
+        tree: &mut Tree,
         _renderer: &iced::Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
         let height = self.line_height();
         let (text_size, font) = (self.size, self.font);
-        let suffix_width = self
-            .suffix
-            .as_ref()
-            .map_or(0.0, |(suffix, _)| text_width(suffix, text_size, font));
-        let natural = text_width(&self.content, text_size, font) + suffix_width;
+        let memo = tree.state.downcast_mut::<Memo>();
+        // The widget is rebuilt with every view; what it measured is kept
+        // while the text, face and size stay the same.
+        let key = (
+            self.content.clone(),
+            self.suffix.as_ref().map(|(suffix, _)| suffix.clone()),
+            text_size.to_bits(),
+            font,
+            self.cut,
+        );
+        if memo.key.as_ref() != Some(&key) {
+            let suffix_width = key
+                .1
+                .as_deref()
+                .map_or(0.0, |suffix| text_width(suffix, text_size, font));
+            memo.natural = text_width(&self.content, text_size, font) + suffix_width;
+            memo.suffix_width = suffix_width;
+            memo.fitted = None;
+            memo.key = Some(key);
+        }
+        let (natural, suffix_width) = (memo.natural, memo.suffix_width);
         let size = limits
             .width(self.width)
             .height(Length::Fixed(height))
@@ -211,13 +230,23 @@ impl<Message, Theme> Widget<Message, Theme, iced::Renderer> for TailText {
                 Size::new(natural, height),
             );
         // The suffix keeps what it needs; the text gives way for the rest.
-        self.shown = fit(
-            &self.content,
-            (size.width - suffix_width).max(0.0),
-            |candidate| text_width(candidate, text_size, font),
-            self.cut,
-        );
-        self.head_width = text_width(&self.shown, text_size, font);
+        let room = (size.width - suffix_width).max(0.0);
+        match &memo.fitted {
+            Some((width, shown, head_width)) if width.to_bits() == room.to_bits() => {
+                self.shown.clone_from(shown);
+                self.head_width = *head_width;
+            }
+            _ => {
+                self.shown = fit(
+                    &self.content,
+                    room,
+                    |candidate| text_width(candidate, text_size, font),
+                    self.cut,
+                );
+                self.head_width = text_width(&self.shown, text_size, font);
+                memo.fitted = Some((room, self.shown.clone(), self.head_width));
+            }
+        }
         layout::Node::new(size)
     }
 

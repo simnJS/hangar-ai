@@ -117,3 +117,4 @@ pub use icon::{Icon, icon};
 
 #[cfg(test)]
 mod testing;
+mod text_metrics;

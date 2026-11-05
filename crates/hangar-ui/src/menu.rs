@@ -49,7 +49,7 @@ use hangar_theme::{Theme, fonts, style};
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::overlay;
 use iced::advanced::renderer::{self, Quad};
-use iced::advanced::text::{self, Paragraph as _, Renderer as _, Text};
+use iced::advanced::text::{self, Renderer as _, Text};
 use iced::advanced::widget::{Tree, tree};
 use iced::advanced::{Clipboard, Renderer as _, Shell, Widget};
 use iced::keyboard::{self, Key, key::Named};
@@ -63,6 +63,7 @@ use crate::glyph::{self, GlyphState, Tint};
 use crate::icon::{self, Icon};
 use crate::layer::{self, Layer};
 use crate::menu_nav::{Move, menu_move, move_selectable};
+use crate::text_metrics::text_width;
 
 /// The menu's inner padding around its lines.
 const PAD: f32 = 5.0;
@@ -398,24 +399,6 @@ struct State {
     highlighted: Option<usize>,
     pressed: Option<Hit>,
     scroll: f32,
-}
-
-/// The width of `content` set in this size and face.
-fn text_width(content: &str, size: f32, font: Font) -> f32 {
-    type Paragraph = <iced::Renderer as text::Renderer>::Paragraph;
-    Paragraph::with_text(Text {
-        content,
-        bounds: Size::INFINITE,
-        size: Pixels(size),
-        line_height: text::LineHeight::default(),
-        font,
-        align_x: text::Alignment::Default,
-        align_y: alignment::Vertical::Top,
-        shaping: text::Shaping::Advanced,
-        wrapping: text::Wrapping::None,
-    })
-    .min_bounds()
-    .width
 }
 
 impl<M: Clone> Menu<'_, M> {
@@ -1037,19 +1020,6 @@ pub fn panel<'a, M: 'a>(t: &'a Theme, content: impl Into<Element<'a, M>>) -> Ele
         .padding(iced::Padding::new(10.0))
         .style(style::container::popover(t))
         .into()
-}
-
-/// A dropdown that opens with the first line highlighted, for a menu asked for
-/// with the keyboard.
-pub fn dropdown_from_keyboard<'a, M: Clone + 'a>(
-    t: &'a Theme,
-    anchor: impl Into<Element<'a, M>>,
-    entries: Option<Vec<Entry<M>>>,
-) -> Layer<'a, M> {
-    layer::dropdown(
-        anchor,
-        entries.map(|entries| menu(t, entries).from_keyboard(true).into()),
-    )
 }
 
 /// A context menu: `row` is where it is asked for with the right button, `at`

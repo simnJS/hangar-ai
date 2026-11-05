@@ -306,6 +306,7 @@ pub fn serialize_chords(chords: &[Chord]) -> String {
 }
 
 /// `None` when the binding does not parse, so callers can drop it.
+#[cfg(test)]
 pub fn serialize_binding(binding: &str) -> Option<String> {
     parse_binding(binding).map(|chords| serialize_chords(&chords))
 }
@@ -347,10 +348,6 @@ pub fn format_chord_on(platform: Platform, chord: &Chord) -> String {
         Platform::Other => "+",
     };
     chord_segments_on(platform, chord).join(separator)
-}
-
-pub fn format_chord(chord: &Chord) -> String {
-    format_chord_on(Platform::current(), chord)
 }
 
 /// Human form of a whole binding, sequences included: `"Ctrl+K Ctrl+S"`. A
@@ -426,6 +423,7 @@ pub fn is_text_editing_chord_on(platform: Platform, chord: &Chord) -> bool {
     }
 }
 
+#[cfg(test)]
 pub fn is_text_editing_chord(chord: &Chord) -> bool {
     is_text_editing_chord_on(Platform::current(), chord)
 }

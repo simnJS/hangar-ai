@@ -6,6 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+use crate::delivery::owns::{expand_braces, glob_matches, owned_segments};
 use crate::store::{write_atomic, Access};
 
 /// The label of a task that waits for the person (src/lib/orchestration.ts).
@@ -843,95 +844,6 @@ pub fn owns_overlap(mine: &[String], theirs: &[String]) -> Vec<(String, String)>
     pairs
 }
 
-/// Past this many alternatives a brace pattern is read no further: a pattern
-/// that large is a mistake, and the ones read already decide most overlaps.
-const MAX_ALTERNATIVES: usize = 64;
-
-/// Segments past this are not read: nobody owns a path that deep, and each
-/// `**` makes the comparison more expensive.
-const MAX_SEGMENTS: usize = 32;
-
-/// `src/{lib,components}/x` as the two patterns it stands for.
-fn expand_braces(pattern: &str) -> Vec<String> {
-    let chars: Vec<char> = pattern.chars().collect();
-    let mut depth = 0;
-    let mut open = 0;
-    for (at, &c) in chars.iter().enumerate() {
-        match c {
-            '{' => {
-                if depth == 0 {
-                    open = at;
-                }
-                depth += 1;
-            }
-            '}' if depth > 0 => {
-                depth -= 1;
-                if depth > 0 {
-                    continue;
-                }
-                let alternatives = split_alternatives(&chars[open + 1..at]);
-                // `{x}` alone is not a choice: its braces stay as they are.
-                if alternatives.len() < 2 {
-                    continue;
-                }
-                let head: String = chars[..open].iter().collect();
-                let tail: String = chars[at + 1..].iter().collect();
-                return alternatives
-                    .iter()
-                    .flat_map(|alternative| expand_braces(&format!("{head}{alternative}{tail}")))
-                    .take(MAX_ALTERNATIVES)
-                    .collect();
-            }
-            _ => {}
-        }
-    }
-    vec![pattern.to_string()]
-}
-
-/// The commas of one brace group that are not inside a nested one.
-fn split_alternatives(inner: &[char]) -> Vec<String> {
-    let mut parts = vec![String::new()];
-    let mut depth = 0;
-    for &c in inner {
-        match c {
-            '{' => depth += 1,
-            '}' => depth -= 1,
-            ',' if depth == 0 => {
-                parts.push(String::new());
-                continue;
-            }
-            _ => {}
-        }
-        parts.last_mut().unwrap().push(c);
-    }
-    parts
-}
-
-/// A pattern as the rule compares it: relative, in forward slashes, without
-/// `./`, and in lower case — the filesystems that ignore case would put both
-/// spellings on one file, and erring towards an overlap only costs a refusal
-/// that says why. None for a pattern that names nothing.
-///
-/// A folder owns what is under it, so it ends in an implicit `**`. A name with
-/// an extension reads as a file and does not: `src/app.ts` is not where
-/// `**/*.test.ts` lives. A folder whose name has a dot in it is written with a
-/// trailing slash, or as `name/**`.
-fn owned_segments(pattern: &str) -> Option<Vec<String>> {
-    let normalized = pattern.trim().replace('\\', "/").to_lowercase();
-    let mut segments: Vec<String> = normalized
-        .split('/')
-        .filter(|segment| !segment.is_empty() && *segment != ".")
-        .take(MAX_SEGMENTS)
-        .map(str::to_string)
-        .collect();
-    let last = segments.last()?;
-    let file = !normalized.ends_with('/') && last.char_indices().any(|(at, c)| c == '.' && at > 0);
-    if !file && last != "**" {
-        segments.push("**".to_string());
-    }
-    Some(segments)
-}
-
 /// Whether some path is matched by both segment lists, `**` standing for any
 /// number of segments, none included.
 fn sequences_meet(a: &[String], b: &[String]) -> bool {
@@ -976,63 +888,6 @@ fn fixed_ends(segment: &str) -> (&str, &str) {
         .map_or(segment.len(), |at| at + 1)
         .max(first);
     (&segment[..first], &segment[last..])
-}
-
-/// One name against one segment pattern: `*`, `?` and `[…]` (`[!…]` or
-/// `[^…]` negated, with ranges). None of them crosses a separator.
-fn glob_matches(pattern: &str, name: &str) -> bool {
-    let pattern: Vec<char> = pattern.chars().collect();
-    let name: Vec<char> = name.chars().collect();
-    glob_from(&pattern, &name)
-}
-
-fn glob_from(pattern: &[char], name: &[char]) -> bool {
-    match pattern.first() {
-        None => name.is_empty(),
-        Some('*') => {
-            let rest = &pattern[1..];
-            (0..=name.len()).any(|skipped| glob_from(rest, &name[skipped..]))
-        }
-        Some('?') => !name.is_empty() && glob_from(&pattern[1..], &name[1..]),
-        Some('[') => match (char_class(pattern), name.first()) {
-            (Some((length, matches)), Some(&c)) => {
-                matches(c) && glob_from(&pattern[length..], &name[1..])
-            }
-            (Some(_), None) => false,
-            // No closing bracket: a plain `[`.
-            (None, first) => first == Some(&'[') && glob_from(&pattern[1..], &name[1..]),
-        },
-        Some(c) => name.first() == Some(c) && glob_from(&pattern[1..], &name[1..]),
-    }
-}
-
-/// The class `pattern` opens with, as its length and what it accepts.
-#[allow(clippy::type_complexity)]
-fn char_class(pattern: &[char]) -> Option<(usize, Box<dyn Fn(char) -> bool>)> {
-    let mut at = 1;
-    let negated = matches!(pattern.get(at), Some('!') | Some('^'));
-    if negated {
-        at += 1;
-    }
-    let start = at;
-    // A `]` first in the class is one of its characters.
-    let close = (start..pattern.len()).find(|&i| pattern[i] == ']' && i > start)?;
-    let members: Vec<char> = pattern[start..close].to_vec();
-    let accepts = move |c: char| {
-        let mut i = 0;
-        let mut found = false;
-        while i < members.len() {
-            if i + 2 < members.len() && members[i + 1] == '-' {
-                found |= members[i] <= c && c <= members[i + 2];
-                i += 3;
-            } else {
-                found |= members[i] == c;
-                i += 1;
-            }
-        }
-        found != negated
-    };
-    Some((close + 1, Box::new(accepts)))
 }
 
 fn blocked_advice(blocked: &Blocked) -> String {

@@ -54,6 +54,7 @@ use std::fmt;
 use std::ops::Range;
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use crate::text_metrics::floor_char_boundary;
 use iced::advanced::clipboard::Kind as ClipboardKind;
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::mouse::{Click, click};
@@ -296,7 +297,10 @@ impl Doc {
                 out.push('\n');
             }
             if let Some(part) = part {
-                out.push_str(&text[floor(&text, part.start)..floor(&text, part.end)]);
+                out.push_str(
+                    &text[floor_char_boundary(&text, part.start)
+                        ..floor_char_boundary(&text, part.end)],
+                );
             }
         }
         out
@@ -404,15 +408,6 @@ impl Doc {
     }
 }
 
-/// The nearest byte at or before `at` that starts a character.
-fn floor(text: &str, at: usize) -> usize {
-    let mut at = at.min(text.len());
-    while !text.is_char_boundary(at) {
-        at -= 1;
-    }
-    at
-}
-
 /// What a character is for double-clicking: words are made of letters, digits
 /// and `_`; a stretch of spaces and a stretch of signs are words of their own.
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -437,7 +432,7 @@ fn class(c: char) -> Class {
 /// so that the end of a word is the word's; of a space and a sign, the one
 /// after the place is taken. At the end of the text it is the last character.
 pub fn word_bounds(text: &str, at: usize) -> Range<usize> {
-    let at = floor(text, at);
+    let at = floor_char_boundary(text, at);
     let after = text[at..].chars().next();
     let before = text[..at].chars().next_back();
     let kind = match (after, before) {
@@ -474,8 +469,8 @@ fn split_spans<'a, Link: Clone>(
         let text = span.text.as_ref();
         let (from, to) = (at, at + text.len());
         at = to;
-        let start = floor(text, range.start.clamp(from, to) - from);
-        let end = floor(text, range.end.clamp(from, to) - from);
+        let start = floor_char_boundary(text, range.start.clamp(from, to) - from);
+        let end = floor_char_boundary(text, range.end.clamp(from, to) - from);
         if start >= end {
             out.push(span.clone());
             continue;

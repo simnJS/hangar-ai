@@ -17,6 +17,7 @@
 
 use std::ops::Range;
 
+use crate::text_metrics::floor_char_boundary;
 use unicode_normalization::UnicodeNormalization;
 use unicode_normalization::char::is_combining_mark;
 
@@ -234,8 +235,8 @@ pub fn highlight<'a>(text: &'a str, ranges: &[Range<usize>]) -> Vec<Part<'a>> {
     for range in merge_ranges(ranges) {
         // A range from a different text could land off a character boundary
         // or past the end; clamp it rather than panic on a stale match.
-        let start = floor_boundary(text, range.start.min(text.len()));
-        let end = floor_boundary(text, range.end.min(text.len()));
+        let start = floor_char_boundary(text, range.start.min(text.len()));
+        let end = floor_char_boundary(text, range.end.min(text.len()));
         if start > at {
             parts.push(Part {
                 text: &text[at..start],
@@ -257,13 +258,6 @@ pub fn highlight<'a>(text: &'a str, ranges: &[Range<usize>]) -> Vec<Part<'a>> {
         });
     }
     parts
-}
-
-fn floor_boundary(text: &str, mut index: usize) -> usize {
-    while !text.is_char_boundary(index) {
-        index -= 1;
-    }
-    index
 }
 
 /// What the palette can search: a heading to be listed under, a label, and
