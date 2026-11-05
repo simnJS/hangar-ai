@@ -391,3 +391,83 @@ mod panel {
         assert_eq!(sent, [Inner::Dismiss]);
     }
 }
+
+mod short_window {
+    use super::*;
+
+    fn long_menu<'a>() -> Menu<'a, Msg> {
+        let lines: Vec<Entry<Msg>> = (0..40)
+            .map(|n| item(format!("Line {n}")).on_select(Msg::First).into())
+            .collect();
+        menu(default_theme(), lines).max_height(2000.0)
+    }
+
+    #[test]
+    fn the_scroll_range_follows_the_height_the_menu_was_given() {
+        let m = long_menu();
+        let content = m.content_height();
+        // Room for the whole menu: nothing to scroll.
+        assert_eq!(m.max_scroll(content), 0.0);
+        // A 300 px box: the rest of the content is reachable.
+        assert_eq!(m.max_scroll(300.0), content - 300.0);
+    }
+
+    #[test]
+    fn revealing_the_last_line_scrolls_to_the_end_of_a_short_box() {
+        let m = long_menu();
+        let mut state = State::default();
+        m.reveal(&mut state, 39, 300.0);
+        assert_eq!(state.scroll, m.content_height() - 300.0);
+    }
+
+    #[test]
+    fn a_line_below_a_short_box_is_revealed() {
+        let m = long_menu();
+        let mut state = State::default();
+        let (top, height) = m.extent(20);
+        assert!(top + height > 300.0);
+        m.reveal(&mut state, 20, 300.0);
+        assert!(state.scroll > 0.0 && top + height <= state.scroll + 300.0);
+    }
+
+    #[test]
+    fn a_menu_that_shrank_does_not_leave_a_gap_at_the_bottom() {
+        let t = default_theme();
+        let lines: Vec<Entry<Msg>> = (0..3)
+            .map(|n| item(format!("Line {n}")).on_select(Msg::First).into())
+            .collect();
+        let mut m = menu(t, lines);
+        let mut tree = Tree::new(Element::<Msg>::from(menu(t, vec![])));
+        tree.state.downcast_mut::<State>().scroll = 500.0;
+        let node = m.layout(
+            &mut tree,
+            &simulated_renderer(),
+            &layout::Limits::new(Size::ZERO, Size::new(400.0, 400.0)),
+        );
+        let layout = Layout::new(&node);
+        let mut messages = Vec::new();
+        let mut shell = Shell::new(&mut messages);
+        m.update(
+            &mut tree,
+            &Event::Mouse(mouse::Event::CursorLeft),
+            layout,
+            mouse::Cursor::Unavailable,
+            &simulated_renderer(),
+            &mut iced_test::core::clipboard::Null,
+            &mut shell,
+            &Rectangle::with_size(Size::new(400.0, 400.0)),
+        );
+        assert_eq!(tree.state.downcast_ref::<State>().scroll, 0.0);
+    }
+
+    fn simulated_renderer() -> iced::Renderer {
+        iced_test::futures::futures::executor::block_on(
+            <iced::Renderer as iced_test::core::renderer::Headless>::new(
+                iced::Font::DEFAULT,
+                iced::Pixels(16.0),
+                std::env::var("ICED_TEST_BACKEND").ok().as_deref(),
+            ),
+        )
+        .expect("a headless renderer")
+    }
+}

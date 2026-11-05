@@ -21,7 +21,7 @@ impl Rgb {
         let clean = hex.strip_prefix('#').unwrap_or(hex);
         let channel = |digits: &str| u8::from_str_radix(digits, 16).ok();
         match clean.len() {
-            3 => {
+            3 if clean.is_ascii() => {
                 let doubled = |at: usize| channel(&clean[at..=at].repeat(2));
                 Some(Rgb(doubled(0)?, doubled(1)?, doubled(2)?))
             }
@@ -245,6 +245,13 @@ mod tests {
 
     fn hex(value: &str) -> Rgb {
         Rgb::hex(value)
+    }
+
+    #[test]
+    fn a_three_byte_non_ascii_string_is_not_a_colour_and_does_not_panic() {
+        assert_eq!(Rgb::parse("é1"), None);
+        assert_eq!(Rgb::parse("#é1"), None);
+        assert_eq!(Rgb::parse("#abc"), Some(Rgb(0xaa, 0xbb, 0xcc)));
     }
 
     fn close(a: f64, b: f64, digits: i32) -> bool {
