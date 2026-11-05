@@ -73,8 +73,13 @@ const MODEL_ANSWER_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Starting a worker checks out a worktree of the whole repository, and
 /// stopping one waits for its processes to let go of that worktree before
-/// removing it: on a large repository, longer than a pane operation.
-const WORKER_ANSWER_TIMEOUT: Duration = Duration::from_secs(120);
+/// removing it: on a large repository, longer than a pane operation. A start
+/// also waits for the workspace's `postCreate` hook, which may run for
+/// `git::HOOK_TIMEOUT`: the answer is waited for past that, plus the
+/// checkout, so the API never gives up on a start the window still carries
+/// out (the caller would be told it failed, then find the worker).
+const WORKER_ANSWER_TIMEOUT: Duration =
+    Duration::from_secs(crate::git::HOOK_TIMEOUT.as_secs() + 3 * 60);
 
 /// project_list and project_status read every project's board: longer than a
 /// pane operation, far short of a worktree.
@@ -137,24 +142,32 @@ fn forget(id: &str) {
     pending().lock().unwrap().remove(id);
 }
 
+/// Takes a request off `pending()` whichever way its wait ends — an answer,
+/// the time limit, or the caller dropping the future (an HTTP client that
+/// hung up) — so a window that never answers leaves nothing behind.
+struct Booked<'a>(&'a str);
+
+impl Drop for Booked<'_> {
+    fn drop(&mut self) {
+        forget(self.0);
+    }
+}
+
 async fn wait(
     id: &str,
     receiver: oneshot::Receiver<Answer>,
     limit: Duration,
 ) -> Result<Value, ControlError> {
+    let _booked = Booked(id);
     match tokio::time::timeout(limit, receiver).await {
         Ok(Ok(Ok(value))) => Ok(value),
         Ok(Ok(Err(message))) => Err(ControlError::Refused(message)),
         Ok(Err(_)) => Err(ControlError::Unavailable(
             "the window dropped the request".to_string(),
         )),
-        Err(_) => {
-            forget(id);
-            Err(ControlError::Unavailable(
-                "Hangar's window did not answer in time — is it still open and responsive?"
-                    .to_string(),
-            ))
-        }
+        Err(_) => Err(ControlError::Unavailable(
+            "Hangar's window did not answer in time — is it still open and responsive?".to_string(),
+        )),
     }
 }
 
@@ -246,6 +259,21 @@ pub fn control_reply(id: String, ok: bool, value: Option<Value>, error: Option<S
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_worker_start_is_waited_for_longer_than_its_hook_may_run() {
+        assert!(answer_timeout("worker_spawn") > crate::git::HOOK_TIMEOUT);
+        assert!(answer_timeout("worker_stop") > crate::git::HOOK_TIMEOUT);
+    }
+
+    #[tokio::test]
+    async fn a_caller_that_gives_up_leaves_no_request_booked() {
+        let (id, receiver) = book();
+        let waiting = wait(&id, receiver, Duration::from_secs(60));
+        // The HTTP client hung up: the future is dropped before any answer.
+        let _ = tokio::time::timeout(Duration::from_millis(20), waiting).await;
+        assert!(!pending().lock().unwrap().contains_key(&id));
+    }
 
     #[tokio::test]
     async fn a_reply_reaches_the_request_it_answers() {
@@ -419,7 +447,8 @@ mod tests {
     fn a_worker_s_worktree_is_given_time_to_check_out() {
         for op in ["worker_spawn", "worker_list", "worker_stop"] {
             assert!(OPERATIONS.contains(&op), "{op} never reaches the window");
-            assert_eq!(answer_timeout(op), Duration::from_secs(120), "{op}");
+            assert_eq!(answer_timeout(op), WORKER_ANSWER_TIMEOUT, "{op}");
+            assert!(answer_timeout(op) >= Duration::from_secs(120), "{op}");
         }
     }
 }

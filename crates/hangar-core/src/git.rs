@@ -59,6 +59,41 @@ impl From<GitError> for String {
 /// makes every call here self-describing — the directory is part of the command
 /// line we would type by hand to reproduce it.
 fn run_git(dir: &Path, args: &[&str]) -> Result<String, GitError> {
+    let mut command = git_command(dir, args);
+    command.stdin(Stdio::null());
+    let limit = network_limit(args);
+    let output = run_limited(command, limit).map_err(|err| match err.kind() {
+        std::io::ErrorKind::NotFound => GitError::Missing,
+        std::io::ErrorKind::TimedOut => GitError::Failed(format!(
+            "`git {}` did not finish within {} seconds and was stopped — is a remote asking for \
+             credentials?",
+            args.first().copied().unwrap_or(""),
+            limit.map_or(0, |limit| limit.as_secs())
+        )),
+        _ => GitError::Failed(format!("could not run git: {err}")),
+    })?;
+
+    if !output.status.success() {
+        return Err(GitError::Failed(diagnostic(&output.stderr)));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// How long a command that talks to a remote may run. A fetch that waits for
+/// a passphrase nobody can type would otherwise hold its thread for good.
+const NETWORK_TIMEOUT: Duration = Duration::from_secs(120);
+
+fn network_limit(args: &[&str]) -> Option<Duration> {
+    matches!(
+        args.first().copied(),
+        Some("fetch" | "pull" | "push" | "clone" | "ls-remote")
+    )
+    .then_some(NETWORK_TIMEOUT)
+}
+
+/// The command `run_git` runs: `git -C <dir> <args>`, set so that nothing
+/// waits for a person and nothing of the pane leaks into git's hooks.
+fn git_command(dir: &Path, args: &[&str]) -> Command {
     // Without this a bundled macOS app looks at the bare `launchd` PATH, where
     // a Homebrew git does not exist. See path_env.rs.
     crate::path_env::ensure();
@@ -74,23 +109,67 @@ fn run_git(dir: &Path, args: &[&str]) -> Result<String, GitError> {
         // the language is what keeps those checks working on a localised
         // install. `LANGUAGE` has to go too: gettext lets it override `LC_ALL`.
         .env("LC_ALL", "C")
-        .env("LANGUAGE", "");
+        .env("LANGUAGE", "")
+        // Nobody is there to type a password or a passphrase.
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GCM_INTERACTIVE", "never");
+    if std::env::var_os("GIT_SSH_COMMAND").is_none() && std::env::var_os("GIT_SSH").is_none() {
+        command.env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes");
+    }
+    crate::delivery::scrub(&mut command);
 
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         command.creation_flags(CREATE_NO_WINDOW);
     }
-
-    let output = command.output().map_err(|err| match err.kind() {
-        std::io::ErrorKind::NotFound => GitError::Missing,
-        _ => GitError::Failed(format!("could not run git: {err}")),
-    })?;
-
-    if !output.status.success() {
-        return Err(GitError::Failed(diagnostic(&output.stderr)));
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
     }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    command
+}
+
+/// `Command::output`, with a time limit: past it the process and what it
+/// started are killed and the error is `TimedOut`. `None`: no limit.
+fn run_limited(
+    mut command: Command,
+    limit: Option<Duration>,
+) -> std::io::Result<std::process::Output> {
+    let Some(limit) = limit else {
+        return command.output();
+    };
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command.spawn()?;
+    let read = |stream: Option<Box<dyn Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            if let Some(mut stream) = stream {
+                let _ = stream.read_to_end(&mut bytes);
+            }
+            bytes
+        })
+    };
+    let out = read(child.stdout.take().map(|s| Box::new(s) as _));
+    let err = read(child.stderr.take().map(|s| Box::new(s) as _));
+    let started = Instant::now();
+    let status = loop {
+        match child.try_wait()? {
+            Some(status) => break status,
+            None if started.elapsed() >= limit => {
+                kill_tree(&mut child);
+                let _ = child.wait();
+                return Err(std::io::ErrorKind::TimedOut.into());
+            }
+            None => std::thread::sleep(Duration::from_millis(25)),
+        }
+    };
+    Ok(std::process::Output {
+        status,
+        stdout: out.join().unwrap_or_default(),
+        stderr: err.join().unwrap_or_default(),
+    })
 }
 
 /// Runs a git-shaped task on the blocking pool and hands its answer back.
@@ -1325,7 +1404,12 @@ pub fn sweep_orphan_worktrees(dir: &Path, held: &[String]) -> Result<OrphanSweep
 // ---------------------------------------------------------------------------
 
 /// How long a hook may run before its whole process tree is killed.
-const HOOK_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+pub(crate) const HOOK_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+
+/// How long the drains get to finish once the hook has exited: a background
+/// process it started (`pnpm dev &`) holds the pipes open for as long as it
+/// lives, and the report must not wait for that.
+const HOOK_DRAIN_GRACE: Duration = Duration::from_secs(2);
 
 /// How much of a hook's output is kept, per stream: the end of it, where the
 /// reason for a failure usually is.
@@ -1434,44 +1518,56 @@ fn kill_tree(child: &mut std::process::Child) {
     let _ = child.kill();
 }
 
-type Drained = std::thread::JoinHandle<(Vec<u8>, bool)>;
+/// What a drain has kept so far (the end of the stream, and whether anything
+/// was dropped), and a signal that it reached the stream's end.
+type Drained = (
+    std::sync::Arc<Mutex<(Vec<u8>, bool)>>,
+    std::sync::mpsc::Receiver<()>,
+);
 
 /// Reads a stream to its end, keeping only the last `HOOK_OUTPUT_CAP` bytes
 /// (and whether anything was dropped). It never stops reading: a full pipe
-/// would stall the hook.
+/// would stall the hook. A stream that never ends — a background process
+/// holds it — is left to its thread; `collect_output` stops waiting for it.
 fn drain<R: Read + Send + 'static>(mut stream: R) -> Drained {
+    let kept = std::sync::Arc::new(Mutex::new((Vec::new(), false)));
+    let (done, finished) = std::sync::mpsc::channel();
+    let sink = kept.clone();
     std::thread::spawn(move || {
-        let mut kept: Vec<u8> = Vec::new();
-        let mut dropped = false;
         let mut buffer = [0u8; 4096];
         loop {
             match stream.read(&mut buffer) {
                 Ok(0) | Err(_) => break,
                 Ok(read) => {
+                    let mut guard = sink.lock().unwrap_or_else(|e| e.into_inner());
+                    let (kept, dropped) = &mut *guard;
                     kept.extend_from_slice(&buffer[..read]);
                     if kept.len() > HOOK_OUTPUT_CAP * 2 {
                         let cut = kept.len() - HOOK_OUTPUT_CAP;
                         kept.drain(..cut);
-                        dropped = true;
+                        *dropped = true;
                     }
                 }
             }
         }
-        if kept.len() > HOOK_OUTPUT_CAP {
-            let cut = kept.len() - HOOK_OUTPUT_CAP;
-            kept.drain(..cut);
-            dropped = true;
-        }
-        (kept, dropped)
-    })
+        let _ = done.send(());
+    });
+    (kept, finished)
 }
 
-fn collect_output(handles: Vec<Drained>) -> String {
+/// What the drains kept. Waits at most `grace` in all for them to reach their
+/// end: past it, what they hold is what the hook said.
+fn collect_output(handles: Vec<Drained>, grace: Duration) -> String {
+    let deadline = Instant::now() + grace;
     let mut parts = Vec::new();
-    for handle in handles {
-        let Ok((bytes, dropped)) = handle.join() else {
-            continue;
-        };
+    for (kept, finished) in handles {
+        let _ = finished.recv_timeout(deadline.saturating_duration_since(Instant::now()));
+        let (mut bytes, mut dropped) = kept.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if bytes.len() > HOOK_OUTPUT_CAP {
+            let cut = bytes.len() - HOOK_OUTPUT_CAP;
+            bytes.drain(..cut);
+            dropped = true;
+        }
         let text = String::from_utf8_lossy(&bytes).replace('\0', "");
         let text = text.trim();
         if text.is_empty() {
@@ -1544,7 +1640,7 @@ fn run_hook(command: &str, base: &str, worktree: &str, timeout: Duration) -> Hoo
         }
     };
 
-    let output = collect_output(readers);
+    let output = collect_output(readers, HOOK_DRAIN_GRACE);
     HookReport {
         ok: !timed_out && status.is_some_and(|status| status.success()),
         timed_out,
@@ -4299,5 +4395,71 @@ mod tests {
         // The unlanded commit is still there to land.
         assert!(run_git(&main, &["rev-parse", "--verify", "refs/heads/unlanded"]).is_ok());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_hook_leaving_a_background_process_holding_its_pipes_still_returns() {
+        let dir = std::env::temp_dir().join(format!("hangar-hook-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let started = Instant::now();
+        let report = run_hook(
+            "echo installed; (sleep 30 &) ; exit 0",
+            dir.to_str().unwrap(),
+            dir.to_str().unwrap(),
+            Duration::from_secs(60),
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(
+            started.elapsed() < HOOK_DRAIN_GRACE + Duration::from_secs(10),
+            "took {:?}",
+            started.elapsed()
+        );
+        assert!(report.ok, "{report:?}");
+        assert!(!report.timed_out);
+        assert_eq!(report.output, "installed");
+    }
+
+    #[test]
+    fn git_never_waits_for_a_password_or_a_passphrase() {
+        let command = git_command(Path::new("."), &["fetch", "--all"]);
+        let env = |name: &str| {
+            command
+                .get_envs()
+                .find(|(key, _)| *key == OsStr::new(name))
+                .map(|(_, value)| value.map(|v| v.to_string_lossy().into_owned()))
+        };
+        assert_eq!(env("GIT_TERMINAL_PROMPT"), Some(Some("0".to_string())));
+        assert_eq!(env("GCM_INTERACTIVE"), Some(Some("never".to_string())));
+        if std::env::var_os("GIT_SSH_COMMAND").is_none() && std::env::var_os("GIT_SSH").is_none() {
+            assert_eq!(
+                env("GIT_SSH_COMMAND"),
+                Some(Some("ssh -o BatchMode=yes".to_string()))
+            );
+        }
+        // What a pane leaves in the environment is removed, not passed on.
+        assert_eq!(env("HANGAR_BRIDGE_TOKEN"), Some(None));
+    }
+
+    #[test]
+    fn only_the_commands_that_reach_a_remote_get_a_time_limit() {
+        assert_eq!(network_limit(&["fetch", "--all"]), Some(NETWORK_TIMEOUT));
+        assert_eq!(network_limit(&["push"]), Some(NETWORK_TIMEOUT));
+        assert_eq!(network_limit(&["status"]), None);
+        assert_eq!(network_limit(&["worktree", "add"]), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_command_past_its_limit_is_stopped() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "sleep 30"]);
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+        let started = Instant::now();
+        let err = run_limited(command, Some(Duration::from_millis(200))).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 }
