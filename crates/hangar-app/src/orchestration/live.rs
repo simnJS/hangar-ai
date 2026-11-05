@@ -13,7 +13,7 @@ use hangar_core::git::{
 use hangar_core::memory::MemoryEntry;
 use hangar_core::pty::PtyManager;
 
-use super::brief::BriefingPort;
+use super::brief::{BriefingPort, CheckCost};
 use super::events::{EngineIo, JournalEntry, OrchestratorEvent};
 use super::manager_feed::ManagerJournalEntry;
 use super::port::{Announcement, NewPane};
@@ -42,9 +42,59 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
         .map_err(|err| format!("the task stopped: {err}"))
 }
 
+/// The last delivery check of each workspace, by id: what it took and said.
+fn checks() -> &'static Mutex<std::collections::HashMap<String, CheckCost>> {
+    static CHECKS: std::sync::OnceLock<Mutex<std::collections::HashMap<String, CheckCost>>> =
+        std::sync::OnceLock::new();
+    CHECKS.get_or_init(Default::default)
+}
+
+/// Remembers how long a workspace's delivery check ran and what it said, for
+/// the orchestrator's next briefing. A check that did not run is not recorded.
+pub fn record_check(workspace_id: &str, seconds: u64, passed: bool) {
+    checks()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(workspace_id.to_string(), CheckCost { seconds, passed });
+}
+
+/// The workspace's last check, if one ran since the app started.
+pub fn last_check(workspace_id: &str) -> Option<CheckCost> {
+    checks()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(workspace_id)
+        .copied()
+}
+
+/// Once per run: what old versions' deliveries left in the temp folder goes,
+/// and git forgets the worktrees whose folder is gone, in each workspace's
+/// repository. On a thread of its own: git is slow on large repositories.
+fn sweep_leftovers_once(folders: Vec<String>) {
+    static DONE: std::sync::Once = std::sync::Once::new();
+    if folders.is_empty() {
+        return;
+    }
+    DONE.call_once(|| {
+        let _ = std::thread::Builder::new()
+            .name("delivery-sweep".into())
+            .spawn(move || hangar_core::delivery::sweep_leftovers(&folders));
+    });
+}
+
 impl LivePort {
     pub(super) fn new(handle: OrchestrationHandle) -> Self {
-        LivePort { handle }
+        let port = LivePort { handle };
+        sweep_leftovers_once(
+            port.snapshot()
+                .state
+                .workspaces
+                .iter()
+                .map(|ws| ws.cwd.clone())
+                .filter(|cwd| !cwd.is_empty())
+                .collect(),
+        );
+        port
     }
 
     fn snapshot(&self) -> Arc<Snapshot> {
@@ -337,6 +387,10 @@ impl BriefingPort for LivePort {
         self.snapshot().state.clone()
     }
 
+    fn last_check(&self, workspace_id: &str) -> Option<CheckCost> {
+        last_check(workspace_id)
+    }
+
     async fn load_board(&self, cwd: &str) -> Result<Vec<Task>, String> {
         let cwd = cwd.to_string();
         blocking(move || hangar_core::board_load(cwd).tasks).await
@@ -482,5 +536,25 @@ mod tests {
         })
         .await;
         assert_eq!(killed, Ok(Ok(())));
+    }
+}
+
+#[cfg(test)]
+mod check_cost_tests {
+    use super::*;
+
+    #[test]
+    fn the_last_check_of_a_workspace_is_the_one_kept() {
+        assert_eq!(last_check("ws-never-checked"), None);
+        record_check("ws-checked", 700, true);
+        record_check("ws-checked", 95, false);
+        assert_eq!(
+            last_check("ws-checked"),
+            Some(CheckCost {
+                seconds: 95,
+                passed: false
+            })
+        );
+        assert_eq!(last_check("ws-other"), None);
     }
 }

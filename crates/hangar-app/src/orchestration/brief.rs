@@ -122,7 +122,25 @@ fn activity_words(activity: Option<&PaneActivity>) -> &'static str {
     }
 }
 
-fn settings_line(ws: &Workspace, git: bool) -> String {
+/// What the workspace's last delivery check cost and said.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CheckCost {
+    pub seconds: u64,
+    pub passed: bool,
+}
+
+/// `last check 12 min, passed`: minutes once it took a minute.
+fn check_cost_words(cost: CheckCost) -> String {
+    let took = if cost.seconds < 60 {
+        format!("{} s", cost.seconds)
+    } else {
+        format!("{} min", (cost.seconds + 30) / 60)
+    };
+    let verdict = if cost.passed { "passed" } else { "failed" };
+    format!("last check {took}, {verdict}")
+}
+
+fn settings_line(ws: &Workspace, git: bool, last_check: Option<CheckCost>) -> String {
     let settings = orchestration_of(ws);
     if !git {
         let check = match &settings.check_command {
@@ -139,7 +157,10 @@ fn settings_line(ws: &Workspace, git: bool) -> String {
         None => "the workspace's current branch".into(),
     };
     let check = match &settings.check_command {
-        Some(command) => format!("check `{command}`"),
+        Some(command) => match last_check {
+            Some(cost) => format!("check `{command}` ({})", check_cost_words(cost)),
+            None => format!("check `{command}`"),
+        },
         None => "no check command".into(),
     };
     let landing = if settings.auto_merge {
@@ -383,6 +404,14 @@ fn pane_of<'a>(state: &'a AppState, pane_id: &str) -> Option<(&'a Workspace, &'a
 /// The pane's briefing, or `None` for a pane with no part in an
 /// orchestration (`buildBriefing`).
 pub fn build_briefing(inputs: &BriefingInputs<'_>) -> Option<Briefing> {
+    build_briefing_with(inputs, None)
+}
+
+/// The same, told what the workspace's last delivery check cost.
+pub fn build_briefing_with(
+    inputs: &BriefingInputs<'_>,
+    last_check: Option<CheckCost>,
+) -> Option<Briefing> {
     let (ws, pane) = pane_of(inputs.state, inputs.pane_id)?;
     let role = pane.role?;
     if pane.agent != AgentId::Claude {
@@ -390,7 +419,7 @@ pub fn build_briefing(inputs: &BriefingInputs<'_>) -> Option<Briefing> {
     }
     Some(match role {
         PaneRole::Manager => manager_briefing(inputs),
-        PaneRole::Orchestrator => orchestrator_briefing(ws, inputs),
+        PaneRole::Orchestrator => orchestrator_briefing(ws, inputs, last_check),
         PaneRole::Worker => worker_briefing(ws, pane, inputs),
     })
 }
@@ -409,7 +438,11 @@ fn manager_briefing(inputs: &BriefingInputs<'_>) -> Briefing {
     }
 }
 
-fn orchestrator_briefing(ws: &Workspace, inputs: &BriefingInputs<'_>) -> Briefing {
+fn orchestrator_briefing(
+    ws: &Workspace,
+    inputs: &BriefingInputs<'_>,
+    last_check: Option<CheckCost>,
+) -> Briefing {
     let title = plan_title(ws, &inputs.state.workspaces);
     let workers = workers_of(ws);
     let mut lines = vec![
@@ -421,7 +454,7 @@ fn orchestrator_briefing(ws: &Workspace, inputs: &BriefingInputs<'_>) -> Briefin
         ),
         "This is current: trust it over what you remember.".to_string(),
         String::new(),
-        settings_line(ws, inputs.git),
+        settings_line(ws, inputs.git, last_check),
         if workers.is_empty() {
             "Workers: none running.".to_string()
         } else {
@@ -583,6 +616,10 @@ pub trait BriefingPort: Sync {
     fn manager_journal(&self) -> Vec<ManagerJournalEntry>;
     /// `bridge_enqueue`, for `announce_role`.
     fn enqueue(&self, pane: &str, text: &str, from: &str) -> Result<(), String>;
+    /// The last delivery check of a workspace, when one ran this session.
+    fn last_check(&self, _workspace_id: &str) -> Option<CheckCost> {
+        None
+    }
 }
 
 /// Reads what a briefing needs, then writes it (`briefingFor`).
@@ -631,18 +668,22 @@ pub async fn briefing_for(
     };
     let journal = port.journal(&ws.id);
     let activity = |pane: &str| port.activity(pane);
-    Ok(build_briefing(&BriefingInputs {
-        state: &state,
-        pane_id,
-        tasks: &tasks,
-        memory: &memory,
-        journal: &journal,
-        activity: &activity,
-        now: port.now(),
-        git: git.unwrap_or(true),
-        projects: &projects,
-        manager_events: &manager_events,
-    }))
+    let last_check = port.last_check(&ws.id);
+    Ok(build_briefing_with(
+        &BriefingInputs {
+            state: &state,
+            pane_id,
+            tasks: &tasks,
+            memory: &memory,
+            journal: &journal,
+            activity: &activity,
+            now: port.now(),
+            git: git.unwrap_or(true),
+            projects: &projects,
+            manager_events: &manager_events,
+        },
+        last_check,
+    ))
 }
 
 /// The answer to the internal request `orchestrator_briefing {paneId}`:

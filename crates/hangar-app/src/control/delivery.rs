@@ -839,6 +839,10 @@ async fn deliver(
         land: landing || settings.auto_merge,
         reuse: landing,
         port_base: pane.port_base,
+        workspace_id: ws.id.clone(),
+        build_env: vec![],
+        check_root: None,
+        data_dir: None,
     };
     let outcome = match delivery.run(request.clone()).await {
         Ok(outcome) => outcome,
@@ -850,12 +854,17 @@ async fn deliver(
             changed: vec![],
             outside_owns: vec![],
             check: None,
+            check_skipped: None,
             review: None,
             merge: None,
             base: None,
             landed_in: None,
         },
     };
+    // What the check cost, for the orchestrator's briefing.
+    if let Some(check) = &outcome.check {
+        crate::orchestration::live::record_check(&ws.id, check.seconds, check.passed);
+    }
     // The outcome stands whatever its follow-ups managed; the next delivery or
     // the person sees the board as it is.
     let _ = settle(ws, pane, task, &request, &outcome, port, delivery).await;

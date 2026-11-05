@@ -582,50 +582,94 @@ fn listing(files: &[String]) -> String {
     text
 }
 
-/// Where temporary worktrees go: a folder of the system's own, canonical so
-/// that it reads the way git will print it back.
-fn scratch_root() -> PathBuf {
-    let root = std::env::temp_dir().join("hangar-deliveries");
-    let _ = std::fs::create_dir_all(&root);
-    dunce::canonicalize(&root).unwrap_or(root)
+//// Where the delivery worktrees of the old versions went: one new folder per
+/// delivery, in a folder of the system's own. Only the startup sweep reads it.
+fn legacy_root() -> PathBuf {
+    std::env::temp_dir().join("hangar-deliveries")
 }
 
-/// A temporary worktree, removed when it goes out of scope — whatever path
-/// leaves: an outcome, an error, a timeout, a panic.
+/// Eight hex digits naming a workspace's check folder. Stands in for
+/// `build_cache::key_for` until that module is here.
+fn stable_key(workspace_id: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(workspace_id.as_bytes());
+    digest[..4]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// The folder every check of a workspace runs in: short and stable, because
+/// Cargo keys the workspace's own crates by path and a new path recompiles
+/// them all. `%LOCALAPPDATA%\hangar\c\<8 hex>` (elsewhere the user's local
+/// data folder, then the system's temp one).
+fn check_folder(request: &Delivery) -> PathBuf {
+    let root = match request
+        .check_root
+        .as_deref()
+        .filter(|root| !root.is_empty())
+    {
+        Some(root) => PathBuf::from(root),
+        None => dirs::data_local_dir()
+            .unwrap_or_else(std::env::temp_dir)
+            .join("hangar")
+            .join("c"),
+    };
+    let _ = std::fs::create_dir_all(&root);
+    let root = dunce::canonicalize(&root).unwrap_or(root);
+    root.join(stable_key(&request.workspace_id))
+}
+
+/// The workspace's worktree for checks: made once, put on each merge in turn.
+/// Nothing is removed afterwards; the next check starts by resetting it.
 struct Scratch {
-    /// Any folder of the repository, to run git from.
-    repo: PathBuf,
     path: PathBuf,
 }
 
 impl Scratch {
-    fn add(repo: &Path, base: &str, task: &str) -> Result<Scratch, String> {
-        let tag: String = task
-            .chars()
-            .filter(char::is_ascii_alphanumeric)
-            .take(8)
-            .collect();
-        let unique = uuid::Uuid::new_v4().simple().to_string();
-        let name = format!(
-            "{SCRATCH_PREFIX}{}-{tag}-{}",
-            std::process::id(),
-            &unique[..8]
-        );
-        // Guarded before it exists, so a worktree half made is removed too.
-        let scratch = Scratch {
-            repo: repo.to_path_buf(),
-            path: scratch_root().join(name),
-        };
-        let path = scratch.path.to_string_lossy().into_owned();
-        git(repo, &["worktree", "add", "--detach", &path, base])
+    /// The worktree at `path`, on `base`, with none of the last check's
+    /// files that git tracks or could add. Ignored files stay (dependencies,
+    /// and what the check's own tools keep); the build output is outside it.
+    /// Made again when missing or broken.
+    fn acquire(repo: &Path, base: &str, path: PathBuf) -> Result<Scratch, String> {
+        if Scratch::reset(repo, base, &path).is_err() {
+            remove_scratch(repo, &path);
+            let _ = git_run(repo, &["worktree", "prune"], false);
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let spelled = path.to_string_lossy().into_owned();
+            git(
+                repo,
+                &["worktree", "add", "--detach", "--force", &spelled, base],
+            )
             .map_err(|err| format!("could not make a worktree to test the delivery in: {err}"))?;
-        Ok(scratch)
+        }
+        Ok(Scratch { path })
+    }
+
+    fn reset(repo: &Path, base: &str, path: &Path) -> Result<(), String> {
+        let listed = worktrees(repo)?;
+        let wanted = key(&path.to_string_lossy());
+        if !path.is_dir() || !listed.iter().any(|(listed, _, _)| key(listed) == wanted) {
+            return Err("not a worktree of this repository".into());
+        }
+        // A merge a check left half done, or files it changed.
+        let _ = git_run(path, &["merge", "--abort"], false);
+        git(path, &["reset", "--hard", "-q"])?;
+        git(path, &["checkout", "--detach", "--force", "-q", base])?;
+        git(path, &["clean", "-ffd", "-q"])?;
+        Ok(())
     }
 }
 
 impl Drop for Scratch {
+    /// The folder stays; what a delivery left in it does not: a conflicted
+    /// merge, changed files, new ones. Whatever path leaves, this runs.
     fn drop(&mut self) {
-        remove_scratch(&self.repo, &self.path);
+        let _ = git_run(&self.path, &["merge", "--abort"], false);
+        let _ = git_run(&self.path, &["reset", "--hard", "-q"], false);
+        let _ = git_run(&self.path, &["clean", "-ffd", "-q"], false);
     }
 }
 
@@ -641,37 +685,64 @@ fn remove_scratch(repo: &Path, path: &Path) {
     }
 }
 
-/// Temporary worktrees a delivery left behind: the app closed in the middle
-/// of one, or crashed. Only this repository's, only ones this process made or
-/// whose process is gone — another Hangar on the same repository may be
-/// testing in its own right now. The caller holds the repository's turn.
-fn sweep(repo: &Path) {
-    let Ok(listed) = worktrees(repo) else {
-        return;
+/// Whether a delivery worktree of an old version is no one's any more: made
+/// by a process that is gone, or by this one. Another Hangar on the same
+/// machine may be testing in its own right now.
+fn legacy_stale(name: &str, table: &Option<Vec<crate::procs::Proc>>) -> bool {
+    let Some(rest) = name.strip_prefix(SCRATCH_PREFIX) else {
+        return false;
     };
-    let root = format!("{}/", key(&scratch_root().to_string_lossy()));
+    let owner: Option<u32> = rest.split('-').next().and_then(|pid| pid.parse().ok());
+    match (owner, table) {
+        (Some(pid), _) if pid == std::process::id() => true,
+        (Some(pid), Some(table)) => !table.iter().any(|proc| proc.pid == pid),
+        _ => false,
+    }
+}
+
+/// At the app's start: the worktrees old versions left in `root` (the
+/// system's temp folder) go, then git forgets the ones whose folder is gone,
+/// in each of `repos` (any folder of a repository).
+fn sweep_legacy(root: &Path, repos: &[String]) {
     let table = crate::procs::table();
-    for (path, _, _) in listed {
-        if !key(&path).starts_with(&root) {
+    let canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let prefix = format!("{}/", key(&canonical.to_string_lossy()));
+    let mut seen = std::collections::HashSet::new();
+    for repo in repos {
+        let repo = Path::new(repo);
+        let Ok(common) = common_dir(repo) else {
+            continue;
+        };
+        if !seen.insert(key(&common.to_string_lossy())) {
             continue;
         }
-        let Some(rest) = Path::new(&path)
-            .file_name()
-            .and_then(|name| name.to_str())
-            .and_then(|name| name.strip_prefix(SCRATCH_PREFIX))
-        else {
-            continue;
-        };
-        let owner: Option<u32> = rest.split('-').next().and_then(|pid| pid.parse().ok());
-        let stale = match (owner, &table) {
-            (Some(pid), _) if pid == std::process::id() => true,
-            (Some(pid), Some(table)) => !table.iter().any(|proc| proc.pid == pid),
-            _ => false,
-        };
-        if stale {
-            remove_scratch(repo, Path::new(&path));
+        for (path, _, _) in worktrees(repo).unwrap_or_default() {
+            let name = Path::new(&path)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default()
+                .to_string();
+            if key(&path).starts_with(&prefix) && legacy_stale(&name, &table) {
+                remove_scratch(repo, Path::new(&path));
+            }
         }
     }
+    // Folders no repository lists any more.
+    for entry in std::fs::read_dir(root).into_iter().flatten().flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if legacy_stale(&name, &table) {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
+    let _ = std::fs::remove_dir(root);
+    for repo in repos {
+        let _ = git_run(Path::new(repo), &["worktree", "prune"], false);
+    }
+}
+
+/// The app's start: what old versions left in the system's temp folder goes.
+pub fn sweep_leftovers(repos: &[String]) {
+    sweep_legacy(&legacy_root(), repos);
 }
 
 fn tested_ref(task: &str, part: &str) -> String {
@@ -729,6 +800,104 @@ fn tested(repo: &Path, task: &str, tip: &str) -> Option<Tested> {
 fn forget_tested(repo: &Path, task: &str) {
     for part in ["base", "merge", "tip"] {
         let _ = git_run(repo, &["update-ref", "-d", &tested_ref(task, part)], false);
+    }
+}
+
+/* ── Checks that cannot tell anything ──────────────────────────── */
+
+/// Files that cannot break a build or a test, by the patterns the check
+/// skipping reads: a name's ending, a name's beginning, a folder.
+const DOC_SUFFIXES: &[&str] = &[".md", ".mdx", ".txt", ".rst"];
+const DOC_NAME_PREFIXES: &[&str] = &["LICENSE", "CHANGELOG"];
+const DOC_FOLDERS: &[&str] = &["docs/", ".github/ISSUE_TEMPLATE/"];
+/// Text files that build tools read all the same: not documentation.
+fn build_input(name: &str) -> bool {
+    name == "CMakeLists.txt"
+        || ((name.starts_with("requirements") || name.starts_with("constraints"))
+            && name.ends_with(".txt"))
+}
+
+fn documentation(path: &str) -> bool {
+    let path = path.replace('\\', "/");
+    let name = path.rsplit('/').next().unwrap_or(&path);
+    if build_input(name) {
+        return false;
+    }
+    DOC_FOLDERS.iter().any(|folder| path.starts_with(folder))
+        || DOC_SUFFIXES.iter().any(|suffix| name.ends_with(suffix))
+        || DOC_NAME_PREFIXES
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
+}
+
+/// Every changed path is documentation: a check could not fail on it.
+fn documentation_only(changed: &[String]) -> bool {
+    !changed.is_empty() && changed.iter().all(|path| documentation(path))
+}
+
+const SKIPPED_DOCS: &str = "documentation only";
+const SKIPPED_PASSED: &str = "already passed on this exact tree";
+/// Trees remembered per repository.
+const PASSED_TREES: usize = 200;
+
+fn passed_file(request: &Delivery) -> Option<PathBuf> {
+    let dir = match request.data_dir.as_deref().filter(|dir| !dir.is_empty()) {
+        Some(dir) => PathBuf::from(dir),
+        None => crate::paths::Paths::from_env().app_data_dir().ok()?,
+    };
+    Some(dir.join("delivery-passed.json"))
+}
+
+fn passed_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(Default::default)
+}
+
+/// What a passed check vouches for: the tree it ran on, with the line that
+/// ran, since another check would say something else about the same files.
+fn passed_entry(tree: &str, line: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(line.as_bytes());
+    let line: String = digest[..4].iter().map(|b| format!("{b:02x}")).collect();
+    format!("{tree}:{line}")
+}
+
+fn read_passed(file: &Path) -> HashMap<String, Vec<String>> {
+    std::fs::read_to_string(file)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
+}
+
+fn passed_before(request: &Delivery, repo: &str, tree: &str, line: &str) -> bool {
+    let Some(file) = passed_file(request) else {
+        return false;
+    };
+    let _held = passed_lock().lock().unwrap_or_else(|p| p.into_inner());
+    read_passed(&file)
+        .get(repo)
+        .is_some_and(|trees| trees.contains(&passed_entry(tree, line)))
+}
+
+fn remember_passed(request: &Delivery, repo: &str, tree: &str, line: &str) {
+    let Some(file) = passed_file(request) else {
+        return;
+    };
+    let _held = passed_lock().lock().unwrap_or_else(|p| p.into_inner());
+    let mut all = read_passed(&file);
+    let trees = all.entry(repo.to_string()).or_default();
+    let entry = passed_entry(tree, line);
+    trees.retain(|kept| *kept != entry);
+    trees.push(entry);
+    if trees.len() > PASSED_TREES {
+        let extra = trees.len() - PASSED_TREES;
+        trees.drain(..extra);
+    }
+    if let Some(parent) = file.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(text) = serde_json::to_string(&all) {
+        let _ = std::fs::write(&file, text);
     }
 }
 
@@ -924,7 +1093,12 @@ fn check_shell(shell: Option<&ShellInfo>) -> ShellInfo {
     })
 }
 
-fn check_command(invocation: &Invocation, dir: &Path, port_base: Option<u32>) -> Command {
+fn check_command(
+    invocation: &Invocation,
+    dir: &Path,
+    port_base: Option<u32>,
+    build_env: &[(String, String)],
+) -> Command {
     crate::path_env::ensure();
     let mut command = Command::new(&invocation.program);
     command.args(&invocation.args).current_dir(dir);
@@ -938,6 +1112,10 @@ fn check_command(invocation: &Invocation, dir: &Path, port_base: Option<u32>) ->
         command.arg(raw);
     }
     scrub(&mut command);
+    // The shared build cache, set after the scrub so that it survives it.
+    for (name, value) in build_env {
+        command.env(name, value);
+    }
     for (name, value) in &invocation.env {
         command.env(name, value);
     }
@@ -999,7 +1177,7 @@ fn run_check(request: &Delivery, dir: &Path, line: &str, limit: Duration) -> Res
     let shell = check_shell(request.shell.as_ref());
     let invocation = invocation(&shell, line);
     let finished = run(
-        check_command(&invocation, dir, request.port_base),
+        check_command(&invocation, dir, request.port_base, &request.build_env),
         Spawn {
             input: None,
             limit,
@@ -1419,6 +1597,19 @@ pub struct Delivery {
     pub reuse: bool,
     #[serde(default)]
     pub port_base: Option<u32>,
+    /// The workspace's id, which names its check folder.
+    #[serde(default)]
+    pub workspace_id: String,
+    /// What the check's build tools are told, after the environment is
+    /// scrubbed: the shared build cache's variables (`build_cache::env_for`).
+    #[serde(default)]
+    pub build_env: Vec<(String, String)>,
+    /// Where the check folders live; none: the user's local data folder.
+    #[serde(default)]
+    pub check_root: Option<String>,
+    /// Where the trees whose check passed are kept; none: the app's data folder.
+    #[serde(default)]
+    pub data_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -1449,6 +1640,8 @@ pub struct Outcome {
     pub changed: Vec<String>,
     pub outside_owns: Vec<String>,
     pub check: Option<Check>,
+    /// Why the check did not run although the workspace has one.
+    pub check_skipped: Option<String>,
     pub review: Option<Verdict>,
     /// The merge it was tested as, and the head of the branch it was merged onto.
     pub merge: Option<String>,
@@ -1468,6 +1661,7 @@ impl Outcome {
             changed: vec![],
             outside_owns: vec![],
             check: None,
+            check_skipped: None,
             review: None,
             merge: None,
             base: None,
@@ -1585,7 +1779,6 @@ pub fn deliver(request: &Delivery, reviewer: &dyn Reviewer, limits: &Limits) -> 
     let stage = Stage::enter(&request.task.id, &repo);
     let turn = turn_of(&repo);
     let _turn = turn.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    sweep(&worktree);
     if !request.reuse {
         // Submitted again: this one replaces what of the task waited for the
         // person, whatever it turns out to be.
@@ -1687,7 +1880,13 @@ can land.",
     }
 
     // 2. Merged onto the branch as it is now, away from everyone's checkout.
-    let scratch = match Scratch::add(worktree, &base, task) {
+    // One folder per workspace, one check at a time in it.
+    let folder = check_folder(request);
+    let folder_turn = turn_of(&format!("check:{}", key(&folder.to_string_lossy())));
+    let _folder_turn = folder_turn
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let scratch = match Scratch::acquire(worktree, &base, folder) {
         Ok(scratch) => scratch,
         Err(err) => return done(Outcome::error(err)),
     };
@@ -1779,13 +1978,31 @@ together, say so in a comment on your task and stop.",
     passed.merge = Some(merge.clone());
     passed.base = Some(base.clone());
 
-    // 3. The workspace's check, on the merged result.
-    if let Some(line) = request
+    // 3. The workspace's check, on the merged result. Not when it cannot tell
+    // anything: nothing but documentation changed, or these very files passed
+    // it before.
+    let line = request
         .check_command
         .as_deref()
         .map(str::trim)
-        .filter(|l| !l.is_empty())
-    {
+        .filter(|l| !l.is_empty());
+    let tree = git(&dir, &["rev-parse", "HEAD^{tree}"])
+        .ok()
+        .map(|out| out.trim().to_string());
+    let repo_key = common_dir(worktree)
+        .map(|dir| key(&dir.to_string_lossy()))
+        .unwrap_or_default();
+    if let Some(line) = line {
+        if documentation_only(&changed) {
+            passed.check_skipped = Some(SKIPPED_DOCS.to_string());
+        } else if tree
+            .as_deref()
+            .is_some_and(|tree| passed_before(request, &repo_key, tree, line))
+        {
+            passed.check_skipped = Some(SKIPPED_PASSED.to_string());
+        }
+    }
+    if let Some(line) = line.filter(|_| passed.check_skipped.is_none()) {
         stage.set("checking");
         if let Some((main, _, _)) = worktrees(worktree)
             .ok()
@@ -1812,14 +2029,17 @@ together, say so in a comment on your task and stop.",
             let mut outcome = passed;
             outcome.outcome = Kind::CheckFailed;
             outcome.detail = format!(
-                "The check `{line}` {how} on {branch} merged onto {target}. It runs in a fresh checkout of that \
-merge, without the files git ignores (dependencies, build output) apart from .env-style files, so it has to \
-install what it needs itself. The end of its output:\n```\n{}\n```\nFix it on your branch, run the check yourself, \
+                "The check `{line}` {how} on {branch} merged onto {target}. It runs in a checkout of that \
+merge that Hangar keeps for this workspace and resets to each merge: untracked files are removed, files git \
+ignores stay, and the build output is shared and outside it. It has to install what it needs itself. The end of its output:\n```\n{}\n```\nFix it on your branch, run the check yourself, \
 commit, then call delivery_submit again.",
                 check.tail
             );
             outcome.check = Some(check);
             return done(outcome);
+        }
+        if let Some(tree) = &tree {
+            remember_passed(request, &repo_key, tree, line);
         }
         passed.check = Some(check);
     }
@@ -1876,18 +2096,20 @@ working around it.",
         return done(outcome);
     }
     passed.review = Some(verdict);
-    // 6. The temporary worktree goes before anything lands.
-    drop(scratch);
-
     // 5. Landed, or kept tested for the person.
     if !request.land {
         save_tested(worktree, task, &base, &merge, &tip);
         let mut outcome = passed;
         outcome.outcome = Kind::Ready;
+        let skipped = outcome
+            .check_skipped
+            .as_ref()
+            .map(|why| format!("Its check was skipped: {why}. "))
+            .unwrap_or_default();
         outcome.detail = format!(
-            "{branch} passed {}its review. Automatic landing is off in this workspace, so it waits for the person to \
+            "{skipped}{branch} passed {}its review. Automatic landing is off in this workspace, so it waits for the person to \
 land it on {target}. There is nothing more for you to do: stop here.",
-            if request.check_command.is_some() {
+            if request.check_command.is_some() && outcome.check_skipped.is_none() {
                 "its check and "
             } else {
                 ""
@@ -2479,11 +2701,11 @@ mod tests {
             target: "main".into(),
             task: TaskBrief {
                 id: repo.task.clone(),
-                title: "Add b.txt".into(),
-                description: "Add b.txt holding one line.".into(),
-                owns: vec!["b.txt".into()],
+                title: "Add b.rs".into(),
+                description: "Add b.rs holding one line.".into(),
+                owns: vec!["b.rs".into()],
             },
-            summary: Some("Added b.txt.".into()),
+            summary: Some("Added b.rs.".into()),
             check_command: None,
             shell: None,
             reviewer_model: "sonnet".into(),
@@ -2491,6 +2713,10 @@ mod tests {
             land: true,
             reuse: false,
             port_base: None,
+            workspace_id: format!("ws-{}", repo.task),
+            build_env: vec![],
+            check_root: Some(repo.root.join("checks").to_string_lossy().into_owned()),
+            data_dir: Some(repo.root.join("data").to_string_lossy().into_owned()),
         }
     }
 
@@ -2498,35 +2724,22 @@ mod tests {
         sh(dir, &["rev-parse", name])
     }
 
-    /// Nothing left of a temporary worktree: the repository lists its main
-    /// checkout and the worker's, and nothing in the scratch folder.
+    /// Nothing left of a delivery but the workspace's check folder: the
+    /// repository lists its main checkout, the worker's and at most that one,
+    /// and the folder holds no merge half done.
     fn assert_no_scratch(repo: &Repo) {
         let listed = worktrees(&repo.main).unwrap();
-        let root = key(&scratch_root().to_string_lossy());
-        assert!(
-            listed
-                .iter()
-                .all(|(path, _, _)| !key(path).starts_with(&root)),
-            "a temporary worktree is left: {listed:?}"
-        );
-        assert_eq!(listed.len(), 2, "{listed:?}");
-        let tag: String = repo
-            .task
-            .chars()
-            .filter(char::is_ascii_alphanumeric)
-            .take(8)
+        let checks = format!("{}/", key(&repo.root.join("checks").to_string_lossy()));
+        let others: Vec<_> = listed
+            .iter()
+            .filter(|(path, _, _)| key(path).starts_with(&checks))
             .collect();
-        let mine = format!("{SCRATCH_PREFIX}{}-{tag}-", std::process::id());
-        let leftovers: Vec<_> = fs::read_dir(scratch_root())
-            .unwrap()
-            .filter_map(Result::ok)
-            .map(|entry| entry.file_name().to_string_lossy().into_owned())
-            .filter(|name| name.starts_with(&mine))
-            .collect();
-        assert!(
-            leftovers.is_empty(),
-            "left in the scratch folder: {leftovers:?}"
-        );
+        assert!(others.len() <= 1, "more than one check folder: {listed:?}");
+        assert_eq!(listed.len(), 2 + others.len(), "{listed:?}");
+        for (path, _, _) in others {
+            let status = sh(Path::new(path), &["status", "--porcelain"]);
+            assert!(status.is_empty(), "the check folder is not clean: {status}");
+        }
     }
 
     fn approve() -> Verdict {
@@ -2611,7 +2824,7 @@ mod tests {
     #[test]
     fn a_branch_ahead_of_the_target_lands_as_a_fast_forward() {
         let repo = repo("ff");
-        write(&repo.worker, "b.txt", "bee\n");
+        write(&repo.worker, "b.rs", "bee\n");
         commit(&repo.worker, "Add b");
         let mut request = request(&repo);
         request.check_command = Some("echo checked".into());
@@ -2626,7 +2839,7 @@ mod tests {
             "no merge commit"
         );
         assert_eq!(
-            read(&repo.main, "b.txt"),
+            read(&repo.main, "b.rs"),
             "bee\n",
             "the person's checkout moved with it"
         );
@@ -2636,10 +2849,10 @@ mod tests {
         );
         let check = outcome.check.clone().expect("the check ran");
         assert!(check.passed && check.tail.contains("checked"), "{check:?}");
-        assert_eq!(outcome.changed, vec!["b.txt".to_string()]);
+        assert_eq!(outcome.changed, vec!["b.rs".to_string()]);
         assert!(outcome.outside_owns.is_empty());
         let prompt = reviewer.prompts.borrow()[0].clone();
-        assert!(prompt.contains("Add b.txt holding one line."));
+        assert!(prompt.contains("Add b.rs holding one line."));
         assert!(prompt.contains("+bee"), "the diff is in the prompt");
         assert!(prompt.contains("The check `echo checked` already passed"));
         assert!(kept(&repo).is_none());
@@ -2653,7 +2866,7 @@ mod tests {
         write(&repo.main, "app.local", "tracked\n");
         commit(&repo.main, "Ignore .env, track app.local");
         sh(&repo.worker, &["merge", "-q", "main"]);
-        write(&repo.worker, "b.txt", "bee\n");
+        write(&repo.worker, "b.rs", "bee\n");
         commit(&repo.worker, "Add b");
         // Ignored, so only the main checkout has it; and a tracked file the
         // person is editing, which the check must see as committed.
@@ -2682,9 +2895,9 @@ mod tests {
     #[test]
     fn a_target_that_moved_on_gets_a_merge_with_both_sides() {
         let repo = repo("merge");
-        write(&repo.main, "c.txt", "sea\n");
+        write(&repo.main, "c.rs", "sea\n");
         commit(&repo.main, "Add c");
-        write(&repo.worker, "b.txt", "bee\n");
+        write(&repo.worker, "b.rs", "bee\n");
         commit(&repo.worker, "Add b");
 
         let outcome = deliver_now(&request(&repo), &fake(Ok(approve())));
@@ -2692,8 +2905,8 @@ mod tests {
         assert_eq!(outcome.outcome, Kind::Landed, "{}", outcome.detail);
         let parents = sh(&repo.main, &["rev-list", "--parents", "-n", "1", "main"]);
         assert_eq!(parents.split(' ').count(), 3, "a merge commit: {parents}");
-        assert_eq!(read(&repo.main, "b.txt"), "bee\n");
-        assert_eq!(read(&repo.main, "c.txt"), "sea\n");
+        assert_eq!(read(&repo.main, "b.rs"), "bee\n");
+        assert_eq!(read(&repo.main, "c.rs"), "sea\n");
         assert_eq!(sh(&repo.main, &["status", "--porcelain"]), "");
         assert_no_scratch(&repo);
     }
@@ -2730,7 +2943,7 @@ mod tests {
     #[test]
     fn a_failing_check_says_how_and_shows_the_end_of_its_output() {
         let repo = repo("check");
-        write(&repo.worker, "b.txt", "bee\n");
+        write(&repo.worker, "b.rs", "bee\n");
         commit(&repo.worker, "Add b");
         let before = head(&repo.main, "main");
         let mut request = request(&repo);
@@ -2756,7 +2969,7 @@ mod tests {
     #[test]
     fn a_check_that_runs_too_long_is_stopped_with_what_it_started() {
         let repo = repo("timeout");
-        write(&repo.worker, "b.txt", "bee\n");
+        write(&repo.worker, "b.rs", "bee\n");
         commit(&repo.worker, "Add b");
         let mut request = request(&repo);
         // A child of the shell, which the shell's own end would not reach.
@@ -2854,7 +3067,7 @@ mod tests {
     #[test]
     fn uncommitted_work_in_the_worker_s_worktree_is_refused() {
         let repo = repo("dirty-worker");
-        write(&repo.worker, "b.txt", "bee\n");
+        write(&repo.worker, "b.rs", "bee\n");
         commit(&repo.worker, "Add b");
         write(&repo.worker, "a.txt", "changed\n");
         write(&repo.worker, "notes.md", "untracked\n");
@@ -2943,7 +3156,7 @@ mod tests {
     #[test]
     fn local_changes_elsewhere_ride_along_a_landing() {
         let repo = repo("bystander");
-        write(&repo.worker, "b.txt", "bee\n");
+        write(&repo.worker, "b.rs", "bee\n");
         commit(&repo.worker, "Add b");
         write(&repo.main, "src/app.ts", "export const app = 2; // mine\n");
 
@@ -2961,12 +3174,12 @@ mod tests {
     #[test]
     fn a_target_that_moves_during_the_review_is_tested_again_on_its_new_head() {
         let repo = repo("moving");
-        write(&repo.worker, "b.txt", "bee\n");
+        write(&repo.worker, "b.rs", "bee\n");
         commit(&repo.worker, "Add b");
         let main = repo.main.clone();
         let reviewer = fake_with(vec![Ok(approve())], move |call| {
             if call == 0 {
-                write(&main, "c.txt", "sea\n");
+                write(&main, "c.rs", "sea\n");
                 commit(&main, "The person commits meanwhile");
             }
         });
@@ -2975,15 +3188,15 @@ mod tests {
 
         assert_eq!(outcome.outcome, Kind::Landed, "{}", outcome.detail);
         assert_eq!(reviewer.calls.get(), 2, "reviewed again on the new head");
-        assert_eq!(read(&repo.main, "b.txt"), "bee\n");
-        assert_eq!(read(&repo.main, "c.txt"), "sea\n");
+        assert_eq!(read(&repo.main, "b.rs"), "bee\n");
+        assert_eq!(read(&repo.main, "c.rs"), "sea\n");
         assert_no_scratch(&repo);
     }
 
     #[test]
     fn a_delivery_waiting_for_the_person_is_tested_again_if_the_target_moved() {
         let repo = repo("ready");
-        write(&repo.worker, "b.txt", "bee\n");
+        write(&repo.worker, "b.rs", "bee\n");
         commit(&repo.worker, "Add b");
         let before = head(&repo.main, "main");
         let mut request = request(&repo);
@@ -2996,7 +3209,7 @@ mod tests {
         assert!(kept(&repo).is_some());
         assert_no_scratch(&repo);
 
-        write(&repo.main, "c.txt", "sea\n");
+        write(&repo.main, "c.rs", "sea\n");
         commit(&repo.main, "The person commits");
         request.land = true;
         request.reuse = true;
@@ -3009,8 +3222,8 @@ mod tests {
             1,
             "the merge it was tested as is stale"
         );
-        assert_eq!(read(&repo.main, "b.txt"), "bee\n");
-        assert_eq!(read(&repo.main, "c.txt"), "sea\n");
+        assert_eq!(read(&repo.main, "b.rs"), "bee\n");
+        assert_eq!(read(&repo.main, "c.rs"), "sea\n");
         assert_no_scratch(&repo);
     }
 
@@ -3021,7 +3234,7 @@ mod tests {
             repo.main.to_string_lossy().into_owned(),
             repo.worker.to_string_lossy().into_owned(),
         );
-        write(&repo.worker, "b.txt", "bee\n");
+        write(&repo.worker, "b.rs", "bee\n");
         commit(&repo.worker, "Add b");
         let before = head(&repo.main, "main");
         let mut request = request(&repo);
@@ -3041,7 +3254,7 @@ mod tests {
         );
 
         // The orchestrator finds a bug; the worker commits the fix.
-        write(&repo.worker, "b.txt", "bee!\n");
+        write(&repo.worker, "b.rs", "bee!\n");
         commit(&repo.worker, "Fix b");
         let plan = preflight(&main, &worker, None, false, Some(&repo.task)).unwrap();
         assert!(
@@ -3071,7 +3284,7 @@ mod tests {
 
         assert_eq!(outcome.outcome, Kind::Landed, "{}", outcome.detail);
         assert_eq!(head(&repo.main, "main"), second.merge);
-        assert_eq!(read(&repo.main, "b.txt"), "bee!\n");
+        assert_eq!(read(&repo.main, "b.rs"), "bee!\n");
         assert!(kept(&repo).is_none());
         assert_no_scratch(&repo);
     }
@@ -3079,7 +3292,7 @@ mod tests {
     #[test]
     fn a_new_delivery_that_fails_leaves_nothing_waiting_to_land() {
         let repo = repo("resubmit-fails");
-        write(&repo.worker, "b.txt", "bee\n");
+        write(&repo.worker, "b.rs", "bee\n");
         commit(&repo.worker, "Add b");
         let mut request = request(&repo);
         request.land = false;
@@ -3088,14 +3301,14 @@ mod tests {
             Kind::Ready
         );
 
-        write(&repo.worker, "b.txt", "bee, broken\n");
+        write(&repo.worker, "b.rs", "bee, broken\n");
         commit(&repo.worker, "Break b");
         let outcome = deliver_now(
             &request,
             &fake(Ok(Verdict {
                 approve: false,
                 blocking: vec![Blocking {
-                    file: "b.txt".into(),
+                    file: "b.rs".into(),
                     line: Some(1),
                     problem: "Broken.".into(),
                 }],
@@ -3119,7 +3332,7 @@ mod tests {
     #[test]
     fn landing_what_waited_after_the_worker_committed_again_lands_nothing() {
         let repo = repo("stale");
-        write(&repo.worker, "b.txt", "bee\n");
+        write(&repo.worker, "b.rs", "bee\n");
         commit(&repo.worker, "Add b");
         let before = head(&repo.main, "main");
         let mut request = request(&repo);
@@ -3132,9 +3345,9 @@ mod tests {
 
         // The worker commits more, and has not submitted it yet; the target
         // moved too, which changes nothing.
-        write(&repo.worker, "b.txt", "bee, half done\n");
+        write(&repo.worker, "b.rs", "bee, half done\n");
         commit(&repo.worker, "Start a fix");
-        write(&repo.main, "c.txt", "sea\n");
+        write(&repo.main, "c.rs", "sea\n");
         commit(&repo.main, "The person commits");
         let target = head(&repo.main, "main");
         request.land = true;
@@ -3150,7 +3363,7 @@ mod tests {
         assert_eq!(outcome.merge.as_deref(), Some(first.as_str()));
         assert_eq!(head(&repo.main, "main"), target, "nothing landed");
         assert_ne!(target, before);
-        assert_eq!(read(&repo.main, "b.txt"), "");
+        assert_eq!(read(&repo.main, "b.rs"), "");
         assert!(kept(&repo).is_none(), "what waited is dropped");
         assert_no_scratch(&repo);
     }
@@ -3158,7 +3371,7 @@ mod tests {
     #[test]
     fn what_an_older_version_kept_still_tells_a_branch_that_moved() {
         let repo = repo("legacy");
-        write(&repo.worker, "b.txt", "bee\n");
+        write(&repo.worker, "b.rs", "bee\n");
         commit(&repo.worker, "Add b");
         let mut request = request(&repo);
         request.land = false;
@@ -3173,16 +3386,186 @@ mod tests {
         );
         assert!(kept(&repo).expect("kept tested").current);
 
-        write(&repo.worker, "b.txt", "bee!\n");
+        write(&repo.worker, "b.rs", "bee!\n");
         commit(&repo.worker, "Fix b");
         assert!(!kept(&repo).expect("kept tested").current);
+    }
+
+    /// A line that prints where it runs and what is there, and leaves a file.
+    fn look() -> String {
+        if cfg!(windows) {
+            "cd && dir /b && echo x> junk.tmp".into()
+        } else {
+            "pwd && ls && echo x > junk.tmp".into()
+        }
+    }
+
+    #[test]
+    fn two_checks_of_a_workspace_run_in_the_same_folder_and_the_second_sees_only_its_own_merge() {
+        let repo = repo("same-folder");
+        write(&repo.worker, "b.rs", "bee\n");
+        commit(&repo.worker, "Add b");
+        let mut request = request(&repo);
+        request.land = false;
+        request.check_command = Some(look());
+        let first = deliver_now(&request, &fake(Ok(approve())));
+        assert_eq!(first.outcome, Kind::Ready, "{}", first.detail);
+        let first = first.check.unwrap().tail;
+        assert!(first.contains("b.rs"), "{first}");
+
+        sh(&repo.worker, &["rm", "-q", "b.rs"]);
+        write(&repo.worker, "c.rs", "sea\n");
+        commit(&repo.worker, "Swap b for c");
+        let second = deliver_now(&request, &fake(Ok(approve())));
+        assert_eq!(second.outcome, Kind::Ready, "{}", second.detail);
+        let second = second.check.unwrap().tail;
+
+        let place = |tail: &str| tail.lines().next().unwrap().trim().to_string();
+        assert_eq!(place(&first), place(&second), "{first}\n{second}");
+        assert!(second.contains("c.rs"), "{second}");
+        assert!(!second.contains("b.rs"), "{second}");
+        assert!(!second.contains("junk.tmp"), "{second}");
+        assert_no_scratch(&repo);
+    }
+
+    #[test]
+    fn the_check_runs_with_the_build_environment_after_the_scrub() {
+        let shell = check_shell(None);
+        let invocation = invocation(&shell, "true");
+        let env = vec![("CARGO_TARGET_DIR".to_string(), "C:/cache/t".to_string())];
+        let command = check_command(&invocation, Path::new("."), None, &env);
+        assert_eq!(
+            env_of(&command, "CARGO_TARGET_DIR"),
+            Some(Some("C:/cache/t".into()))
+        );
+        let none = check_command(&invocation, Path::new("."), None, &[]);
+        assert_eq!(env_of(&none, "CARGO_TARGET_DIR"), None);
+    }
+
+    #[test]
+    fn only_documentation_is_documentation() {
+        let docs = |paths: &[&str]| {
+            documentation_only(&paths.iter().map(|p| p.to_string()).collect::<Vec<_>>())
+        };
+        assert!(docs(&[
+            "README.md",
+            "site/page.mdx",
+            "notes.txt",
+            "guide.rst",
+            "docs/img/a.png",
+            "LICENSE",
+            "LICENSE-MIT",
+            "CHANGELOG.md",
+            ".github/ISSUE_TEMPLATE/bug.yml",
+        ]));
+        assert!(!docs(&[]));
+        assert!(!docs(&["README.md", "src/main.rs"]));
+        assert!(!docs(&[".github/workflows/ci.yml"]));
+        assert!(!docs(&["CMakeLists.txt"]));
+        assert!(!docs(&["requirements.txt"]));
+        assert!(!docs(&["package.json"]));
+    }
+
+    #[test]
+    fn a_documentation_only_delivery_skips_the_check_and_a_code_one_does_not() {
+        let repo = repo("docs-only");
+        write(&repo.worker, "README.md", "hello\n");
+        commit(&repo.worker, "Docs");
+        let mut request = request(&repo);
+        request.land = false;
+        request.check_command = Some("exit 1".into());
+        let docs = deliver_now(&request, &fake(Ok(approve())));
+        assert_eq!(docs.outcome, Kind::Ready, "{}", docs.detail);
+        assert_eq!(docs.check_skipped.as_deref(), Some(SKIPPED_DOCS));
+        assert!(docs.check.is_none());
+        assert!(docs.review.is_some());
+
+        write(&repo.worker, "src/lib.rs", "pub fn a() {}\n");
+        commit(&repo.worker, "Code");
+        let code = deliver_now(&request, &fake(Ok(approve())));
+        assert_eq!(code.outcome, Kind::CheckFailed, "{}", code.detail);
+        assert!(code.check_skipped.is_none());
+        assert_no_scratch(&repo);
+    }
+
+    #[test]
+    fn a_tree_that_passed_skips_the_check_and_a_new_one_runs_it() {
+        let repo = repo("same-tree");
+        write(&repo.worker, "b.rs", "bee\n");
+        commit(&repo.worker, "Add b");
+        let mut request = request(&repo);
+        request.land = false;
+        request.check_command = Some("echo ok".into());
+        let first = deliver_now(&request, &fake(Ok(approve())));
+        assert_eq!(first.outcome, Kind::Ready, "{}", first.detail);
+        assert!(first.check.is_some() && first.check_skipped.is_none());
+
+        // Submitted again: a new merge commit, the same files.
+        let again = deliver_now(&request, &fake(Ok(approve())));
+        assert_eq!(again.outcome, Kind::Ready, "{}", again.detail);
+        assert!(again.check.is_none());
+        assert_eq!(again.check_skipped.as_deref(), Some(SKIPPED_PASSED));
+
+        // Other files: it runs. So does another check line on the same ones.
+        write(&repo.worker, "c.rs", "sea\n");
+        commit(&repo.worker, "Add c");
+        let changed = deliver_now(&request, &fake(Ok(approve())));
+        assert!(changed.check.is_some(), "{}", changed.detail);
+        request.check_command = Some("echo fine".into());
+        let other = deliver_now(&request, &fake(Ok(approve())));
+        assert!(other.check.is_some(), "{}", other.detail);
+        assert_no_scratch(&repo);
+    }
+
+    #[test]
+    fn only_the_last_trees_that_passed_are_kept() {
+        let dir = std::env::temp_dir().join(format!("hangar-passed-{}", uuid::Uuid::new_v4()));
+        let mut request = request(&repo("passed-cap"));
+        request.data_dir = Some(dir.to_string_lossy().into_owned());
+        for n in 0..PASSED_TREES + 5 {
+            remember_passed(&request, "repo", &format!("tree{n}"), "check");
+        }
+        assert!(!passed_before(&request, "repo", "tree0", "check"));
+        assert!(passed_before(&request, "repo", "tree204", "check"));
+        assert!(!passed_before(&request, "other", "tree204", "check"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn worktrees_old_versions_left_are_swept_with_their_folders() {
+        let repo = repo("sweep");
+        let old = repo.root.join("old");
+        fs::create_dir_all(&old).unwrap();
+        let name = format!("{SCRATCH_PREFIX}{}-abc-1234", std::process::id());
+        let listed = old.join(&name);
+        sh(
+            &repo.main,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "--detach",
+                &listed.to_string_lossy(),
+                "main",
+            ],
+        );
+        let orphan = old.join(format!("{SCRATCH_PREFIX}{}-def-5678", std::process::id()));
+        fs::create_dir_all(&orphan).unwrap();
+        let other = old.join("someone-else");
+        fs::create_dir_all(&other).unwrap();
+
+        sweep_legacy(&old, &[repo.main.to_string_lossy().into_owned()]);
+
+        assert!(!listed.exists() && !orphan.exists());
+        assert!(other.exists(), "what is not a delivery's stays");
+        assert_eq!(worktrees(&repo.main).unwrap().len(), 2);
     }
 
     #[test]
     fn a_target_checked_out_nowhere_lands_by_moving_its_ref() {
         let repo = repo("ref");
         sh(&repo.main, &["switch", "-q", "-c", "elsewhere"]);
-        write(&repo.worker, "b.txt", "bee\n");
+        write(&repo.worker, "b.rs", "bee\n");
         commit(&repo.worker, "Add b");
 
         let outcome = deliver_now(&request(&repo), &fake(Ok(approve())));
@@ -3191,7 +3574,7 @@ mod tests {
         assert_eq!(outcome.landed_in, None);
         assert_eq!(head(&repo.main, "main"), head(&repo.main, "worker"));
         assert_eq!(
-            read(&repo.main, "b.txt"),
+            read(&repo.main, "b.rs"),
             "",
             "the checkout on another branch is left alone"
         );
@@ -3201,7 +3584,7 @@ mod tests {
     #[test]
     fn blocking_items_come_back_with_where_and_what() {
         let repo = repo("changes");
-        write(&repo.worker, "b.txt", "bee\n");
+        write(&repo.worker, "b.rs", "bee\n");
         write(&repo.worker, "src/app.ts", "export const app = 3;\n");
         commit(&repo.worker, "Add b, and change app");
         let reviewer = fake(Ok(Verdict {
@@ -3211,7 +3594,7 @@ mod tests {
                 line: Some(1),
                 problem: "Changes app, which the task did not ask for.".into(),
             }],
-            notes: "b.txt itself is fine.".into(),
+            notes: "b.rs itself is fine.".into(),
         }));
 
         let outcome = deliver_now(&request(&repo), &reviewer);
@@ -3229,21 +3612,21 @@ mod tests {
             "{}",
             outcome.detail
         );
-        assert!(outcome.detail.contains("Notes: b.txt itself is fine."));
+        assert!(outcome.detail.contains("Notes: b.rs itself is fine."));
         assert_eq!(outcome.outside_owns, vec!["src/app.ts".to_string()]);
         let prompt = reviewer.prompts.borrow()[0].clone();
         assert!(
             prompt.contains("Changed outside the files the task owns: src/app.ts."),
             "{prompt}"
         );
-        assert!(read(&repo.main, "b.txt").is_empty());
+        assert!(read(&repo.main, "b.rs").is_empty());
         assert_no_scratch(&repo);
     }
 
     #[test]
     fn a_review_that_cannot_run_merges_nothing() {
         let repo = repo("no-review");
-        write(&repo.worker, "b.txt", "bee\n");
+        write(&repo.worker, "b.rs", "bee\n");
         commit(&repo.worker, "Add b");
         let before = head(&repo.main, "main");
 
@@ -3276,7 +3659,7 @@ mod tests {
             "{empty}"
         );
 
-        write(&repo.worker, "b.txt", "bee\n");
+        write(&repo.worker, "b.rs", "bee\n");
         commit(&repo.worker, "Add b");
         let plan = preflight(&main, &worker, None, false, None).unwrap();
         assert_eq!(
@@ -3298,7 +3681,7 @@ mod tests {
     #[test]
     fn after_landing_the_worktree_and_branch_go_unless_they_hold_more() {
         let repo = repo("cleanup");
-        write(&repo.worker, "b.txt", "bee\n");
+        write(&repo.worker, "b.rs", "bee\n");
         commit(&repo.worker, "Add b");
         assert_eq!(
             deliver_now(&request(&repo), &fake(Ok(approve()))).outcome,

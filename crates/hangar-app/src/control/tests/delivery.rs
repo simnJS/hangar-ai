@@ -265,6 +265,7 @@ fn outcome(kind: Kind, detail: &str) -> Outcome {
         changed: vec!["src/export/button.tsx".into()],
         outside_owns: vec![],
         check: None,
+        check_skipped: None,
         review: None,
         merge: Some("abcdef1234567890".into()),
         base: Some("1234567abcdef".into()),
@@ -724,6 +725,8 @@ async fn a_landed_delivery_finishes_the_task_and_lets_the_worker_go() {
     contains(&comment, "Summary: Added the button.");
     contains(&comment, "Check: `pnpm test` passed in 42 s.");
     contains(&comment, "Review (sonnet): approved. Notes: Clean.");
+    // The briefing's Settings line reads what the check cost from here.
+    assert!(crate::orchestration::live::last_check("w1").is_some());
     contains(
         &comment,
         "Changed outside the files it owns, accepted by the review: src/i18n.ts.",

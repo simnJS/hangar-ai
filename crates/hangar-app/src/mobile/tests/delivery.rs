@@ -95,6 +95,7 @@ fn outcome(kind: Kind) -> Outcome {
         changed: Vec::new(),
         outside_owns: Vec::new(),
         check: None,
+        check_skipped: None,
         review: None,
         merge: Some("abc1234def567".into()),
         base: Some("0123456789ab".into()),

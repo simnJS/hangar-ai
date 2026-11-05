@@ -184,6 +184,7 @@ struct Fake {
     /// Whether `loadProjects` is given.
     projects: bool,
     sent: Mutex<Vec<(String, String)>>,
+    last_check: Option<CheckCost>,
 }
 
 fn fake(setup: Setup) -> Fake {
@@ -194,12 +195,17 @@ fn fake(setup: Setup) -> Fake {
         is_repo: None,
         projects: false,
         sent: Mutex::new(Vec::new()),
+        last_check: None,
     }
 }
 
 impl BriefingPort for Fake {
     fn state(&self) -> Arc<AppState> {
         Arc::new(self.setup.state.clone())
+    }
+
+    fn last_check(&self, _workspace_id: &str) -> Option<CheckCost> {
+        self.last_check
     }
 
     async fn load_board(&self, cwd: &str) -> Result<Vec<Task>, String> {
@@ -877,5 +883,70 @@ async fn answers_the_internal_request_in_the_shape_core_checks() {
         HashMap::<String, String>::new(),
         AgentId::Claude,
         Workspace::default(),
+    );
+}
+
+fn settings_of(last_check: Option<CheckCost>) -> String {
+    let setup = setup();
+    let briefing = build_briefing_with(
+        &BriefingInputs {
+            state: &setup.state,
+            pane_id: &setup.pane_id,
+            tasks: &setup.tasks,
+            memory: &setup.memory,
+            journal: &setup.journal,
+            activity: &activity,
+            now: now(),
+            git: setup.git,
+            projects: &setup.projects,
+            manager_events: &[],
+        },
+        last_check,
+    )
+    .expect("a briefing");
+    briefing
+        .context
+        .lines()
+        .find(|line| line.starts_with("Settings:"))
+        .expect("a settings line")
+        .to_string()
+}
+
+#[test]
+fn the_settings_line_says_what_the_last_check_cost_and_said() {
+    let passed = settings_of(Some(CheckCost {
+        seconds: 12 * 60 + 10,
+        passed: true,
+    }));
+    assert!(
+        passed.contains("check `pnpm test` (last check 12 min, passed)"),
+        "{passed}"
+    );
+    let failed = settings_of(Some(CheckCost {
+        seconds: 40,
+        passed: false,
+    }));
+    assert!(failed.contains("(last check 40 s, failed)"), "{failed}");
+}
+
+#[test]
+fn the_settings_line_says_nothing_of_a_check_that_never_ran() {
+    let line = settings_of(None);
+    assert!(!line.contains("last check"), "{line}");
+    assert!(line.starts_with("Settings: check `pnpm test`, "), "{line}");
+}
+
+#[tokio::test]
+async fn the_briefing_reads_the_last_check_from_its_port() {
+    let mut port = fake(setup());
+    port.last_check = Some(CheckCost {
+        seconds: 14 * 60,
+        passed: true,
+    });
+    let briefing = briefing_for("o", &port).await.unwrap().unwrap();
+    assert!(
+        briefing.context.contains("(last check 14 min, passed)"),
+        "{}",
+        briefing.context
     );
 }
