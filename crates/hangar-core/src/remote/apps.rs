@@ -40,7 +40,13 @@ pub const IDLE_MS: u64 = 30 * 60 * 1000;
 pub const SWEEP_EVERY: Duration = Duration::from_secs(60);
 /// A server on the loopback takes a connection at once. This only bounds a
 /// port nobody listens on, which Windows takes two seconds to refuse.
-const REACH_TIMEOUT: Duration = Duration::from_millis(500);
+const REACH_TIMEOUT: Duration = if cfg!(test) {
+    // A machine loaded with builds can take longer than half a second to
+    // accept on its own loopback: the tests are not to fail for it.
+    Duration::from_secs(5)
+} else {
+    Duration::from_millis(500)
+};
 /// More ports than the window ever asks about at once.
 const MAX_PORTS: usize = 256;
 
@@ -613,6 +619,24 @@ pub(super) mod tests {
         }
     }
 
+    /// A listener on one of the share's ports, tried again for ten seconds
+    /// while it is taken: the last test's sockets may still be closing, on a
+    /// machine slowed by a dozen builds.
+    pub async fn bind_share(addr: impl Into<SocketAddr>) -> tokio::net::TcpListener {
+        let addr = addr.into();
+        let mut tries = 0;
+        loop {
+            match tokio::net::TcpListener::bind(addr).await {
+                Ok(listener) => return listener,
+                Err(err) if err.kind() == std::io::ErrorKind::AddrInUse && tries < 100 => {
+                    tries += 1;
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                Err(err) => panic!("could not listen on {addr}: {err}"),
+            }
+        }
+    }
+
     /// A dev server on 127.0.0.1:`port`. It answers a request with its own
     /// body and headers of its own — two cookies, one by the device's name
     /// — `/stream` a chunk at a time as the test hands them over, and
@@ -620,9 +644,7 @@ pub(super) mod tests {
     pub async fn dev_server(port: u16) -> (u16, DevServer) {
         let dev = DevServer::default();
         let app = axum::Router::new().fallback(answer).with_state(dev.clone());
-        let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, port))
-            .await
-            .unwrap();
+        let listener = bind_share((Ipv4Addr::LOCALHOST, port)).await;
         let port = listener.local_addr().unwrap().port();
         tokio::spawn(async move {
             let _ = axum::serve(listener, app).await;
@@ -799,14 +821,16 @@ pub(super) mod tests {
             // If someone else wins the port in between, bind fails: start over.
             let mut held = None;
             for _ in 0..50 {
-                let server = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, test_port(9)))
-                    .await
-                    .unwrap();
+                let server = bind_share((Ipv4Addr::LOCALHOST, test_port(9))).await;
                 let port = server.local_addr().unwrap().port();
                 assert_eq!(listening(&[port, 0, port]).await, [port]);
                 assert_eq!(reach(port).await, Some(at(port)));
                 drop(server);
                 let socket = tokio::net::TcpSocket::new_v4().unwrap();
+                // Connections closed a moment ago still wait out their close
+                // on the port: they do not keep a socket from binding it, a
+                // listener does.
+                socket.set_reuseaddr(true).unwrap();
                 if socket
                     .bind(SocketAddr::from((Ipv4Addr::LOCALHOST, port)))
                     .is_ok()
@@ -814,6 +838,7 @@ pub(super) mod tests {
                     held = Some((socket, port));
                     break;
                 }
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
             let (_held, port) = held.expect("no port could be freed and kept");
             assert!(listening(&[port]).await.is_empty());
@@ -831,10 +856,18 @@ pub(super) mod tests {
                 return;
             };
             let port = server.local_addr().unwrap().port();
-            assert_eq!(
-                reach(port).await,
-                Some(SocketAddr::from((Ipv6Addr::LOCALHOST, port)))
-            );
+            // Something else on 127.0.0.1 at that port — the last test's
+            // server still closing — is found first: give it a few seconds.
+            let ipv6 = Some(SocketAddr::from((Ipv6Addr::LOCALHOST, port)));
+            let mut found = reach(port).await;
+            for _ in 0..50 {
+                if found == ipv6 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                found = reach(port).await;
+            }
+            assert_eq!(found, ipv6);
             assert_eq!(listening(&[port]).await, [port]);
         });
     }

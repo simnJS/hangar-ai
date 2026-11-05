@@ -833,6 +833,36 @@ async fn land_answers_while_a_long_landing_runs_and_the_same_call_waits_for_that
     assert_eq!(r.runs(), ["run:true:true"]);
 }
 
+/// MOB-07: two taps at once — two phones, or a retry — start one landing,
+/// and the outcome is the one landing's.
+#[tokio::test]
+async fn land_tapped_twice_at_once_starts_one_landing_and_tells_its_outcome() {
+    let r = rig();
+    *locked(&r.delivery.next) = Next::Hold;
+    *locked(&r.fakes.wait) = Wait::Now;
+    let (first, second) = tokio::join!(
+        r.call("remote_land", json!({"task": "t1", "merge": "abc1234"})),
+        r.call("remote_land", json!({"task": "t1", "merge": "abc1234"})),
+    );
+    for answer in [first, second] {
+        assert_equal(&answer.unwrap()["landed"], json!(false));
+    }
+    until(|| locked(&r.delivery.held).is_some()).await;
+    let finish = locked(&r.delivery.held).take().unwrap();
+    finish.send(outcome(Kind::Landed)).unwrap();
+    let port = r.port.clone();
+    until(|| {
+        delivery_state(&port, "t1").is_some_and(|state| state.state() == "landed")
+            && !r.app.is_delivering("w1")
+    })
+    .await;
+    assert_equal(
+        &r.call("remote_land", json!({"task": "t1"})).await.unwrap(),
+        json!({"landed": true, "target": "main"}),
+    );
+    assert_eq!(r.runs(), ["run:true:true"]);
+}
+
 /* ── remote_rework ────────────────────────────────────────────── */
 
 #[tokio::test]

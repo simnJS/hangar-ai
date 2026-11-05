@@ -124,7 +124,7 @@ impl Rig {
     async fn apps(&self, args: Value) -> Result<Value, String> {
         remote_apps(&self.port, &args, self.mobile.sources())
             .await
-            .map(|answer| value(&answer))
+            .and_then(|answer| value(&answer))
     }
 
     fn probed(&self) -> Vec<Vec<u16>> {

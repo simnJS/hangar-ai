@@ -20,6 +20,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use axum::body::Body;
 use axum::extract::{Request, State};
@@ -118,6 +119,14 @@ async fn relay(State(slot): State<Slot>, request: Request) -> Response {
     forward(route, request).await
 }
 
+/// How long a dev server has to take a request and start its answer: the
+/// tests wait less.
+const ANSWER_WITHIN: Duration = if cfg!(test) {
+    Duration::from_millis(300)
+} else {
+    Duration::from_secs(30)
+};
+
 /// One request, relayed over a connection of its own to the dev server, its
 /// answer handed back as it comes.
 async fn forward(route: Route, mut request: Request) -> Response {
@@ -135,19 +144,23 @@ async fn forward(route: Route, mut request: Request) -> Response {
     as_made_on_the_pc(&mut parts.headers, route.target, upgrade.is_some());
     let request = Request::from_parts(parts, body);
 
-    let Ok(stream) = TcpStream::connect(route.target).await else {
-        return not_answering();
-    };
-    let _ = stream.set_nodelay(true);
-    let Ok((mut sender, connection)) =
-        hyper::client::conn::http1::handshake(TokioIo::new(stream)).await
-    else {
-        return not_answering();
-    };
-    tokio::spawn(async move {
-        let _ = connection.with_upgrades().await;
-    });
-    let Ok(mut response) = sender.send_request(request).await else {
+    // A dev server that takes the connection and never answers is one not
+    // answering: the phone is told so in time, rather than kept waiting
+    // until it dies (MOB-19). A body that streams slowly afterwards is the
+    // dev server's to send at its pace.
+    let answered = tokio::time::timeout(ANSWER_WITHIN, async {
+        let stream = TcpStream::connect(route.target).await.ok()?;
+        let _ = stream.set_nodelay(true);
+        let (mut sender, connection) = hyper::client::conn::http1::handshake(TokioIo::new(stream))
+            .await
+            .ok()?;
+        tokio::spawn(async move {
+            let _ = connection.with_upgrades().await;
+        });
+        sender.send_request(request).await.ok()
+    })
+    .await;
+    let Ok(Some(mut response)) = answered else {
         return not_answering();
     };
 
@@ -694,6 +707,36 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+        });
+    }
+
+    /// MOB-19: one that takes the connection and never answers is not
+    /// answering, said in time.
+    #[test]
+    fn a_dev_server_that_never_answers_is_a_page_saying_so_in_time() {
+        on_ports(|| async {
+            let remote = remote_on(window_listing(&[]), no_app, FakeTailnet::connected());
+            let token = pair(&remote);
+            let mute = apps::tests::bind_share((Ipv4Addr::LOCALHOST, test_port(9))).await;
+            showing(&remote.apps, mute.local_addr().unwrap().port());
+            let held = tokio::spawn(async move {
+                let mut taken = Vec::new();
+                while let Ok((socket, _)) = mute.accept().await {
+                    taken.push(socket);
+                }
+            });
+            let response = tokio::time::timeout(
+                Duration::from_secs(5),
+                router(remote, 0).oneshot(request(Method::GET, Some(&token), false)),
+            )
+            .await
+            .expect("still waiting on a mute dev server")
+            .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+            // The relay's side closes first, so the share's port is not left
+            // waiting out a close for the next test.
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            held.abort();
         });
     }
 

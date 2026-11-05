@@ -207,6 +207,7 @@ const en = {
 
   "error.offline": "The PC does not answer.",
   "error.busy": "The PC is busy. Try again in a moment.",
+  "error.slow": "The PC has not said yet whether it was done. Check before trying again.",
   "error.tooBig": "This file is over 25 MB, the most the PC accepts.",
   "error.refused": "The PC refused: {reason}",
   "error.notSent": "Not sent. {reason}",
@@ -641,6 +642,7 @@ const fr: Record<Key, string> = {
 
   "error.offline": "Le PC ne répond pas.",
   "error.busy": "Le PC est occupé. Réessayez dans un instant.",
+  "error.slow": "Le PC n'a pas encore dit si c'était fait. Vérifiez avant de réessayer.",
   "error.tooBig": "Ce fichier dépasse 25 Mo, le maximum que le PC accepte.",
   "error.refused": "Le PC a refusé : {reason}",
   "error.notSent": "Pas envoyé. {reason}",

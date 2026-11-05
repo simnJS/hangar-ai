@@ -29,6 +29,7 @@ use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 
 use super::apps::{self, OpenError};
+use super::calls::{self, Begin, Outcome};
 use super::files;
 use super::pairing::PairError;
 use super::push;
@@ -146,11 +147,30 @@ async fn paired_only(
     if foreign {
         return refuse(StatusCode::FORBIDDEN, "forbidden");
     }
-    let Some(device) = remote.device(request.headers()) else {
+    let Some(device) = off_the_runtime(&remote, {
+        let headers = request.headers().clone();
+        move |remote| remote.device(&headers)
+    })
+    .await
+    .flatten() else {
         return refuse(StatusCode::UNAUTHORIZED, "unpaired");
     };
     request.extensions_mut().insert(device);
     next.run(request).await
+}
+
+/// `work` on a blocking thread: what reads or writes remote.json — a phone's
+/// visit noted once a minute, a pairing, a subscription — takes the store's
+/// lock across a write to disk, which a slow disk would make every request
+/// of a runtime worker wait on (MOB-13). `None` if the thread panicked.
+async fn off_the_runtime<T: Send + 'static>(
+    remote: &Arc<Remote>,
+    work: impl FnOnce(&Remote) -> T + Send + 'static,
+) -> Option<T> {
+    let remote = remote.clone();
+    tokio::task::spawn_blocking(move || work(&remote))
+        .await
+        .ok()
 }
 
 /// Answers kept out of every cache, the API's as much as the placeholder's,
@@ -225,7 +245,12 @@ async fn pair(State(remote): State<Arc<Remote>>, body: Body) -> Response {
         Value::String(name) => name.as_str(),
         device => device["name"].as_str().unwrap_or_default(),
     };
-    match remote.pair(code, name) {
+    let (code, name) = (code.to_string(), name.to_string());
+    let Some(paired) = off_the_runtime(&remote, move |remote| remote.pair(&code, &name)).await
+    else {
+        return storage("the pairing could not be saved".to_string());
+    };
+    match paired {
         Ok((device, token)) => {
             let cookie = format!(
                 "{COOKIE}={token}; Path=/; Max-Age={COOKIE_MAX_AGE}; HttpOnly; Secure; SameSite=Strict"
@@ -250,9 +275,30 @@ async fn pair(State(remote): State<Arc<Remote>>, body: Body) -> Response {
     }
 }
 
+/// A call made with a key runs on the window this many times what one HTTP
+/// answer waits for it, its retries waiting on it all along: a dialog of
+/// several questions typed in (MOB-06) takes well past 10 s.
+const KEYED_RUNS: u32 = 12;
+
+/// The header a call that changes something carries, the same on each of
+/// its tries (calls.rs).
+const KEY_HEADER: &str = "idempotency-key";
+
 /// One of the phone's calls, relayed to the window and its answer handed
 /// back as is.
-async fn call(State(remote): State<Arc<Remote>>, Path(op): Path<String>, body: Body) -> Response {
+///
+/// - 503 `pc-busy`: the window was not reached; nothing ran, and the call
+///   may be made again.
+/// - 504 `pc-slow`: the window took it and has not said what it did yet. It
+///   may have run: only a retry with the same key is safe, which waits on,
+///   or is answered with, what the first try did.
+async fn call(
+    State(remote): State<Arc<Remote>>,
+    Extension(device): Extension<DeviceView>,
+    Path(op): Path<String>,
+    headers: HeaderMap,
+    body: Body,
+) -> Response {
     if !CALLS.contains(&op.as_str()) {
         return refuse(StatusCode::NOT_FOUND, "unknown-op");
     }
@@ -260,18 +306,51 @@ async fn call(State(remote): State<Arc<Remote>>, Path(op): Path<String>, body: B
         Ok(args) => args,
         Err((status, error)) => return refuse(status, error),
     };
-    match remote
-        .window
-        .ask(&format!("remote_{op}"), args, remote.call_timeout)
-        .await
-    {
-        Ok(answer) => Json(answer).into_response(),
-        Err(ControlError::Refused(message)) => (
+    let remote_op = format!("remote_{op}");
+    let Some(key) = headers.get(KEY_HEADER) else {
+        return outcome_response(
+            remote
+                .window
+                .call(&remote_op, args, remote.call_timeout)
+                .await,
+        );
+    };
+    let Some(key) = key.to_str().ok().filter(|key| calls::valid_key(key)) else {
+        return refuse(StatusCode::BAD_REQUEST, "bad-key");
+    };
+    let receiver = match remote.calls.begin(&device.id, &op, key, &args) {
+        Begin::Run(sender, receiver) => {
+            let (runner, key) = (remote.clone(), key.to_string());
+            tokio::spawn(async move {
+                let limit = runner.call_timeout * KEYED_RUNS;
+                let outcome = runner.window.call(&remote_op, args, limit).await;
+                if outcome == Outcome::Unreached {
+                    runner.calls.forget(&device.id, &op, &key);
+                }
+                let _ = sender.send(Some(outcome));
+            });
+            receiver
+        }
+        Begin::Wait(receiver) => receiver,
+        Begin::Mismatch => return refuse(StatusCode::UNPROCESSABLE_ENTITY, "key-reused"),
+        Begin::Full => return refuse(StatusCode::SERVICE_UNAVAILABLE, "pc-busy"),
+    };
+    match calls::outcome_within(receiver, remote.call_timeout).await {
+        Some(outcome) => outcome_response(outcome),
+        None => refuse(StatusCode::GATEWAY_TIMEOUT, "pc-slow"),
+    }
+}
+
+fn outcome_response(outcome: Outcome) -> Response {
+    match outcome {
+        Outcome::Answer(answer) => Json(answer).into_response(),
+        Outcome::Refused(message) => (
             StatusCode::BAD_REQUEST,
             Json(json!({ "error": "refused", "message": message })),
         )
             .into_response(),
-        Err(ControlError::Unavailable(_)) => refuse(StatusCode::SERVICE_UNAVAILABLE, "pc-busy"),
+        Outcome::Unreached => refuse(StatusCode::SERVICE_UNAVAILABLE, "pc-busy"),
+        Outcome::Lost => refuse(StatusCode::GATEWAY_TIMEOUT, "pc-slow"),
     }
 }
 
@@ -338,36 +417,36 @@ async fn shared_file(
         .get(header::RANGE)
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
-    let body = method != Method::HEAD;
+    let lookup = path.clone();
     let Ok(Ok(part)) =
-        tokio::task::spawn_blocking(move || files::read_part(&path, range.as_deref(), body)).await
+        tokio::task::spawn_blocking(move || files::part_of(&lookup, range.as_deref())).await
     else {
         return refuse(StatusCode::NOT_FOUND, "not-found");
     };
-    // (status, bytes sent, Content-Range, body): a HEAD's body is empty, and
-    // its length still the one a GET would send.
-    let (status, count, range, bytes) = match part {
-        files::Part::Whole { len, body } => (StatusCode::OK, len, None, body),
-        files::Part::Range {
-            start,
-            end,
-            len,
-            body,
-        } => (
+    // (status, bytes sent, Content-Range, where they start): a HEAD's body
+    // is empty, and its length still the one a GET would send.
+    let (status, count, range, start) = match part {
+        files::Part::Whole { len } => (StatusCode::OK, len, None, 0),
+        files::Part::Range { start, end, len } => (
             StatusCode::PARTIAL_CONTENT,
             end - start + 1,
             Some(format!("bytes {start}-{end}/{len}")),
-            body,
+            start,
         ),
         files::Part::Unsatisfiable { len } => (
             StatusCode::RANGE_NOT_SATISFIABLE,
             0,
             Some(format!("bytes */{len}")),
-            Vec::new(),
+            0,
         ),
     };
+    let bytes = if method == Method::HEAD || count == 0 {
+        Body::empty()
+    } else {
+        files::stream(path, start, count)
+    };
 
-    let mut response = Response::new(Body::from(bytes));
+    let mut response = Response::new(bytes);
     *response.status_mut() = status;
     let headers = response.headers_mut();
     headers.insert(header::CONTENT_LENGTH, HeaderValue::from(count));
@@ -530,7 +609,11 @@ async fn push_subscribe(
                 .into_response()
         }
     };
-    match remote.subscribe(&device.id, subscription) {
+    let subscribed = off_the_runtime(&remote, move |remote| {
+        remote.subscribe(&device.id, subscription)
+    })
+    .await;
+    match subscribed.unwrap_or_else(|| Err("the subscription could not be saved".to_string())) {
         Ok(true) => Json(json!({ "subscribed": true })).into_response(),
         // Revoked between its cookie being read and now.
         Ok(false) => refuse(StatusCode::UNAUTHORIZED, "unpaired"),
@@ -543,7 +626,8 @@ async fn push_unsubscribe(
     State(remote): State<Arc<Remote>>,
     Extension(device): Extension<DeviceView>,
 ) -> Response {
-    match remote.unsubscribe(&device.id) {
+    let unsubscribed = off_the_runtime(&remote, move |remote| remote.unsubscribe(&device.id)).await;
+    match unsubscribed.unwrap_or_else(|| Err("the subscription could not be removed".to_string())) {
         Ok(()) => Json(json!({ "subscribed": false })).into_response(),
         Err(message) => storage(message),
     }
@@ -607,7 +691,9 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tower::ServiceExt;
 
-    use super::super::apps::tests::{dev_server, on_ports, window_listing, FakeTailnet, PC};
+    use super::super::apps::tests::{
+        bind_share, dev_server, on_ports, window_listing, FakeTailnet, PC,
+    };
     use super::super::assets::tests::{no_app, small_app};
     use super::super::tests::{remote_on, remote_with, test_port, Fake};
     use super::*;
@@ -1055,8 +1141,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_window_that_does_not_answer_in_time_is_a_busy_pc() {
+    async fn a_window_that_does_not_answer_in_time_is_a_slow_pc_and_one_not_reached_a_busy_one() {
         let remote = remote_with(Fake::silent(), no_app);
+        let token = paired_phone(&remote).await;
+        let answer = ask(
+            &remote,
+            post_to("/m/api/call/state", Some(&token), true, "{}"),
+        )
+        .await;
+        assert_eq!(answer.status, StatusCode::GATEWAY_TIMEOUT);
+        assert_eq!(answer.body, json!({ "error": "pc-slow" }));
+
+        let remote = remote_with(Fake::unreached(), no_app);
         let token = paired_phone(&remote).await;
         let answer = ask(
             &remote,
@@ -1065,6 +1161,105 @@ mod tests {
         .await;
         assert_eq!(answer.status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(answer.body, json!({ "error": "pc-busy" }));
+    }
+
+    fn keyed(token: &str, op: &str, key: &str, body: Value) -> HttpRequest<Body> {
+        let mut request = post_to(
+            &format!("/m/api/call/{op}"),
+            Some(token),
+            true,
+            body.to_string(),
+        );
+        request
+            .headers_mut()
+            .insert(KEY_HEADER, HeaderValue::from_str(key).unwrap());
+        request
+    }
+
+    /// MOB-01: the window answers late, the phone tries again with the same
+    /// key, and gets what the first try did — the prompt typed once.
+    #[tokio::test]
+    async fn a_call_tried_again_with_its_key_is_made_once_and_answered_as_it_went() {
+        let window = Fake::silent();
+        let remote = remote_with(window.clone(), no_app);
+        let token = paired_phone(&remote).await;
+        let body = json!({ "pane": "Ben", "text": "run the tests" });
+        let first = ask(
+            &remote,
+            keyed(&token, "send", "key-send-0001", body.clone()),
+        )
+        .await;
+        assert_eq!(first.status, StatusCode::GATEWAY_TIMEOUT);
+        assert_eq!(first.body, json!({ "error": "pc-slow" }));
+
+        // Still running: the retry waits on it, and runs nothing.
+        let again = ask(
+            &remote,
+            keyed(&token, "send", "key-send-0001", body.clone()),
+        )
+        .await;
+        assert_eq!(again.status, StatusCode::GATEWAY_TIMEOUT);
+        assert_eq!(*window.asked.lock().unwrap(), ["remote_send"]);
+
+        // The window answers at last; the next retry is told what it did.
+        let id = window.held.lock().unwrap()[0].clone();
+        crate::control::control_reply(id, true, Some(json!({ "sent": true })), None);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let last = ask(
+            &remote,
+            keyed(&token, "send", "key-send-0001", body.clone()),
+        )
+        .await;
+        assert_eq!(last.status, StatusCode::OK);
+        assert_eq!(last.body, json!({ "sent": true }));
+        assert_eq!(*window.asked.lock().unwrap(), ["remote_send"]);
+
+        // Another key is another call.
+        ask(&remote, keyed(&token, "send", "key-send-0002", body)).await;
+        assert_eq!(window.asked.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_call_that_never_reached_the_window_runs_again_with_its_key() {
+        let window = Fake::unreached();
+        let remote = remote_with(window.clone(), no_app);
+        let token = paired_phone(&remote).await;
+        let body = json!({ "pane": "Ben", "allow": true });
+        for _ in 0..2 {
+            let answer = ask(
+                &remote,
+                keyed(&token, "permission", "key-perm-0001", body.clone()),
+            )
+            .await;
+            assert_eq!(answer.status, StatusCode::SERVICE_UNAVAILABLE);
+            assert_eq!(answer.body, json!({ "error": "pc-busy" }));
+        }
+        assert_eq!(window.asked.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_key_is_refused_malformed_or_sent_again_with_other_arguments() {
+        let window = Fake::echo();
+        let remote = remote_with(window.clone(), no_app);
+        let token = paired_phone(&remote).await;
+        let bad = ask(&remote, keyed(&token, "send", "no", json!({}))).await;
+        assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+        assert_eq!(bad.body, json!({ "error": "bad-key" }));
+
+        let first = ask(
+            &remote,
+            keyed(&token, "send", "key-send-0001", json!({ "text": "a" })),
+        )
+        .await;
+        assert_eq!(first.status, StatusCode::OK);
+        let reused = ask(
+            &remote,
+            keyed(&token, "send", "key-send-0001", json!({ "text": "b" })),
+        )
+        .await;
+        assert_eq!(reused.status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(reused.body, json!({ "error": "key-reused" }));
+        assert_eq!(window.asked.lock().unwrap().len(), 1);
     }
 
     #[tokio::test]
@@ -1163,8 +1358,8 @@ mod tests {
     fn an_app_nothing_listens_on_is_refused() {
         on_ports(|| async {
             // A port of the share, just let go of: nobody listens on it.
-            let closed = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, test_port(9)))
-                .unwrap()
+            let closed = bind_share((Ipv4Addr::LOCALHOST, test_port(9)))
+                .await
                 .local_addr()
                 .unwrap()
                 .port();

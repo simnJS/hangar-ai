@@ -174,6 +174,28 @@ fn load(file: &Path) -> Saved {
     }
 }
 
+/// Writes `bytes` to `path` for this user alone (0600 on Unix): remote.json
+/// holds the phones' push secrets, vapid.json the key their notifications
+/// are signed with, and another account on the PC has no business reading
+/// either (MOB-09). A file left from before is made private too.
+pub(super) fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        options.mode(0o600);
+        let mut file = options.open(path)?;
+        file.set_permissions(fs::Permissions::from_mode(0o600))?;
+        file.write_all(bytes)
+    }
+    #[cfg(not(unix))]
+    {
+        options.open(path)?.write_all(bytes)
+    }
+}
+
 fn write(file: &Path, saved: &Saved) -> Result<(), String> {
     if let Some(dir) = file.parent() {
         fs::create_dir_all(dir)
@@ -183,7 +205,8 @@ fn write(file: &Path, saved: &Saved) -> Result<(), String> {
     // Write-then-rename, as state.json is saved: a crash mid-write cannot
     // leave half a file.
     let tmp = file.with_extension("json.tmp");
-    fs::write(&tmp, body).map_err(|err| format!("could not save remote.json: {err}"))?;
+    write_private(&tmp, body.as_bytes())
+        .map_err(|err| format!("could not save remote.json: {err}"))?;
     fs::rename(&tmp, file).map_err(|err| format!("could not save remote.json: {err}"))
 }
 
@@ -199,6 +222,25 @@ pub(super) mod tests {
                 uuid::Uuid::new_v4().simple()
             ))
             .join("remote.json")
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remote_json_is_the_user_s_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let file = scratch_file("private");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        // Left from before, readable by all: made private on the next save.
+        fs::write(file.with_extension("json.tmp"), "{}").unwrap();
+        fs::set_permissions(
+            file.with_extension("json.tmp"),
+            fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
+        let store = Store::open(file.clone());
+        store.update(|saved| saved.port = 1).unwrap();
+        let mode = fs::metadata(&file).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
     }
 
     fn phone(token: &str, last_seen: u64) -> Device {

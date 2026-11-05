@@ -101,6 +101,8 @@ pub struct App {
     /// A terminal mounts one nap after its workspace opens, its shell two
     /// naps later still, and opening mounts nothing by itself.
     pub slow: AtomicBool,
+    /// Panes whose terminal mounts and whose shell never starts.
+    pub dead: Mutex<HashSet<PaneId>>,
     pub delivering: Mutex<HashMap<(WsId, String), u32>>,
     pub delivery: Mutex<Option<Arc<dyn DeliveryDeps>>>,
     deliveries: Deliveries,
@@ -127,6 +129,7 @@ impl App {
             drawn: Mutex::new(None),
             naps: Arc::new(AtomicU32::new(0)),
             slow: AtomicBool::new(false),
+            dead: Mutex::new(HashSet::new()),
             delivering: Mutex::new(HashMap::new()),
             delivery: Mutex::new(None),
             deliveries: Deliveries::default(),
@@ -318,6 +321,9 @@ impl AppPort for App {
     }
 
     fn alive(&self, pane: &PaneId) -> BoxFuture<bool> {
+        if locked(&self.dead).contains(pane) {
+            return ready(false);
+        }
         ready(if self.slow.load(Ordering::SeqCst) {
             self.naps.load(Ordering::SeqCst) >= 3
         } else {

@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ApiError, type ActionState, type Chat, type ChatAnswer, type ChatItem, type Pending } from "../api";
+import { ApiError, type ActionState, type Chat, type ChatAnswer, type ChatItem, type Pending, type PendingShown } from "../api";
 import {
   actionKind,
   actionLine,
@@ -290,10 +290,11 @@ function ChatView(props: ChatViewProps) {
     void props.refresh();
   };
 
-  const answerPermission = async (allow: boolean) => {
+  /** On the prompt the card shows: the PC refuses it if the pane has moved on. */
+  const answerPermission = async (allow: boolean, prompt?: string) => {
     setAnswered({ key: pendingKey(pending) ?? "", at: Date.now() });
     try {
-      await client.permission(props.paneId, allow);
+      await client.permission(props.paneId, allow, prompt);
     } catch (error) {
       setAnswered(null);
       throw error;
@@ -833,8 +834,8 @@ function PermissionCard({
   answer,
 }: {
   name: string;
-  pending: Extract<Pending, { kind: "permission" }>;
-  answer: (allow: boolean) => Promise<void>;
+  pending: Extract<PendingShown, { kind: "permission" }>;
+  answer: (allow: boolean, prompt?: string) => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -842,7 +843,7 @@ function PermissionCard({
     setBusy(true);
     setError(null);
     try {
-      await answer(allow);
+      await answer(allow, pending.prompt);
     } catch (failure) {
       setError(errorText(failure));
       setBusy(false);

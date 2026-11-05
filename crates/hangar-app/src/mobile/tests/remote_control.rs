@@ -368,6 +368,121 @@ async fn permission_is_refused_unless_the_pane_is_waiting() {
     assert!(r.typed().is_empty());
 }
 
+/// MOB-02: Enter approves whatever is open; it is typed only on the prompt
+/// the phone showed, which the chat and the screen both name.
+#[tokio::test]
+async fn permission_is_typed_only_on_the_prompt_the_phone_showed() {
+    let r = rig(vec![chat_shop()], vec![], true);
+    reads(&r, Some(page()));
+    let first = json!({"command": "pnpm test"});
+    started(&r, "toolu_a", "Bash", first.clone(), 5000);
+    dialog(&r, true, Some(("Bash", first)));
+    r.act("w1", "shop", AgentActivity::Waiting);
+    let shown = r.ok("remote_chat", json!({"pane": "Ben"})).await["pending"]["prompt"].clone();
+    assert!(shown.is_string());
+    assert_eq!(
+        r.ok("remote_screen", json!({"pane": "Ben"})).await["prompt"],
+        shown
+    );
+
+    // Claude Code moved on to its next call before the tap reached the PC.
+    ended(&r, "toolu_a");
+    let next = json!({"command": "rm -rf build"});
+    started(&r, "toolu_b", "Bash", next.clone(), 6000);
+    dialog(&r, true, Some(("Bash", next)));
+    r.err(
+        r.run(
+            "remote_permission",
+            json!({"pane": "Ben", "allow": true, "prompt": shown}),
+        )
+        .await,
+        "changed since the phone showed it",
+    );
+    // A phone that names none, where the PC knows which: refused as well.
+    r.err(
+        r.run("remote_permission", json!({"pane": "Ben", "allow": true}))
+            .await,
+        "changed since the phone showed it",
+    );
+    assert!(r.typed().is_empty());
+
+    let current = r.ok("remote_chat", json!({"pane": "Ben"})).await["pending"]["prompt"].clone();
+    assert_ne!(current, shown);
+    r.ok(
+        "remote_permission",
+        json!({"pane": "Ben", "allow": true, "prompt": current}),
+    )
+    .await;
+    assert_eq!(r.typed(), [r#"write:w1:"\r""#]);
+
+    // Answered at the PC meanwhile: nothing asks any more, nothing is typed.
+    dialog(&r, false, None);
+    reads(&r, Some(page()));
+    r.err(
+        r.run(
+            "remote_permission",
+            json!({"pane": "Ben", "allow": false, "prompt": current}),
+        )
+        .await,
+        "changed since the phone showed it",
+    );
+    assert_eq!(r.typed().len(), 1);
+}
+
+#[tokio::test]
+async fn permission_is_refused_on_a_question_whose_highlighted_option_enter_would_pick() {
+    let r = rig(vec![chat_shop()], vec![], true);
+    reads(&r, Some(page()));
+    let asked = json!({"questions": [{"question": "Which color?", "header": "Color", "multiSelect": false,
+        "options": [{"label": "Red", "description": "Warm"}, {"label": "Blue", "description": "Cold"}]}]});
+    started(&r, "toolu_q", "AskUserQuestion", asked.clone(), 5000);
+    dialog(&r, true, Some(("AskUserQuestion", asked)));
+    r.act("w1", "shop", AgentActivity::Waiting);
+    r.err(
+        r.run("remote_permission", json!({"pane": "Ben", "allow": true}))
+            .await,
+        "waits on a question",
+    );
+    assert!(r.typed().is_empty());
+}
+
+/// MOB-18: keys sent while an answer is typed into the same dialog would
+/// land in the middle of it.
+#[tokio::test]
+async fn nothing_is_typed_into_a_pane_an_answer_is_being_typed_into() {
+    let r = rig(vec![shop()], vec![], true);
+    r.act("w1", "shop", AgentActivity::Waiting);
+    r.mobile.book().answering.insert("w1".into());
+    r.err(
+        r.run("remote_send", json!({"pane": "Ben", "keys": ["escape"]}))
+            .await,
+        "being typed",
+    );
+    r.err(
+        r.run("remote_permission", json!({"pane": "Ben", "allow": true}))
+            .await,
+        "being typed",
+    );
+    assert!(r.typed().is_empty());
+    r.mobile.book().answering.remove("w1");
+    r.ok("remote_send", json!({"pane": "Ben", "keys": ["escape"]}))
+        .await;
+}
+
+/// MOB-17: a shell that never starts reaches no process: not "sent".
+#[tokio::test]
+async fn send_to_a_pane_whose_shell_never_starts_says_nothing_was_sent() {
+    let r = rig(vec![shop()], vec![], true);
+    locked(&r.app.live).remove("sh");
+    locked(&r.app.dead).insert("sh".into());
+    r.err(
+        r.run("remote_send", json!({"pane": "term", "text": "ls"}))
+            .await,
+        "nothing was sent",
+    );
+    assert!(r.typed().is_empty());
+}
+
 /* ── remote_manager ───────────────────────────────────────────── */
 
 #[tokio::test]
@@ -644,6 +759,24 @@ async fn chat_answers_no_items_and_why_for_a_shell_a_pane_without_a_session_a_se
     assert_eq!(locked(&r.fakes.chats).len(), 1);
 }
 
+/// A pending permission as the phone shows it: without its `prompt`, which
+/// is checked to be there.
+#[track_caller]
+fn shown(pending: &Value) -> Value {
+    let mut pending = pending.clone();
+    let prompt = pending
+        .as_object_mut()
+        .and_then(|fields| fields.remove("prompt"));
+    assert!(
+        prompt
+            .as_ref()
+            .and_then(Value::as_str)
+            .is_some_and(|p| p.len() == 16),
+        "no prompt in {pending}"
+    );
+    pending
+}
+
 fn open_call() -> OpenCall {
     OpenCall {
         tool: "Bash".into(),
@@ -665,7 +798,7 @@ async fn chat_derives_a_pending_permission_from_the_pane_waiting_on_a_call_witho
     );
     let waiting = r.ok("remote_chat", json!({"pane": "Ben"})).await;
     assert_equal(
-        &waiting["pending"],
+        &shown(&waiting["pending"]),
         json!({"kind": "permission", "tool": "Bash", "title": "Ran pnpm test", "detail": "pnpm test"}),
     );
 
@@ -829,7 +962,7 @@ async fn chat_gives_the_permission_a_dialog_asks_titled_as_it_would_run_and_the_
     r.act("w1", "shop", AgentActivity::Waiting);
     let asking = r.ok("remote_chat", json!({"pane": "Ben"})).await;
     assert_equal(
-        &asking["pending"],
+        &shown(&asking["pending"]),
         json!({"kind": "permission", "tool": "Bash", "title": "Run pnpm test --run", "detail": "pnpm test --run\npnpm build"}),
     );
     // Held by the dialog, it has not run yet.
@@ -860,7 +993,7 @@ async fn chat_names_an_edit_s_file_in_the_session_s_folder_with_its_diff() {
     r.act("w1", "shop", AgentActivity::Waiting);
     let asking = r.ok("remote_chat", json!({"pane": "Ben"})).await;
     assert_equal(
-        &asking["pending"],
+        &shown(&asking["pending"]),
         json!({"kind": "permission", "tool": "Edit", "title": "Edit src/cart.ts", "detail": "- a\n- b\n+ c"}),
     );
 }
@@ -932,7 +1065,7 @@ async fn chat_leaves_the_transcript_to_speak_when_the_mod_reported_nothing() {
         }),
     );
     assert_equal(
-        &r.ok("remote_chat", json!({"pane": "Ben"})).await["pending"],
+        &shown(&r.ok("remote_chat", json!({"pane": "Ben"})).await["pending"]),
         json!({"kind": "permission", "tool": "Bash", "title": "Ran pnpm test", "detail": "pnpm test"}),
     );
 }
