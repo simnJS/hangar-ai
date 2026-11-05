@@ -101,3 +101,18 @@ fn the_tint_is_a_colour_the_renderer_replaces_not_one_that_leaks() {
         assert!(!icon.svg().contains("currentColor"), "{}", icon.name());
     }
 }
+
+#[test]
+fn every_drawing_survives_the_parser_as_something_with_area() {
+    // usvg drops a path whose bounding box has no height or width (a bare
+    // horizontal line), and the renderer then has nothing to draw.
+    for icon in Icon::ALL {
+        let tree = usvg::Tree::from_str(&icon.svg(), &usvg::Options::default()).unwrap();
+        let bounds = tree.root().abs_bounding_box();
+        assert!(
+            tree.root().has_children() && bounds.width() > 0.0 && bounds.height() > 0.0,
+            "{} draws nothing: {bounds:?}",
+            icon.name()
+        );
+    }
+}
