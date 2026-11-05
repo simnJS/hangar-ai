@@ -456,7 +456,10 @@ mod focus {
         modal(page, content).into()
     }
 
-    fn focused(ui: &mut UserInterface<'_, (), iced::Theme, iced::Renderer>, r: &iced::Renderer) -> Vec<String> {
+    fn focused(
+        ui: &mut UserInterface<'_, (), iced::Theme, iced::Renderer>,
+        r: &iced::Renderer,
+    ) -> Vec<String> {
         let mut op = Focused::default();
         ui.operate(r, &mut op);
         op.0
@@ -492,6 +495,9 @@ mod focus {
             &mut clipboard::Null,
             &mut messages,
         );
-        assert_eq!(focused(&mut ui, &renderer), ["Some(Id(Custom(\"dialog\")))"]);
+        assert_eq!(
+            focused(&mut ui, &renderer),
+            ["Some(Id(Custom(\"dialog\")))"]
+        );
     }
 }

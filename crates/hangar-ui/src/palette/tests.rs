@@ -202,15 +202,38 @@ mod searching {
     }
 }
 
+fn long() -> Palette<usize> {
+    Palette::new(
+        (0..40)
+            .map(|n| Item::new(n, "All", format!("Row {n}")))
+            .collect(),
+    )
+}
+
 mod scrolling {
     use super::*;
 
-    fn long() -> Palette<usize> {
-        Palette::new(
-            (0..40)
-                .map(|n| Item::new(n, "All", format!("Row {n}")))
-                .collect(),
-        )
+    #[test]
+    fn a_list_shorter_than_the_default_scrolls_to_keep_the_choice_in_view() {
+        let mut palette = long();
+        // Only 100 px of the list are on screen (a short window).
+        run(
+            &mut palette,
+            Msg::Scrolled {
+                offset: 0.0,
+                view: 100.0,
+            },
+        );
+        for _ in 0..4 {
+            run(&mut palette, Msg::Next);
+        }
+        let (_, bottom) = palette.extent(4);
+        assert!(bottom > 100.0, "row 4 ends below the short view");
+        assert!(
+            palette.scroll >= bottom - 100.0,
+            "scrolled {} for a row ending at {bottom}",
+            palette.scroll
+        );
     }
 
     #[test]
@@ -354,6 +377,42 @@ mod in_a_window {
         assert!(sent.contains(&Outer::Palette(Msg::Click(0))), "{sent:?}");
     }
 
+    const SECOND_ROW: f32 = 84.0 + 50.0 + 1.0 + 4.0 + HEADING + ROW * 1.5;
+
+    #[test]
+    fn a_pointer_at_rest_over_a_row_does_not_choose_it() {
+        let palette = palette();
+        let labels = Labels::default();
+        let mut ui = simulate(open(&palette, &labels));
+        // The pointer is there, and the window carries on (as it does when
+        // the list scrolls under the pointer): nothing was moved.
+        ui.point_at(iced::Point::new(400.0, SECOND_ROW));
+        ui.simulate([iced::Event::Window(iced::window::Event::RedrawRequested(
+            std::time::Instant::now(),
+        ))]);
+        ui.key(Named::ArrowDown);
+        let sent = messages(ui);
+        assert!(
+            !sent
+                .iter()
+                .any(|m| matches!(m, Outer::Palette(Msg::Hover(_)))),
+            "{sent:?}"
+        );
+    }
+
+    #[test]
+    fn a_pointer_that_moves_over_a_row_chooses_it() {
+        let palette = palette();
+        let labels = Labels::default();
+        let mut ui = simulate(open(&palette, &labels));
+        ui.move_to(401.0, SECOND_ROW);
+        let sent = messages(ui);
+        assert_eq!(
+            sent,
+            [Outer::Palette(Msg::Over(1)), Outer::Palette(Msg::Moved)]
+        );
+    }
+
     #[test]
     fn the_esc_cap_dismisses() {
         let palette = palette();
@@ -362,5 +421,72 @@ mod in_a_window {
         ui.click("Esc").expect("the cap is shown");
         let sent = messages(ui);
         assert!(sent.contains(&Outer::Palette(Msg::Dismiss)), "{sent:?}");
+    }
+}
+
+mod hovering {
+    use super::*;
+
+    #[test]
+    fn a_row_under_a_resting_pointer_does_not_take_the_choice() {
+        let mut palette = long();
+        // The list scrolled under the pointer: a row says it is over.
+        run(&mut palette, Msg::Next);
+        run(&mut palette, Msg::Over(5));
+        assert_eq!(palette.selected(), 1);
+        run(&mut palette, Msg::Next);
+        assert_eq!(palette.selected(), 2);
+    }
+
+    #[test]
+    fn a_real_move_takes_the_choice_to_the_row_under_it() {
+        let mut palette = long();
+        run(&mut palette, Msg::Over(5));
+        run(&mut palette, Msg::Moved);
+        assert_eq!(palette.selected(), 5);
+    }
+
+    #[test]
+    fn a_stale_row_is_forgotten_by_the_keys() {
+        let mut palette = long();
+        run(&mut palette, Msg::Over(5));
+        run(&mut palette, Msg::Next);
+        run(&mut palette, Msg::Moved);
+        assert_eq!(palette.selected(), 1);
+    }
+}
+
+mod cache {
+    use super::*;
+
+    #[test]
+    fn reading_the_list_does_not_filter_again() {
+        let mut palette = palette();
+        run(&mut palette, Msg::Query("restart".into()));
+        assert_eq!(palette.len(), 2);
+        // Changing the query behind the palette's back is not seen by the
+        // reads: they answer from what the last `Query` computed.
+        palette.query = "settings".into();
+        assert_eq!(palette.len(), 2);
+        assert_eq!(palette.shown().len(), 2);
+        let _ = palette.update(Msg::Hover(1));
+        assert_eq!(palette.len(), 2);
+    }
+
+    #[test]
+    fn a_new_query_or_new_items_refresh_it() {
+        let mut palette = palette();
+        run(&mut palette, Msg::Query("restart".into()));
+        assert_eq!(palette.len(), 2);
+        palette.set_items(vec![Item::new(
+            Target::Settings,
+            "View",
+            "Restart settings",
+        )]);
+        assert_eq!(palette.len(), 1);
+        assert_eq!(
+            palette.chosen().map(|item| &item.value),
+            Some(&Target::Settings)
+        );
     }
 }

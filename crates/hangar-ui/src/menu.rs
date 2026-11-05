@@ -576,7 +576,8 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Menu<'_, M> {
                         mouse::ScrollDelta::Lines { y, .. } => y * LINE,
                         mouse::ScrollDelta::Pixels { y, .. } => *y,
                     };
-                    state.scroll = (state.scroll - lines).clamp(0.0, self.max_scroll(bounds.height));
+                    state.scroll =
+                        (state.scroll - lines).clamp(0.0, self.max_scroll(bounds.height));
                     shell.request_redraw();
                 }
                 shell.capture_event();
@@ -723,7 +724,8 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Menu<'_, M> {
         let (top, height) = self.extent(index);
         let line = Rectangle {
             x: bounds.x + translation.x,
-            y: bounds.y + translation.y + top - state.scroll.clamp(0.0, self.max_scroll(bounds.height)),
+            y: bounds.y + translation.y + top
+                - state.scroll.clamp(0.0, self.max_scroll(bounds.height)),
             width: bounds.width,
             height,
         };
