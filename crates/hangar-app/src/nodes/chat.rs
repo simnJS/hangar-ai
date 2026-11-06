@@ -109,8 +109,8 @@ fn sessions_of(answer: &Value, here: u64) -> Vec<AgentSession> {
 /// `before`, else the one before that cursor. `Ok(None)` while the session
 /// has no transcript yet.
 ///
-/// For the chat view's conversation of a remote workspace, which does not
-/// call it yet. The page is the JSON core serialises: `ChatPage` is
+/// The chat view reads a remote workspace's conversation through this
+/// (`mobile::desk::chat`). The page is the JSON core serialises: `ChatPage` is
 /// serialise-only in core, so it is handed over as it came.
 #[allow(
     dead_code,

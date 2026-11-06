@@ -33,8 +33,6 @@ fn line(cmd: &Cmd) -> String {
         .join(" | ")
 }
 
-// ── command lines ─────────────────────────────────────────────────────
-
 const OWN: &str = "/run/user/1000/hangar-ssh/42-ab";
 
 fn own() -> Mux {
@@ -145,8 +143,6 @@ fn the_target_is_trimmed() {
     assert_eq!(commands::ssh(&n, &Mux::Off, "true").args[4], "me@box");
 }
 
-// ── sharing one connection (ControlMaster) ────────────────────────────
-
 #[test]
 fn unix_shares_the_connection_and_windows_does_not() {
     let config = "user me\nhostname box\ncontrolmaster false\ncontrolpersist no\n";
@@ -249,8 +245,6 @@ fn the_control_socket_is_this_process_s_and_short() {
     assert!(name.len() <= 27, "{name}");
     assert_ne!(path, connect::control_path(dir, "another-node"));
 }
-
-// ── what is read back ─────────────────────────────────────────────────
 
 #[test]
 fn the_probe_reads_each_answer() {
@@ -487,8 +481,6 @@ fn http_get_sends_the_token_and_reads_the_answer() {
     assert_eq!(info.hostname, "h");
 }
 
-// ── settings ──────────────────────────────────────────────────────────
-
 #[test]
 fn nodes_are_read_leniently_and_written_only_when_there_are_some() {
     let state = read_state(serde_json::json!({"settings": {"nodes": [
@@ -523,8 +515,6 @@ fn a_reset_of_the_settings_keeps_the_nodes() {
     m.apply(StoreAction::ResetSettings);
     assert_eq!(m.settings().nodes, vec![node(None)]);
 }
-
-// ── status and client ─────────────────────────────────────────────────
 
 #[test]
 fn the_client_is_there_only_while_connected() {
@@ -590,8 +580,6 @@ async fn a_status_from_an_older_connection_is_dropped() {
     );
     assert_eq!(live.status("other"), NodeStatus::Disconnected);
 }
-
-// ── the state machine, against a fake machine ─────────────────────────
 
 /// A machine: the answers to the commands, in order (the link's session
 /// takes one too), and a tunnel the test can end.

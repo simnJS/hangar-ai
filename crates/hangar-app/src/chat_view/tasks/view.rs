@@ -130,8 +130,6 @@ fn caption<'a>(t: &'a Theme, words: String) -> iced::widget::Text<'a> {
         .color(t.colors.fg_secondary)
 }
 
-// ---- What waits for the person ------------------------------------------
-
 fn waiting<'a>(ctx: Ctx<'a>, ws: &'a Workspace, items: &[Waiting]) -> Element<'a, Message> {
     let t = ctx.theme;
     let mut list = column![heading(
@@ -286,8 +284,6 @@ fn waiting_row<'a>(ctx: Ctx<'a>, ws: &'a Workspace, item: &Waiting) -> Element<'
     .padding([space::XS, 0.0])
     .into()
 }
-
-// ---- The tasks ------------------------------------------------------------
 
 fn column_group<'a>(st: &'a State, ctx: Ctx<'a>, group: &Group, now: u64) -> Element<'a, Message> {
     let mut list = column![heading(

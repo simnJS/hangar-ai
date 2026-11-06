@@ -18,7 +18,7 @@
 //! the port writes a remote pane's input over its node's stream, and reads
 //! its screen from the terminal that stream feeds here.
 
-// The chat view (chat_view/) calls these; nothing in the window does yet.
+// The chat view (chat_view/) is the window's only caller of these.
 #![allow(dead_code)]
 
 use serde_json::Value;
