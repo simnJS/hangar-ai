@@ -235,6 +235,13 @@ pub enum StoreAction {
         ws: WsId,
         id: String,
     },
+    /// The workspace shown as the chat view (`on`) or as its grid. Off is
+    /// written as the field's absence. Nothing restarts: the terminals stay
+    /// mounted either way, only what draws them changes.
+    SetChatView {
+        ws: WsId,
+        on: bool,
+    },
 }
 
 /// The ids an action made or found.
@@ -905,6 +912,14 @@ fn reduce(model: &mut Model, action: StoreAction) -> StoreOutcome {
 
         StoreAction::MoveSavedCommand { from, to, ws, id } => {
             move_saved_command(model, from, to, &ws, &id);
+        }
+
+        StoreAction::SetChatView { ws, on } => {
+            map_workspace(model, &ws, |workspace| {
+                let mut next = workspace.clone();
+                next.chat_view = on.then_some(true);
+                Some((next, ()))
+            });
         }
     }
     outcome

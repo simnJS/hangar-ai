@@ -19,7 +19,7 @@ use crate::state::Settings;
 
 /// How far along a feature is; the page says so beside its title.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)] // No experiment ships yet, so no stage is used; the first one will.
+#[allow(dead_code)] // `Beta` waits for the first feature that reaches it.
 pub enum Stage {
     Experimental,
     Beta,
@@ -87,8 +87,17 @@ pub struct Experiment {
     pub platforms: Option<&'static [Platform]>,
 }
 
-/// Newest last. Empty until the first experiment lands.
-pub const EXPERIMENTS: &[Experiment] = &[];
+/// The chat view of a workspace (`chat_view`), in place of its grid.
+pub const CHAT_VIEW: &str = "chat-view";
+
+/// Newest last.
+pub const EXPERIMENTS: &[Experiment] = &[Experiment {
+    id: CHAT_VIEW,
+    stage: Stage::Experimental,
+    title: Key::ExperimentsChatViewTitle,
+    hint: Key::ExperimentsChatViewHint,
+    platforms: None,
+}];
 
 /// The experiments this machine can offer: those with no platform list, or
 /// one that names it.
@@ -128,7 +137,6 @@ pub fn is_experiment_enabled(
 }
 
 /// What code outside the settings asks: the shipped registry, this machine.
-#[allow(dead_code)] // No experiment ships yet, so nothing asks; the first one will.
 pub fn enabled(settings: &Settings, id: &str) -> bool {
     is_experiment_enabled(settings, id, EXPERIMENTS, Platform::current())
 }

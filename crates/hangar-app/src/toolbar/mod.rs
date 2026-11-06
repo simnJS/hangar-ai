@@ -368,6 +368,12 @@ fn bar<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace, width: f32) -> Elemen
         ));
     }
     lead = lead.push(views(ctx, view, icon_views));
+    // The chat view is the terminals view's other face: offered there, while
+    // the experiment is on.
+    let chat = terminals && crate::chat_view::shown(model, ws);
+    if terminals && crate::chat_view::available(model) {
+        lead = lead.push(chat_switch(ctx, ws, chat));
+    }
 
     // ---- The room between the two ends, which moves the window too when
     // Hangar draws its title bar.
@@ -377,7 +383,8 @@ fn bar<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a Workspace, width: f32) -> Elemen
     let mut trail = row![].spacing(2).align_y(Alignment::Center);
     trail = trail.push(crate::needs_you::button(&ctx.pkg.needs_you, ctx));
     trail = trail.push(crate::accounts::switcher(&ctx.pkg.accounts, ctx));
-    if terminals {
+    // The layouts and the tidy arrange the grid, which the chat view hides.
+    if terminals && !chat {
         trail = trail.push(layouts(st, ctx, ws));
         if !folded {
             trail = trail.push(
@@ -552,6 +559,43 @@ fn views<'a>(ctx: Ctx<'a>, current: View, icons_only: bool) -> Element<'a, Messa
         .padding(2)
         .style(style::container::segmented_track(t))
         .into()
+}
+
+/// « Chat / Panes »: the workspace shown as the chat view or as its grid
+/// (`chat_view`), a segmented control like the views.
+fn chat_switch<'a>(ctx: Ctx<'a>, ws: &'a Workspace, chat: bool) -> Element<'a, Message> {
+    let t = ctx.theme;
+    let segment = |label: Key, on: bool| {
+        iced::widget::button(
+            container(
+                text(ctx.t(label).into_owned())
+                    .size(font_size::UI)
+                    .font(fonts::ui_medium()),
+            )
+            .center_y(Length::Fill),
+        )
+        .padding(Padding::from([0.0, 11.0]))
+        .height(22)
+        .style(style::button::tab(t, chat == on))
+        .on_press(Message::ChatView(crate::chat_view::Msg::SetShown(
+            ws.id.clone(),
+            on,
+        )))
+    };
+    tip::bottom(
+        t,
+        container(
+            row![
+                segment(Key::ChatViewChat, true),
+                segment(Key::ChatViewPanes, false)
+            ]
+            .spacing(2)
+            .align_y(Alignment::Center),
+        )
+        .padding(2)
+        .style(style::container::segmented_track(t)),
+        ctx.t(Key::ChatViewSwitchHint).into_owned(),
+    )
 }
 
 /// The layouts: one button showing the one the panes are in, with a menu of

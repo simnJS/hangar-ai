@@ -164,10 +164,16 @@ fn work_area<'a>(ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, Message> {
         ctx.model.live.windows.get(&ctx.window),
         Some(WindowKind::Workspace(_))
     );
+    // A workspace shown as the chat view keeps its grid in the tree, hidden
+    // like any other off screen, and the chat view goes over it.
+    let chat = terminals && crate::chat_view::shown(ctx.model, ws);
     let mut main = stack![].width(Length::Fill).height(Length::Fill);
     if own_window {
         main = main.push(crate::panes::view_workspace(
-            &p.panes, ctx, &ws.id, !terminals,
+            &p.panes,
+            ctx,
+            &ws.id,
+            !terminals || chat,
         ));
     } else {
         for id in &ctx.model.ui.opened_ids {
@@ -177,13 +183,14 @@ fn work_area<'a>(ctx: Ctx<'a>, ws: &'a Workspace) -> Element<'a, Message> {
             if opened.detached == Some(true) {
                 continue;
             }
-            let hidden = opened.id != ws.id || !terminals;
+            let hidden = opened.id != ws.id || !terminals || chat;
             main = main.push(crate::panes::view_workspace(
                 &p.panes, ctx, &opened.id, hidden,
             ));
         }
     }
     match ctx.view() {
+        View::Terminals if chat => main = main.push(crate::chat_view::view(ctx, ws)),
         View::Terminals => {}
         View::Board => main = main.push(crate::board::view(&p.board, ctx, BoardVariant::Full)),
         View::Memory => main = main.push(crate::memory::view(&p.memory, ctx)),

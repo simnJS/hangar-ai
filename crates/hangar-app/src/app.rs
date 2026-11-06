@@ -70,6 +70,7 @@ macro_rules! packages {
             control: Control,
             orchestration: Orchestration,
             mobile: Mobile,
+            chat_view: ChatView,
         }
     };
 }

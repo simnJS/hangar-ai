@@ -39,6 +39,7 @@ pub mod search;
 mod status;
 mod term_widget;
 mod terminal_pane;
+mod tools;
 mod view_pane;
 mod waves;
 mod workspace_terminals;
@@ -946,6 +947,34 @@ pub fn view_workspace<'a>(
     }
 }
 
+#[cfg(test)]
+impl State {
+    /// Every terminal of `ws` as mounted, without a shell behind it: what a
+    /// test of another package draws a grid with (`controller::mounted`).
+    pub(crate) fn mount_for_test(&mut self, ws: &Workspace) {
+        for pane in &ws.panes {
+            self.panes
+                .insert(pane.id.clone(), controller::mounted(ws, pane));
+        }
+    }
+
+    /// Whether terminal `pane` is mounted.
+    pub(crate) fn is_mounted(&self, pane: &str) -> bool {
+        self.panes.contains_key(pane)
+    }
+}
+
+/// The workspace's panes that are not terminals, for the tools area of the
+/// chat view: nothing when it has none (`tools.rs`).
+pub fn view_tools<'a>(
+    st: &'a State,
+    ctx: Ctx<'a>,
+    ws: &'a Workspace,
+    width: f32,
+) -> Option<Element<'a, Message>> {
+    tools::view(st, ctx, ws, width)
+}
+
 /// What the engines may do with the terminals (`Services::terminals`).
 pub fn terminal_access(st: &State) -> Arc<dyn TerminalAccess> {
     st.hub.clone()
@@ -989,9 +1018,11 @@ pub(crate) fn zoomed_pane(m: &Model, ws: &Workspace) -> Option<PaneId> {
 }
 
 /// Workspace `ws` is on screen, its grid shown: in its own window, or the
-/// active one of the main window.
+/// active one of the main window. A workspace shown as the chat view has its
+/// grid off screen: its terminals go on running, but none is visible, takes
+/// the keyboard or resumes ahead of the others.
 fn on_screen(m: &Model, ws: &Workspace) -> bool {
-    if !m.live.hydrated || m.ui.view != View::Terminals {
+    if !m.live.hydrated || m.ui.view != View::Terminals || crate::chat_view::shown(m, ws) {
         return false;
     }
     m.live.windows.values().any(|kind| match kind {
@@ -1135,6 +1166,7 @@ fn signature(st: &State, m: &Model) -> u64 {
             continue;
         };
         (&ws.id, &ws.theme_id, ws.detached).hash(&mut hash);
+        crate::chat_view::shown(m, ws).hash(&mut hash);
         ws.view_panes.len().hash(&mut hash);
         for pane in &ws.panes {
             pane.id.hash(&mut hash);
@@ -1184,6 +1216,25 @@ fn sync_if_needed(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message>
     }
 }
 
+/// The terminals that should be running: every one of an opened workspace,
+/// whatever is on screen (a hidden grid, the chat view, another view).
+fn wanted_panes(m: &Model) -> Vec<(WsId, PaneId)> {
+    if !m.live.hydrated {
+        return Vec::new();
+    }
+    m.ui.opened_ids
+        .iter()
+        .filter_map(|id| m.workspace(id))
+        .flat_map(|ws| ws.panes.iter().map(|pane| (ws.id.clone(), pane.id.clone())))
+        .collect()
+}
+
+/// Whether the keyboard should be in terminal `id`: the panes have it, the
+/// pane is on screen and it is the workspace's focused one.
+fn keyboard_goes_to(m: &Model, ws: &Workspace, id: &str) -> bool {
+    keyboard_free(m) && visible(m, ws, id) && focused_pane(m, ws).as_deref() == Some(id)
+}
+
 /// Brings the panes in line with the model: starts the panes that appeared
 /// in an opened workspace and stops those that went (a workspace that leaves
 /// `opened_ids`, which is how a sleep unmounts it, takes its terminals with
@@ -1192,15 +1243,7 @@ fn sync_if_needed(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message>
 /// asks it to.
 fn sync(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
     let mut tasks = Vec::new();
-    let wanted: Vec<(WsId, PaneId)> = if m.live.hydrated {
-        m.ui.opened_ids
-            .iter()
-            .filter_map(|id| m.workspace(id))
-            .flat_map(|ws| ws.panes.iter().map(|pane| (ws.id.clone(), pane.id.clone())))
-            .collect()
-    } else {
-        Vec::new()
-    };
+    let wanted = wanted_panes(m);
     let wanted_ids: HashSet<&PaneId> = wanted.iter().map(|(_, pane)| pane).collect();
 
     // Gone: closed, restarted under a new id, its workspace closed or put to
@@ -1257,7 +1300,6 @@ fn sync(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
         }
     }
 
-    let free = keyboard_free(m);
     let locale = m.locale();
     for (id, rt) in st.panes.iter_mut() {
         let Some(ws) = m.workspace(&rt.ws) else {
@@ -1274,10 +1316,7 @@ fn sync(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
             rt.look = look;
         }
         let typing = rt.search.as_ref().is_some_and(|search| search.typing);
-        let wants = free
-            && !typing
-            && visible(m, ws, id)
-            && focused_pane(m, ws).as_deref() == Some(id.as_str());
+        let wants = !typing && keyboard_goes_to(m, ws, id);
         if wants != rt.focused {
             rt.focused = wants;
             let events = rt.link.lock().set_focused(wants);
@@ -1477,5 +1516,93 @@ mod tests {
             false,
             &[TermEvent::Write(b"\x1b[A".to_vec()), TermEvent::UserInput]
         ));
+    }
+}
+
+#[cfg(test)]
+mod chat_view_tests {
+    use super::*;
+    use crate::navigator::testing::{model_of, pane, workspace};
+    use crate::state::Settings;
+    use crate::state::types::{AgentId, AppState};
+
+    fn model(experiment: bool) -> Model {
+        let mut m = model_of(AppState {
+            workspaces: vec![
+                workspace(
+                    "chat-on-screen",
+                    "Shop",
+                    None,
+                    vec![
+                        pane("ava", "Ava", AgentId::Shell),
+                        pane("leo", "Leo", AgentId::Shell),
+                    ],
+                ),
+                workspace(
+                    "chat-other",
+                    "Blog",
+                    None,
+                    vec![pane("mia", "Mia", AgentId::Shell)],
+                ),
+            ],
+            active_workspace_id: Some("chat-on-screen".into()),
+            ..AppState::default()
+        });
+        if experiment {
+            m.apply(StoreAction::UpdateSettings(Patch::new(
+                |s: &mut Settings| s.experiments = vec!["chat-view".into()],
+            )));
+        }
+        m
+    }
+
+    fn ws(m: &Model) -> Workspace {
+        m.workspace("chat-on-screen").unwrap().clone()
+    }
+
+    fn chat(m: &mut Model, on: bool) {
+        m.apply(StoreAction::SetChatView {
+            ws: "chat-on-screen".into(),
+            on,
+        });
+    }
+
+    #[test]
+    fn a_workspace_shown_as_the_chat_view_keeps_its_terminals_running_off_screen_and_without_the_keyboard()
+     {
+        let mut m = model(true);
+        let st = State::default();
+        assert!(visible(&m, &ws(&m), "ava"));
+        assert!(in_front(&m, &ws(&m), "ava"));
+        assert!(keyboard_goes_to(&m, &ws(&m), "ava"));
+        let running = wanted_panes(&m);
+        assert_eq!(running.len(), 2, "the active workspace's two terminals");
+        let before = signature(&st, &m);
+
+        chat(&mut m, true);
+        for id in ["ava", "leo"] {
+            assert!(!visible(&m, &ws(&m), id), "{id} is off screen");
+            assert!(!in_front(&m, &ws(&m), id), "{id} does not resume first");
+            assert!(!keyboard_goes_to(&m, &ws(&m), id), "{id} has no keyboard");
+        }
+        // Nothing unmounts: the same terminals are wanted, and the sync that
+        // takes the keyboard away runs, since the signature changed.
+        assert_eq!(wanted_panes(&m), running);
+        assert_ne!(signature(&st, &m), before);
+
+        chat(&mut m, false);
+        assert!(visible(&m, &ws(&m), "ava"));
+        assert!(keyboard_goes_to(&m, &ws(&m), "ava"));
+        assert_eq!(wanted_panes(&m), running);
+        assert_eq!(signature(&st, &m), before);
+    }
+
+    #[test]
+    fn the_chat_view_asked_for_while_the_experiment_is_off_leaves_the_grid_on_screen() {
+        let mut m = model(false);
+        chat(&mut m, true);
+        assert_eq!(ws(&m).chat_view, Some(true));
+        assert!(visible(&m, &ws(&m), "ava"));
+        assert!(keyboard_goes_to(&m, &ws(&m), "ava"));
     }
 }

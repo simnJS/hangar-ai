@@ -143,6 +143,11 @@ fn run(m: &Model, window: window::Id, target: Target) -> Task<Message> {
         }
         Target::Manager => intent(Intent::OpenManager),
         Target::KitTab { ws, kit, tab } => intent(Intent::OpenKitTab { ws, kit, tab }),
+        // Shown where it is drawn: the terminals view, whichever face it has.
+        Target::ChatView { ws, on } => {
+            Task::done(Message::ChatView(crate::chat_view::Msg::SetShown(ws, on)))
+                .chain(intent(Intent::SetView(View::Terminals)))
+        }
     }
 }
 

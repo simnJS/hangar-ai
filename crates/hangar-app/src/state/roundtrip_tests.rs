@@ -195,6 +195,22 @@ fn a_file_the_app_wrote_survives_a_change_with_only_that_change() {
     assert_eq!(difference(&model.to_json(), &raw, ""), None);
 }
 
+#[test]
+fn the_chat_view_switch_writes_only_its_flag_and_leaves_no_trace_when_off() {
+    let (mut model, raw) = load(TYPICAL);
+    let id = model.state().workspaces[0].id.clone();
+    let raw = without_the_limits(raw);
+    model.apply(StoreAction::SetChatView {
+        ws: id.clone(),
+        on: true,
+    });
+    let mut on = raw.clone();
+    on["workspaces"][0]["chatView"] = json!(true);
+    assert_eq!(difference(&model.to_json(), &on, ""), None);
+    model.apply(StoreAction::SetChatView { ws: id, on: false });
+    assert_eq!(difference(&model.to_json(), &raw, ""), None);
+}
+
 /// Hangar sets no limit on the workers any more (owner's decision,
 /// 2026-11-04): a file of 1.x that holds `maxWorkers` and `maxAttempts` loads
 /// with every other orchestration setting it holds, and the first save leaves
