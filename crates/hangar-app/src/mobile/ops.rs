@@ -21,12 +21,12 @@ use crate::control::types::same;
 use crate::state::roles::{manager_of, orchestrator_of};
 use crate::state::{AgentActivity, AgentId, AppState, Pane, Snapshot, Workspace};
 
-use super::chat_live::pending_now;
 use super::contract::{
     ChatPending, NamedActivity, REMOTE_KEYS, RemoteHistory, RemoteManager, RemotePane,
     RemoteProject, RemoteScreen, RemoteSent, RemoteState, RemoteWaiting, RemoteWoken,
     RemoteWorkspace, WaitingKind,
 };
+use super::desk::pending_now;
 use super::engine::Mobile;
 use crate::orchestration::manager_feed::{ManagerEvent, ManagerJournalEntry};
 

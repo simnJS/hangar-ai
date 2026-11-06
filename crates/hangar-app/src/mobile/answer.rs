@@ -34,6 +34,7 @@ use crate::control::run_as_person;
 use crate::state::{AgentId, Pane, Workspace};
 
 use super::contract::RemoteAnswered;
+use super::desk::transcript_page;
 use super::engine::{ChatRead, Mobile};
 use super::ops::{find_pane, hold, resumes};
 
@@ -688,15 +689,15 @@ pub async fn answer_pane(
         .clone()
         .filter(|cwd| !cwd.is_empty())
         .unwrap_or_else(|| ws.cwd.clone());
-    let page = mobile
-        .sources()
-        .chat(ChatRead {
-            session_id,
-            cwd,
-            before: None,
-            limit: None,
-        })
-        .await?;
+    // On its node for a remote pane: the question is checked against the
+    // transcript the pane writes.
+    let read = ChatRead {
+        session_id,
+        cwd,
+        before: None,
+        limit: None,
+    };
+    let page = transcript_page(mobile, ws, pane, read).await?;
     let live = mobile.book().chat.question(&pane.id);
     let pending = live.or_else(|| page.as_ref().and_then(|page| page.question.clone()));
     let items = page
