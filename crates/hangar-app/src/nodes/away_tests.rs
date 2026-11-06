@@ -3,6 +3,10 @@
 //! fake node that answers with core's own git helpers, as hangar-node does,
 //! over real repositories.
 
+// The way there and back runs on unix only (see below): its helpers rest
+// unused on Windows.
+#![cfg_attr(not(unix), allow(dead_code, unused_imports))]
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -323,11 +327,16 @@ async fn fake_node(home: PathBuf) -> NodeClient {
     client
 }
 
+// A node is a Linux machine: its fake here lays POSIX paths out on this
+// disk, which a Windows host cannot stand in for.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_worker_s_branch_goes_to_the_node_and_comes_back() {
     let dir = tempfile::tempdir().unwrap();
-    let here = dir.path().join("site");
-    let node_home = dir.path().join("node");
+    // macOS: the temp folder is a symlink (/var → /private/var) git resolves.
+    let base = dir.path().canonicalize().unwrap();
+    let here = base.join("site");
+    let node_home = base.join("node");
     std::fs::create_dir_all(&here).unwrap();
     std::fs::create_dir_all(&node_home).unwrap();
     git(&here, &["init", "-q"]);

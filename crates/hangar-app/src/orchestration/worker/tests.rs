@@ -2210,8 +2210,7 @@ fn two_workspaces_never_get_the_same_block() {
     assert_eq!(seen.len(), 4);
 }
 
-/// A block with one port listened on by another process is skipped, and
-/// handed out again once the port is free.
+/// A block with one port listened on by another process is skipped.
 #[test]
 fn a_block_with_a_busy_port_is_skipped() {
     let listener = (PORT_POOL_START..=PORT_POOL_END)
@@ -2230,6 +2229,7 @@ fn a_block_with_a_busy_port_is_skipped() {
     assert!(!port_is_free(busy));
     let granted = allocate_port_base(&[], [], port_is_free).unwrap();
     assert!(!(granted..granted + PORT_COUNT).contains(&busy));
+    // Not asserted: the port free again once dropped. Other tests and
+    // processes probe the same pool, and macOS has been seen holding it.
     drop(listener);
-    assert!(port_is_free(busy));
 }

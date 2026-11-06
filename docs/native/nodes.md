@@ -72,6 +72,15 @@ history when it reconnects.
    spawn a shell, type `echo`, read it back, kill it, reconnect and replay
    the history.
 
+## End-to-end test
+
+`bash scripts/node-test/e2e.sh` runs the whole flow on the Docker rig against
+an isolated debug instance: remote shell, reconnect replay, memory and
+transcript routes, orchestration in a remote workspace, and a local
+workspace's worker sent to the node whose commit lands back here. It needs
+Docker and a display and takes minutes, so it is not in CI: run it by hand
+after a change to nodes. See `scripts/node-test/README.md`.
+
 ## Later (phase 2 and on)
 
 - Orchestration on a node (workers in worktrees there), the chat view of a

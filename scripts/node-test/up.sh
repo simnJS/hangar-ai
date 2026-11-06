@@ -27,8 +27,8 @@ if [ "$platform" = "linux/arm64" ] && [ "$(uname -m)" != "aarch64" ] && [ "$(una
   fi
 fi
 
-mkdir -p "$KEYS_DIR"
-chmod 700 "$KEYS_DIR"
+mkdir -p "$KEYS_DIR" "$STATE_DIR"
+chmod 700 "$KEYS_DIR" "$STATE_DIR"
 if [ ! -f "$KEY" ]; then
   ssh-keygen -q -t ed25519 -N '' -C hangar-node-test -f "$KEY"
 fi
