@@ -2,9 +2,17 @@
 RIG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KEYS_DIR="$RIG_DIR/.keys"
 KEY="$KEYS_DIR/id_ed25519"
-KNOWN_HOSTS="$KEYS_DIR/known_hosts"
-SSH_CONFIG="$RIG_DIR/ssh_config"
-STATE_PORT="$KEYS_DIR/port"
+# HANGAR_NODE_TEST_STATE_DIR keeps a run's port, known_hosts and ssh_config
+# in a folder of its own (e2e.sh), so it never clobbers a rig started by hand.
+if [ -n "${HANGAR_NODE_TEST_STATE_DIR:-}" ]; then
+  STATE_DIR="$HANGAR_NODE_TEST_STATE_DIR"
+  SSH_CONFIG="$STATE_DIR/ssh_config"
+else
+  STATE_DIR="$KEYS_DIR"
+  SSH_CONFIG="$RIG_DIR/ssh_config"
+fi
+KNOWN_HOSTS="$STATE_DIR/known_hosts"
+STATE_PORT="$STATE_DIR/port"
 CONTAINER="${HANGAR_NODE_TEST_CONTAINER:-hangar-node-test}"
 HOST_ALIAS="hangar-node-test"
 
