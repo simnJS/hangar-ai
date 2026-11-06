@@ -44,7 +44,10 @@ platforms carry both:
 | macOS `.app` | `Contents/MacOS/` |
 | Windows installer | the install folder, removed by the uninstaller |
 
-They are not programs the desktop's own system runs. The same two files are on
+They are not programs the desktop's own system runs. On macOS they sit in `Contents/MacOS` with the
+other executables: cargo-packager (`package/app`) codesigns only the files that
+have a Mach-O header, so these ELF files are copied and neither signed nor
+refused (read in 0.11.8's source; a signed build has not been run here). The same two files are on
 the release as `hangar-node-<v>-linux-x86_64` and `-linux-aarch64`, for a node
 set up by hand (`chmod +x`, then `hangar-node serve`); not in `latest.json`, not
 signed.

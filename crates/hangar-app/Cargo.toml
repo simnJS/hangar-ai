@@ -123,7 +123,21 @@ icons = [
 # The helper that shows HTML kit tabs and PDFs is looked for next to the main
 # executable (hangar_webview::find_helper), and every format puts all of the
 # binaries in the one folder: usr/bin, Contents/MacOS, the install folder.
-binaries = [{ path = "hangar-ai", main = true }, { path = "hangar-webview" }]
+#
+# The two `hangar-node-<arch>` files are the headless node daemon built for
+# Linux x86_64 and arm64, which the desktop uploads to a node over SSH
+# (hangar_app::nodes::model::BinarySource looks for them in this same folder).
+# They are not built by this package: the release workflow builds them with
+# `-p hangar-node` and packaging/common.sh's stage_node_binaries puts them in the
+# folder the packager reads, whatever the platform it packages for. On macOS the
+# packager only codesigns files with a Mach-O header, so these ELF files are
+# copied and left alone (docs/native/PACKAGING.md, "hangar-node").
+binaries = [
+  { path = "hangar-ai", main = true },
+  { path = "hangar-webview" },
+  { path = "hangar-node-x86_64" },
+  { path = "hangar-node-aarch64" },
+]
 
 [package.metadata.packager.deb]
 # `dpkg -i` upgrades the package of the same name, so this one has to stay what
@@ -188,6 +202,8 @@ require-sh = false
 assets = [
   { source = "target/release/hangar-ai", dest = "/usr/bin/hangar-ai", mode = "755" },
   { source = "target/release/hangar-webview", dest = "/usr/bin/hangar-webview", mode = "755" },
+  { source = "target/release/hangar-node-x86_64", dest = "/usr/bin/hangar-node-x86_64", mode = "755" },
+  { source = "target/release/hangar-node-aarch64", dest = "/usr/bin/hangar-node-aarch64", mode = "755" },
   { source = "crates/hangar-app/packaging/linux/hangar-ai.desktop", dest = "/usr/share/applications/hangar-ai.desktop", mode = "644" },
   { source = "crates/hangar-app/packaging/icons/linux/16x16.png", dest = "/usr/share/icons/hicolor/16x16/apps/hangar-ai.png", mode = "644" },
   { source = "crates/hangar-app/packaging/icons/linux/24x24.png", dest = "/usr/share/icons/hicolor/24x24/apps/hangar-ai.png", mode = "644" },
