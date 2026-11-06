@@ -158,6 +158,9 @@ fn same_inputs(seen: &[Seen], workspaces: &[Workspace]) -> bool {
         })
 }
 
+/// The answers for one active workspace, by assignee.
+type Answers = HashMap<String, Option<PaneTarget>>;
+
 /// Past answers of [`find_agent_pane`], kept while the workspaces it read
 /// stay the same.
 ///
@@ -172,7 +175,7 @@ fn same_inputs(seen: &[Seen], workspaces: &[Workspace]) -> bool {
 pub struct PaneFinder {
     seen: Vec<Seen>,
     /// By active workspace (a handful), then by assignee.
-    answers: Vec<(Option<WsId>, HashMap<String, Option<PaneTarget>>)>,
+    answers: Vec<(Option<WsId>, Answers)>,
 }
 
 /// More assignees than any board has: past it the memo starts over, so names
