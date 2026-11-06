@@ -4,8 +4,10 @@
 
 ## Orchestrator mode
 
-Pin a Claude Code pane as a workspace's orchestrator. It plans the work on the board and
-starts workers to carry it out. You follow everything from one window.
+A new workspace starts with one Claude Code pane that is its orchestrator (**More
+options** in the create dialog offers other setups); in an existing workspace, pin a
+Claude Code pane as its orchestrator. It plans the work on the board and starts workers to
+carry it out. You follow everything from one window.
 
 **How it works**
 

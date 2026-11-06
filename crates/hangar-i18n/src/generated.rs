@@ -726,6 +726,8 @@ pub enum Key {
     CreateLess,
     /// `create.more`
     CreateMore,
+    /// `create.moreOptions`
+    CreateMoreOptions,
     /// `create.name`
     CreateName,
     /// `create.namePlaceholder`
@@ -734,6 +736,12 @@ pub enum Key {
     CreateNotInstalled,
     /// `create.openFile`
     CreateOpenFile,
+    /// `create.panes`
+    CreatePanes,
+    /// `create.panesCustom`
+    CreatePanesCustom,
+    /// `create.panesOrchestrator`
+    CreatePanesOrchestrator,
     /// `create.rootExtra`
     CreateRootExtra,
     /// `create.rootMain`
@@ -754,6 +762,18 @@ pub enum Key {
     CreateSourceFolder,
     /// `create.sourceGit`
     CreateSourceGit,
+    /// `create.start`
+    CreateStart,
+    /// `create.startCustom`
+    CreateStartCustom,
+    /// `create.startNoClaude`
+    CreateStartNoClaude,
+    /// `create.startNoGit`
+    CreateStartNoGit,
+    /// `create.startOrchestrator`
+    CreateStartOrchestrator,
+    /// `create.startShell`
+    CreateStartShell,
     /// `create.submit`
     CreateSubmit,
     /// `create.terminals`
@@ -3829,7 +3849,7 @@ pub enum Key {
 }
 
 /// How many keys there are.
-pub const KEY_COUNT: usize = 1906;
+pub const KEY_COUNT: usize = 1916;
 
 impl Key {
     /// Every key, in the order of their ids.
@@ -4190,10 +4210,14 @@ impl Key {
         Key::CreateLayoutHint,
         Key::CreateLess,
         Key::CreateMore,
+        Key::CreateMoreOptions,
         Key::CreateName,
         Key::CreateNamePlaceholder,
         Key::CreateNotInstalled,
         Key::CreateOpenFile,
+        Key::CreatePanes,
+        Key::CreatePanesCustom,
+        Key::CreatePanesOrchestrator,
         Key::CreateRootExtra,
         Key::CreateRootMain,
         Key::CreateRootMissing,
@@ -4204,6 +4228,12 @@ impl Key {
         Key::CreateSource,
         Key::CreateSourceFolder,
         Key::CreateSourceGit,
+        Key::CreateStart,
+        Key::CreateStartCustom,
+        Key::CreateStartNoClaude,
+        Key::CreateStartNoGit,
+        Key::CreateStartOrchestrator,
+        Key::CreateStartShell,
         Key::CreateSubmit,
         Key::CreateTerminals,
         Key::CreateTitle,
@@ -6101,10 +6131,14 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "create.layoutHint", en: Text::plain("click a cell to change its agent"), fr: Text::plain("clique une case pour changer son agent") },
     Message { id: "create.less", en: Text::plain("One {agent} fewer"), fr: Text::plain("Un {agent} de moins") },
     Message { id: "create.more", en: Text::plain("One more {agent}"), fr: Text::plain("Un {agent} de plus") },
+    Message { id: "create.moreOptions", en: Text::plain("More options"), fr: Text::plain("Plus d'options") },
     Message { id: "create.name", en: Text::plain("Name"), fr: Text::plain("Nom") },
     Message { id: "create.namePlaceholder", en: Text::plain("My project"), fr: Text::plain("Mon projet") },
     Message { id: "create.notInstalled", en: Text::plain("not installed"), fr: Text::plain("non installé") },
     Message { id: "create.openFile", en: Text::plain(".code-workspace…"), fr: Text::plain(".code-workspace…") },
+    Message { id: "create.panes", en: Text::plain("Panes"), fr: Text::plain("Panneaux") },
+    Message { id: "create.panesCustom", en: Text::plain("Panes of my choice"), fr: Text::plain("Panneaux au choix") },
+    Message { id: "create.panesOrchestrator", en: Text::plain("One orchestrator"), fr: Text::plain("Un orchestrateur") },
     Message { id: "create.rootExtra", en: Text::plain("extra"), fr: Text::plain("en plus") },
     Message { id: "create.rootMain", en: Text::plain("main"), fr: Text::plain("principal") },
     Message { id: "create.rootMissing", en: Text::plain("missing"), fr: Text::plain("introuvable") },
@@ -6115,6 +6149,12 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "create.source", en: Text::plain("Source"), fr: Text::plain("Source") },
     Message { id: "create.sourceFolder", en: Text::plain("Existing folder"), fr: Text::plain("Dossier existant") },
     Message { id: "create.sourceGit", en: Text::plain("From a Git repository"), fr: Text::plain("Depuis un dépôt Git") },
+    Message { id: "create.start", en: Text::plain("Starts with"), fr: Text::plain("Démarre avec") },
+    Message { id: "create.startCustom", en: Text::plural("{n} pane, as chosen under More options", "{n} panes, as chosen under More options"), fr: Text::plural("{n} panneau, comme choisi dans Plus d'options", "{n} panneaux, comme choisis dans Plus d'options") },
+    Message { id: "create.startNoClaude", en: Text::plain("Claude Code is not installed on this machine: the workspace starts with a shell instead of an orchestrator."), fr: Text::plain("Claude Code n'est pas installé sur cette machine\u{202f}: le workspace démarre avec un shell au lieu d'un orchestrateur.") },
+    Message { id: "create.startNoGit", en: Text::plain("This folder is not a Git repository: the workers will share it. Run git init in it to give each worker a worktree of its own."), fr: Text::plain("Ce dossier n'est pas un dépôt Git\u{202f}: les workers le partageront. Lance git init dedans pour donner à chaque worker son propre worktree.") },
+    Message { id: "create.startOrchestrator", en: Text::plain("One Claude Code pane, the orchestrator: tell it what you want, it plans the work and hands it to workers"), fr: Text::plain("Un panneau Claude Code, l'orchestrateur\u{202f}: dis-lui ce que tu veux, il planifie le travail et le confie à des workers") },
+    Message { id: "create.startShell", en: Text::plain("One plain shell"), fr: Text::plain("Un shell simple") },
     Message { id: "create.submit", en: Text::plain("Create workspace"), fr: Text::plain("Créer le workspace") },
     Message { id: "create.terminals", en: Text::plain("Number of panes"), fr: Text::plain("Nombre de panneaux") },
     Message { id: "create.title", en: Text::plain("New workspace"), fr: Text::plain("Nouveau workspace") },

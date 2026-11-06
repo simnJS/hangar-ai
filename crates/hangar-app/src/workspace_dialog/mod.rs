@@ -90,6 +90,14 @@ struct Folder {
     assignments: Vec<AgentId>,
     claude_account: Option<String>,
     hooks: HooksDraft,
+    /// « More options » is unfolded. Folding it keeps what was chosen there.
+    more: bool,
+    /// The panes are the ones chosen under « More options » (`layout`,
+    /// `assignments`) rather than the default orchestrator.
+    custom: bool,
+    /// Whether the folder is a Git repository, and for which folder: a check
+    /// answered for a folder since left is not shown.
+    repo: Option<(String, bool)>,
 }
 
 impl Default for Folder {
@@ -105,7 +113,17 @@ impl Default for Folder {
             assignments: folder::initial_assignments(folder::DEFAULT_LAYOUT),
             claude_account: None,
             hooks: HooksDraft::default(),
+            more: false,
+            custom: false,
+            repo: None,
         }
+    }
+}
+
+impl Folder {
+    /// Whether the folder is known not to be a Git repository.
+    fn not_a_repo(&self) -> bool {
+        matches!(&self.repo, Some((cwd, false)) if *cwd == self.cwd)
     }
 }
 
@@ -250,6 +268,16 @@ pub enum Msg {
     Less(AgentId),
     Cycle(usize),
     Hook(HookField, String),
+    /// Folds or unfolds « More options ».
+    MoreOptions,
+    /// `true`: the panes chosen under « More options »; `false`: the default
+    /// orchestrator.
+    Custom(bool),
+    /// `git_repo_info` answered for the folder `for_cwd`.
+    RepoChecked {
+        for_cwd: String,
+        repo: bool,
+    },
     /// The workspace account picker (`accounts::workspace_picker`).
     Account(Option<String>),
 
@@ -431,7 +459,7 @@ fn form(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
             st.folder.roots.clear();
             st.folder.reading = None;
             st.folder.suggestion = None;
-            Task::none()
+            check_repo(st)
         }
         Msg::Browse => Task::perform(
             dialogs::pick_folder(t.t(Key::CreateFolderDialog).into_owned(), None),
@@ -453,7 +481,7 @@ fn form(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
             // through it — usually, not always, so this is offered rather
             // than applied.
             let for_cwd = selected.clone();
-            Task::perform(
+            let suggest = Task::perform(
                 async move {
                     tokio::task::spawn_blocking(move || {
                         hangar_core::workspace_file::find_code_workspace(selected)
@@ -468,7 +496,8 @@ fn form(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
                         found,
                     })
                 },
-            )
+            );
+            Task::batch([suggest, check_repo(st)])
         }
         Msg::BrowseFile => Task::perform(
             dialogs::pick_file(
@@ -518,6 +547,7 @@ fn form(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
                     if st.name.trim().is_empty() {
                         st.name = folder::workspace_file_name(&path);
                     }
+                    return check_repo(st);
                 }
             }
             Task::none()
@@ -530,6 +560,7 @@ fn form(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
                 .any(|root| root.path == path && root.exists)
             {
                 st.folder.cwd = path;
+                return check_repo(st);
             }
             Task::none()
         }
@@ -562,6 +593,22 @@ fn form(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
         }
         Msg::Account(id) => {
             st.folder.claude_account = id;
+            Task::none()
+        }
+        Msg::MoreOptions => {
+            st.folder.more = !st.folder.more;
+            Task::none()
+        }
+        Msg::Custom(custom) => {
+            st.folder.custom = custom;
+            Task::none()
+        }
+        Msg::RepoChecked { for_cwd, repo } => {
+            // Late, for a folder the form has moved on from: kept with the
+            // folder it is about, and shown only for that one.
+            if for_cwd == st.folder.cwd {
+                st.folder.repo = Some((for_cwd, repo));
+            }
             Task::none()
         }
 
@@ -662,6 +709,34 @@ fn schedule_parse(st: &mut State) -> Task<Message> {
     })
 }
 
+/// Asks whether the folder of the form is a Git repository: an orchestrator
+/// in one that is not has its workers share the folder, which the form says.
+/// A folder of a node is not this machine's to look at.
+fn check_repo(st: &mut State) -> Task<Message> {
+    let cwd = st.folder.cwd.clone();
+    if cwd.is_empty() || st.place.node.is_some() {
+        return Task::none();
+    }
+    let for_cwd = cwd.clone();
+    Task::perform(
+        async move {
+            let info = hangar_core::git::git_repo_info(cwd).await;
+            info.installed && info.is_repo
+        },
+        move |repo| {
+            Message::WorkspaceDialog(Msg::RepoChecked {
+                for_cwd: for_cwd.clone(),
+                repo,
+            })
+        },
+    )
+}
+
+/// What the workspace of the form starts with.
+fn start_of(st: &State, m: &Model) -> folder::Start {
+    folder::start_of(st.folder.custom, m.ui.claude_installed)
+}
+
 /// Splits a `.code-workspace` into the folder to open in and the rest. Only
 /// the latest read is applied (`Folder::reading`).
 fn read_workspace_file(st: &mut State, path: String) -> Task<Message> {
@@ -717,10 +792,12 @@ fn submit_folder(st: &mut State, m: &mut Model, kits: &[WorkspaceKit]) -> Task<M
     let remote = st.place.node.clone();
     // A workspace on a node takes no kit: kits of remote files come later.
     let kits: &[WorkspaceKit] = if remote.is_some() { &[] } else { kits };
+    let start = start_of(st, m);
     let Some(draft) = folder::draft_of(&FolderForm {
         name: &st.name,
         cwd: &st.folder.cwd,
         roots: &st.folder.roots,
+        start,
         layout: st.folder.layout,
         assignments: &st.folder.assignments,
         shell_id: st.folder.shell_id.as_deref(),
@@ -748,6 +825,12 @@ fn submit_folder(st: &mut State, m: &mut Model, kits: &[WorkspaceKit]) -> Task<M
                     workspace.worktree_hooks = Some(hooks.clone());
                 }),
             ));
+        }
+        // In the same update as the creation, before the pane mounts: it
+        // launches as the orchestrator it was made to be, with Hangar's
+        // server. The new workspace opens in the panes view, as any other.
+        if start == folder::Start::Orchestrator {
+            crate::orchestration_ui::actions::pin_first_pane(m, &id);
         }
         // The new workspace is the one in front, and its terminals start.
         tasks.push(Task::done(Message::Intent(Intent::ActivateWorkspace(id))));
