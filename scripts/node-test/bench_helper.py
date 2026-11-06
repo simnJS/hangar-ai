@@ -23,7 +23,7 @@ its API (`--url`, `--token`: node.json's).
                   line after it shows
   desktop-prepare --root R --endpoint F <ws> <pane>
                   a plain bash with a fixed prompt in that pane
-  connect --root R --endpoint F --since NS --log LOG --name NAME <ws> <pane>
+  connect --root R --endpoint F --since NS [--log LOG] --name NAME <ws> <pane>
                   an app just started (at NS, epoch nanoseconds): milliseconds
                   until its endpoint file, then until the pane shows its first
                   text (its prompt, or the screen replayed), and the
@@ -479,7 +479,7 @@ def shown(control, workspace, pane):
 
 def cmd_connect(args):
     opts, rest = options(
-        args, ["root", "endpoint", "since", "log", "name"], ["root", "endpoint", "since", "log", "name"]
+        args, ["root", "endpoint", "since", "log", "name"], ["root", "endpoint", "since", "name"]
     )
     workspace, pane = rest
     since = int(opts["since"])
@@ -502,6 +502,9 @@ def cmd_connect(args):
             die(f"no text in {pane} after 120 s")
         time.sleep(0.003)
     # The connection's steps, as the app logged them (connect.rs `Laps`).
+    if "log" not in opts:
+        print(json.dumps(result))
+        return
     with open(opts["log"], encoding="utf-8", errors="replace") as handle:
         for line in handle:
             if not line.startswith("nodes timing: "):

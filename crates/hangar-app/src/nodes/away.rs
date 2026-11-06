@@ -39,6 +39,7 @@ use serde_json::{Value, json};
 use crate::state::types::{AppState, NodeConfig, Pane};
 
 use super::commands::{self, Cmd};
+use super::connect;
 use super::engine;
 use super::model::NodeClient;
 use super::runner::Runner;
@@ -221,7 +222,8 @@ pub async fn send_branch(
     branch: &str,
 ) -> Result<String, String> {
     let repo = ensure_repo(client, &repo_name(main_root)).await?;
-    run(runner, commands::push_branch(node, main_root, &repo, branch))
+    let mux = connect::mux_of(&node.id);
+    run(runner, commands::push_branch(node, &mux, main_root, &repo, branch))
         .await
         .map_err(|error| {
             format!(
@@ -325,9 +327,10 @@ pub async fn bring_back(
             "{checkout} exists on this computer and is not {branch}'s worktree: ask the person to move it away."
         ));
     }
+    let mux = connect::mux_of(&node.id);
     run(
         runner,
-        commands::fetch_branch(node, &main_root, &repo, &branch),
+        commands::fetch_branch(node, &mux, &main_root, &repo, &branch),
     )
     .await
     .map_err(|error| {

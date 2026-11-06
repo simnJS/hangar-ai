@@ -10,12 +10,14 @@
 //! package also holds, so quitting can kill it synchronously, without
 //! waiting for the task to be dropped.
 
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard, OnceLock, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::state::types::NodeConfig;
 
-use super::commands;
+use super::commands::{self, Mux};
 use super::model::{
     BinarySource, Decision, Failure, NodeInfo, NodeStatus, Step, decide, parse_node_json,
     parse_probe,
@@ -95,8 +97,10 @@ impl Default for Timing {
             poll: Duration::from_millis(500),
             first_backoff: Duration::from_secs(1),
             max_backoff: Duration::from_secs(30),
-            handshake_tries: 20,
-            handshake_wait: Duration::from_millis(250),
+            // A tunnel of its own (no master) listens a moment after its
+            // ssh starts: asked often, it answers as soon as it can.
+            handshake_tries: 250,
+            handshake_wait: Duration::from_millis(20),
         }
     }
 }
@@ -109,6 +113,77 @@ pub struct Setup {
     /// The version to have on the node.
     pub version: String,
     pub timing: Timing,
+    /// Where the connection's master socket goes ([`Mux::Own`]); `None`
+    /// shares nothing (Windows, no private folder for it).
+    pub control_dir: Option<PathBuf>,
+}
+
+/// The folder of the app's SSH master sockets, made private: under
+/// `HANGAR_NODES_SSH_DIR` when set (the rig's runs), else the runtime
+/// folder (`$XDG_RUNTIME_DIR`), else the cache. `None` on Windows, or when
+/// it cannot be made, or is too deep for a socket's path (about 100 bytes,
+/// ssh's temporary name included).
+pub fn control_dir() -> Option<PathBuf> {
+    if cfg!(windows) {
+        return None;
+    }
+    let dir = std::env::var_os("HANGAR_NODES_SSH_DIR")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| dirs::runtime_dir().map(|dir| dir.join("hangar-ssh")))
+        .or_else(|| dirs::cache_dir().map(|dir| dir.join("hangar-ssh")))?;
+    if dir.as_os_str().len() > 60 {
+        return None;
+    }
+    std::fs::create_dir_all(&dir).ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).ok()?;
+    }
+    Some(dir)
+}
+
+/// The master socket of node `id` in `dir`: this process's own (two apps
+/// on one account each have theirs), short.
+pub fn control_path(dir: &Path, id: &str) -> PathBuf {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    id.hash(&mut hasher);
+    dir.join(format!("{}-{:x}", std::process::id(), hasher.finish()))
+}
+
+/// How each node's commands share its connection, as its connection found
+/// out: what git's push and fetch (`away.rs`) go through.
+static MUXES: LazyLock<RwLock<HashMap<String, Mux>>> = LazyLock::new(Default::default);
+
+pub fn mux_of(node: &str) -> Mux {
+    MUXES
+        .read()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .get(node)
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// What node `setup.node` shares: `ssh -G` asked once what the person's
+/// config sets.
+async fn find_mux<R: Runner>(runner: &R, setup: &Setup) -> Mux {
+    let Some(dir) = &setup.control_dir else {
+        return Mux::Off;
+    };
+    let said = runner
+        .run(commands::config_query(&setup.node))
+        .await
+        .ok()
+        .filter(|output| output.success)
+        .map(|output| output.stdout);
+    let path = control_path(dir, &setup.node.id);
+    commands::mux_for(
+        cfg!(windows),
+        said.as_deref(),
+        path.to_str().map(str::to_string),
+    )
 }
 
 /// The last line a tool wrote on stderr, which is where ssh says why.
@@ -140,10 +215,18 @@ async fn run_ok<R: Runner>(
     }
 }
 
-/// Steps 1 to 6, once. On success the tunnel is in `slot`.
+/// The connection's steps, once. On success the tunnel is in `slot`.
+///
+/// One remote command probes the node and starts its daemon when the
+/// version installed is this one ([`commands::probe_script`]); the install,
+/// when one is needed, is an upload then one command; then the tunnel and
+/// `/node/info` through it. With [`Mux::Own`] the probe runs in the
+/// tunnel's own connection, which the install shares and the forward is
+/// added to: one SSH handshake for the whole connection.
 pub async fn connect_once<R: Runner>(
     runner: &R,
     setup: &Setup,
+    mux: &Mux,
     slot: &TunnelSlot<R::Tunnel>,
     report: &(impl Fn(NodeStatus) + Send + Sync),
 ) -> Result<(NodeInfo, u16, String), Failure> {
@@ -151,42 +234,98 @@ pub async fn connect_once<R: Runner>(
     let mut laps = Laps::new(&node.id);
 
     report(NodeStatus::Connecting(Step::Probe));
-    let output = run_ok(runner, commands::probe(node), Step::Probe).await?;
-    laps.lap("probe");
+    if let Some(mut old) = locked(slot).take() {
+        old.kill();
+    }
+    let output = match mux {
+        Mux::Own(path) => {
+            // What a killed master left would keep this one from listening.
+            let _ = std::fs::remove_file(path);
+            let (tunnel, output) = runner
+                .open_link(
+                    commands::link(node, path, &setup.version),
+                    PathBuf::from(path),
+                )
+                .await
+                .map_err(Failure::Local)?;
+            *locked(slot) = Some(tunnel);
+            if !output.success {
+                return Err(Failure::Ssh {
+                    step: Step::Probe,
+                    detail: reason(&output),
+                });
+            }
+            output
+        }
+        Mux::Off | Mux::Theirs => {
+            run_ok(
+                runner,
+                commands::probe(node, mux, &setup.version),
+                Step::Probe,
+            )
+            .await?
+        }
+    };
     let probe = parse_probe(&output.stdout).map_err(|detail| Failure::Ssh {
         step: Step::Probe,
         detail,
     })?;
+    laps.lap("probe");
 
     let decision = decide(probe.installed.as_deref(), &setup.version);
-    if decision != Decision::Keep {
+    let node_json = if decision == Decision::Keep {
+        if !probe.started {
+            return Err(Failure::Ssh {
+                step: Step::Start,
+                detail: probe
+                    .said
+                    .lines()
+                    .last()
+                    .unwrap_or("failed without a word")
+                    .to_string(),
+            });
+        }
+        probe.node_json
+    } else {
         report(NodeStatus::Connecting(Step::Install));
         let binary = setup.source.binary_for(&probe.arch)?;
-        run_ok(runner, commands::make_bin_dir(node), Step::Install).await?;
-        run_ok(runner, commands::upload(node, &binary), Step::Install).await?;
-        run_ok(runner, commands::put_in_place(node), Step::Install).await?;
-        if let Decision::Update { .. } = decision {
-            stop_older_daemon(runner, setup).await;
-        }
-        laps.lap("install");
-    }
-
-    report(NodeStatus::Connecting(Step::Start));
-    run_ok(runner, commands::serve(node), Step::Start).await?;
-    laps.lap("start");
+        run_ok(runner, commands::upload(node, mux, &binary), Step::Install).await?;
+        laps.lap("upload");
+        let stop = match decision {
+            Decision::Update { .. } => older_daemon(&probe.node_json, &setup.version),
+            _ => None,
+        };
+        report(NodeStatus::Connecting(Step::Start));
+        let output = run_ok(
+            runner,
+            commands::install_and_start(node, mux, stop),
+            Step::Start,
+        )
+        .await?;
+        laps.lap("start");
+        output.stdout
+    };
 
     report(NodeStatus::Connecting(Step::Config));
-    let output = run_ok(runner, commands::read_node_json(node), Step::Config).await?;
-    let json = parse_node_json(&output.stdout).map_err(Failure::NodeJson)?;
-    laps.lap("config");
+    let json = parse_node_json(&node_json).map_err(Failure::NodeJson)?;
 
     report(NodeStatus::Connecting(Step::Tunnel));
     let local = runner.free_port().map_err(Failure::Local)?;
-    let tunnel = runner
-        .spawn_tunnel(commands::tunnel(node, local, json.port))
-        .map_err(Failure::Local)?;
-    if let Some(mut old) = locked(slot).replace(tunnel) {
-        old.kill();
+    match mux {
+        Mux::Own(path) => {
+            run_ok(
+                runner,
+                commands::forward(node, path, local, json.port),
+                Step::Tunnel,
+            )
+            .await?;
+        }
+        Mux::Off | Mux::Theirs => {
+            let tunnel = runner
+                .spawn_tunnel(commands::tunnel(node, mux, local, json.port))
+                .map_err(Failure::Local)?;
+            *locked(slot) = Some(tunnel);
+        }
     }
     laps.lap("tunnel");
 
@@ -218,22 +357,13 @@ pub async fn connect_once<R: Runner>(
     Err(Failure::Api(last))
 }
 
-/// The daemon `node.json` names, stopped when it is of another version than
-/// the one just installed. Best effort: a node.json left by a daemon that
-/// has since died names nothing that runs.
-async fn stop_older_daemon<R: Runner>(runner: &R, setup: &Setup) {
-    let Ok(output) = runner.run(commands::read_node_json(&setup.node)).await else {
-        return;
-    };
-    if !output.success {
-        return;
-    }
-    let Ok(json) = parse_node_json(&output.stdout) else {
-        return;
-    };
-    if let (Some(pid), true) = (json.pid, json.version != setup.version) {
-        let _ = runner.run(commands::stop(&setup.node, pid)).await;
-    }
+/// The pid of the daemon an older `node.json` names, when it is of another
+/// version than the one being installed: stopped before the new one starts.
+/// A node.json left by a daemon that has since died names nothing that
+/// runs, which `kill` is told without harm.
+pub fn older_daemon(node_json: &str, version: &str) -> Option<u32> {
+    let json = parse_node_json(node_json).ok()?;
+    (json.version != version).then_some(json.pid).flatten()
 }
 
 /// The connection for as long as the task runs: connected, watched, opened
@@ -247,8 +377,13 @@ pub async fn run<R: Runner>(
     let timing = setup.timing;
     let mut backoff = timing.first_backoff;
     let mut was_connected = false;
+    let mux = find_mux(&runner, &setup).await;
+    MUXES
+        .write()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .insert(setup.node.id.clone(), mux.clone());
     loop {
-        let failure = match connect_once(&runner, &setup, &slot, &report).await {
+        let failure = match connect_once(&runner, &setup, &mux, &slot, &report).await {
             Ok((info, local_port, token)) => {
                 report(NodeStatus::Connected {
                     info,

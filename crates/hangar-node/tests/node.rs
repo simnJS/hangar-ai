@@ -309,6 +309,33 @@ fn version_prints_the_version_and_the_target() {
 }
 
 #[test]
+fn serve_if_version_starts_only_this_version() {
+    let home = tempfile::tempdir().unwrap();
+    let other = command(home.path())
+        .args(["serve", "--detach", "--if-version", "0.0.0-other"])
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    assert_eq!(other.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&other.stderr).contains("not started"));
+    assert!(!state_dir(home.path()).join("node.json").exists());
+
+    let status = command(home.path())
+        .args([
+            "serve",
+            "--detach",
+            "--if-version",
+            env!("CARGO_PKG_VERSION"),
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let node = Node::found(home);
+    assert!(alive(node.pid));
+    assert_eq!(node.get("/node/info").0, 200);
+}
+
+#[test]
 fn the_api_wants_the_token() {
     let node = Node::start();
     for path in ["/node/info", "/node/panes", "/api/board?cwd=/"] {

@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use super::commands::{self, Cmd};
+use super::commands::{self, Cmd, Mux};
 use super::connect::{self, Setup, Timing, TunnelSlot, locked};
 use super::model::*;
 use super::runner::{CmdOutput, Runner, Tunnel, parse_response};
@@ -35,87 +35,103 @@ fn line(cmd: &Cmd) -> String {
 
 // ── command lines ─────────────────────────────────────────────────────
 
+const OWN: &str = "/run/user/1000/hangar-ssh/42-ab";
+
+fn own() -> Mux {
+    Mux::Own(OWN.into())
+}
+
 #[test]
 fn every_ssh_step_is_batch_mode_with_a_bounded_wait() {
     let n = node(None);
-    for cmd in [
-        commands::probe(&n),
-        commands::make_bin_dir(&n),
-        commands::put_in_place(&n),
-        commands::serve(&n),
-        commands::read_node_json(&n),
-        commands::stop(&n, 42),
-        commands::tunnel(&n, 21080, 7000),
-    ] {
-        assert_eq!(cmd.program, "ssh");
-        assert_eq!(
-            cmd.args[..4],
-            ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"],
-            "{}",
-            line(&cmd)
-        );
-        assert!(!cmd.args.contains(&"-F".to_string()), "{}", line(&cmd));
+    for mux in [Mux::Off, Mux::Theirs, own()] {
+        for cmd in [
+            commands::probe(&n, &mux, "1.0.0"),
+            commands::install_and_start(&n, &mux, Some(42)),
+            commands::tunnel(&n, &mux, 21080, 7000),
+            commands::link(&n, OWN, "1.0.0"),
+            commands::forward(&n, OWN, 21080, 7000),
+        ] {
+            assert_eq!(cmd.program, "ssh");
+            assert_eq!(
+                cmd.args[..4],
+                ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"],
+                "{}",
+                line(&cmd)
+            );
+            assert!(!cmd.args.contains(&"-F".to_string()), "{}", line(&cmd));
+        }
     }
 }
 
 #[test]
-fn the_probe_asks_the_architecture_and_a_version_that_may_be_missing() {
+fn the_probe_asks_everything_in_one_command() {
     assert_eq!(
-        line(&commands::probe(&node(None))),
+        line(&commands::probe(&node(None), &Mux::Off, "1.2.3")),
         "ssh | -o | BatchMode=yes | -o | ConnectTimeout=10 | me@box | \
-         uname -m; ~/.local/share/hangar-node/bin/hangar-node version 2>/dev/null || true"
+         mkdir -p ~/.local/share/hangar-node/bin; uname -m; echo @@hangar; \
+         ~/.local/share/hangar-node/bin/hangar-node version 2>/dev/null; echo @@hangar; \
+         ~/.local/share/hangar-node/bin/hangar-node serve --detach --if-version 1.2.3 2>&1 \
+         && echo @@hangar-started; echo @@hangar; cat ~/.local/state/hangar-node/node.json 2>/dev/null"
     );
 }
 
 #[test]
 fn a_config_file_is_passed_as_dash_f_before_the_target() {
     let n = node(Some("/tmp/rig/ssh_config"));
-    let cmd = commands::serve(&n);
+    let cmd = commands::ssh(&n, &Mux::Off, "true");
     assert_eq!(
         line(&cmd),
-        "ssh | -o | BatchMode=yes | -o | ConnectTimeout=10 | -F | /tmp/rig/ssh_config | me@box | \
-         ~/.local/share/hangar-node/bin/hangar-node serve --detach"
+        "ssh | -o | BatchMode=yes | -o | ConnectTimeout=10 | -F | /tmp/rig/ssh_config | me@box | true"
     );
-    let upload = commands::upload(&n, Path::new("/opt/hangar/hangar-node-x86_64"));
+    let upload = commands::upload(&n, &Mux::Off, Path::new("/opt/hangar/hangar-node-x86_64"));
     assert_eq!(
         line(&upload),
         "scp | -o | BatchMode=yes | -o | ConnectTimeout=10 | -F | /tmp/rig/ssh_config | -q | \
          /opt/hangar/hangar-node-x86_64 | me@box:.local/share/hangar-node/bin/hangar-node.new"
     );
+    assert_eq!(
+        line(&commands::config_query(&n)),
+        "ssh | -G | -o | BatchMode=yes | -o | ConnectTimeout=10 | -F | /tmp/rig/ssh_config | me@box"
+    );
 }
 
 #[test]
 fn a_blank_config_file_is_no_config_file() {
-    let cmd = commands::serve(&node(Some("  ")));
+    let cmd = commands::ssh(&node(Some("  ")), &Mux::Off, "true");
     assert!(!cmd.args.contains(&"-F".to_string()));
 }
 
 #[test]
-fn the_upload_lands_beside_the_binary_and_is_renamed_over_it() {
+fn the_install_stops_an_older_daemon_then_puts_the_upload_in_place_and_starts() {
     let n = node(None);
     assert_eq!(
-        line(&commands::make_bin_dir(&n)),
-        "ssh | -o | BatchMode=yes | -o | ConnectTimeout=10 | me@box | mkdir -p ~/.local/share/hangar-node/bin"
+        commands::install_and_start(&n, &Mux::Off, Some(4242))
+            .args
+            .last()
+            .unwrap(),
+        "kill 4242 2>/dev/null; chmod +x ~/.local/share/hangar-node/bin/hangar-node.new && \
+         mv -f ~/.local/share/hangar-node/bin/hangar-node.new ~/.local/share/hangar-node/bin/hangar-node && \
+         ~/.local/share/hangar-node/bin/hangar-node serve --detach && cat ~/.local/state/hangar-node/node.json"
     );
-    assert_eq!(
-        commands::put_in_place(&n).args.last().unwrap(),
-        "chmod +x ~/.local/share/hangar-node/bin/hangar-node.new && \
-         mv -f ~/.local/share/hangar-node/bin/hangar-node.new ~/.local/share/hangar-node/bin/hangar-node"
-    );
-}
-
-#[test]
-fn node_json_is_read_with_cat() {
-    assert_eq!(
-        commands::read_node_json(&node(None)).args.last().unwrap(),
-        "cat ~/.local/state/hangar-node/node.json"
+    assert!(
+        commands::install_and_start(&n, &Mux::Off, None)
+            .args
+            .last()
+            .unwrap()
+            .starts_with("chmod +x")
     );
 }
 
 #[test]
 fn the_tunnel_forwards_loopback_to_loopback_and_runs_no_command() {
     assert_eq!(
-        line(&commands::tunnel(&node(Some("cfg")), 21085, 40123)),
+        line(&commands::tunnel(
+            &node(Some("cfg")),
+            &Mux::Off,
+            21085,
+            40123
+        )),
         "ssh | -o | BatchMode=yes | -o | ConnectTimeout=10 | -F | cfg | \
          -o | ExitOnForwardFailure=yes | -o | ServerAliveInterval=15 | -o | ServerAliveCountMax=3 | \
          -o | IPQoS=af21 | -o | Compression=no | -N | -L | 127.0.0.1:21085:127.0.0.1:40123 | me@box"
@@ -126,28 +142,170 @@ fn the_tunnel_forwards_loopback_to_loopback_and_runs_no_command() {
 fn the_target_is_trimmed() {
     let mut n = node(None);
     n.ssh_target = "  me@box ".into();
-    assert_eq!(commands::serve(&n).args[4], "me@box");
+    assert_eq!(commands::ssh(&n, &Mux::Off, "true").args[4], "me@box");
+}
+
+// ── sharing one connection (ControlMaster) ────────────────────────────
+
+#[test]
+fn unix_shares_the_connection_and_windows_does_not() {
+    let config = "user me\nhostname box\ncontrolmaster false\ncontrolpersist no\n";
+    assert_eq!(
+        commands::mux_for(false, Some(config), Some(OWN.into())),
+        own()
+    );
+    // OpenSSH for Windows has no ControlMaster: the commands as they were.
+    assert_eq!(
+        commands::mux_for(true, Some(config), Some(OWN.into())),
+        Mux::Off
+    );
+    // An ssh that could not say (too old for -G, a broken config), or no
+    // folder for the socket: nothing shared.
+    assert_eq!(commands::mux_for(false, None, Some(OWN.into())), Mux::Off);
+    assert_eq!(commands::mux_for(false, Some(config), None), Mux::Off);
+    assert_eq!(
+        commands::mux_for(false, Some("controlpath none\n"), Some(OWN.into())),
+        own()
+    );
+}
+
+#[test]
+fn a_person_s_control_path_is_left_to_them() {
+    let config = "controlmaster auto\ncontrolpath /home/me/.ssh/cm-%C\ncontrolpersist 600\n";
+    let mux = commands::mux_for(false, Some(config), Some(OWN.into()));
+    assert_eq!(mux, Mux::Theirs);
+    let n = node(None);
+    // Not overridden: none of the app's sharing options on their commands.
+    for cmd in [
+        commands::probe(&n, &mux, "1.0.0"),
+        commands::upload(&n, &mux, Path::new("/bin/x")),
+        commands::install_and_start(&n, &mux, None),
+    ] {
+        assert!(
+            !cmd.args.iter().any(|arg| arg.starts_with("Control")),
+            "{}",
+            line(&cmd)
+        );
+    }
+    // The tunnel alone keeps off their master: a forward asked through one
+    // would live in it, and the ssh asking would end at once.
+    let tunnel = commands::tunnel(&n, &mux, 21085, 40123);
+    assert!(line(&tunnel).contains("-o | ControlMaster=no | -o | ControlPath=none"));
+    // Off: nothing at all, as before.
+    let off = commands::tunnel(&n, &Mux::Off, 21085, 40123);
+    assert!(!off.args.iter().any(|arg| arg.starts_with("Control")));
+}
+
+#[test]
+fn with_sharing_the_tunnel_is_the_master_and_the_rest_its_sessions() {
+    let n = node(None);
+    let link = commands::link(&n, OWN, "1.2.3");
+    let words = line(&link);
+    assert!(
+        words.contains(&format!(
+            "-o | ControlMaster=yes | -o | ControlPath={OWN} | -o | ControlPersist=no | \
+             -o | ExitOnForwardFailure=yes | -o | ServerAliveInterval=15 | -o | ServerAliveCountMax=3 | \
+             -o | IPQoS=af21 | -o | Compression=no | me@box"
+        )),
+        "{words}"
+    );
+    let session = link.args.last().unwrap();
+    assert!(session.starts_with(&commands::probe_script("1.2.3")));
+    assert!(
+        session.ends_with("; echo; echo @@hangar-end; exec cat"),
+        "{session}"
+    );
+
+    assert_eq!(
+        line(&commands::forward(&n, OWN, 21085, 40123)),
+        format!(
+            "ssh | -o | BatchMode=yes | -o | ConnectTimeout=10 | -o | ControlPath={OWN} | -O | forward | \
+             -L | 127.0.0.1:21085:127.0.0.1:40123 | me@box"
+        )
+    );
+    // The install's commands ride the master, never becoming one.
+    for cmd in [
+        commands::upload(&n, &own(), Path::new("/bin/x")),
+        commands::install_and_start(&n, &own(), None),
+    ] {
+        assert!(
+            line(&cmd).contains(&format!("-o | ControlMaster=no | -o | ControlPath={OWN}")),
+            "{}",
+            line(&cmd)
+        );
+    }
+}
+
+#[test]
+fn the_control_socket_is_this_process_s_and_short() {
+    let dir = Path::new("/run/user/1000/hangar-ssh");
+    let path = connect::control_path(dir, "5f0c3f5e-9c7a-4a43-a2b5-3e8f9f1e2d11");
+    assert_eq!(path.parent(), Some(dir));
+    let name = path.file_name().unwrap().to_str().unwrap();
+    assert!(
+        name.starts_with(&format!("{}-", std::process::id())),
+        "{name}"
+    );
+    assert!(name.len() <= 27, "{name}");
+    assert_ne!(path, connect::control_path(dir, "another-node"));
 }
 
 // ── what is read back ─────────────────────────────────────────────────
 
 #[test]
-fn the_probe_reads_the_architecture_and_the_version() {
+fn the_probe_reads_each_answer() {
+    let json = r#"{"version":"0.4.2","port":40123,"token":"abc","pid":77}"#;
     assert_eq!(
-        parse_probe("x86_64\n0.4.2 x86_64-unknown-linux-gnu\n"),
+        parse_probe(&format!(
+            "x86_64\n@@hangar\n0.4.2 x86_64-unknown-linux-gnu\n@@hangar\n@@hangar-started\n@@hangar\n{json}\n"
+        )),
         Ok(Probe {
             arch: "x86_64".into(),
-            installed: Some("0.4.2".into())
+            installed: Some("0.4.2".into()),
+            started: true,
+            said: String::new(),
+            node_json: json.into(),
         })
     );
+    // Nothing installed: the start failed, and says so; no node.json.
     assert_eq!(
-        parse_probe("aarch64\n"),
+        parse_probe(
+            "aarch64\n@@hangar\n@@hangar\nsh: 1: hangar-node: not found\n@@hangar\n@@hangar-end\nlater\n"
+        ),
         Ok(Probe {
             arch: "aarch64".into(),
-            installed: None
+            installed: None,
+            started: false,
+            said: "sh: 1: hangar-node: not found".into(),
+            node_json: String::new(),
         })
     );
     assert!(parse_probe("\n  \n").is_err());
+    // node.json has no newline of its own: the end mark may follow it.
+    assert_eq!(
+        parse_probe(
+            "x86_64\n@@hangar\n1 t\n@@hangar\n@@hangar-started\n@@hangar\n{\"a\":1}@@hangar-end\n"
+        )
+        .map(|p| p.node_json),
+        Ok("{\"a\":1}".into())
+    );
+    // What a shell's startup files print comes first.
+    assert_eq!(
+        parse_probe("Welcome to box\nx86_64\n@@hangar\n").map(|p| p.arch),
+        Ok("x86_64".into())
+    );
+}
+
+#[test]
+fn the_daemon_to_stop_is_an_older_one() {
+    let old = r#"{"version":"9.0.0","port":40000,"token":"old","pid":4242}"#;
+    assert_eq!(connect::older_daemon(old, "9.9.9"), Some(4242));
+    assert_eq!(connect::older_daemon(old, "9.0.0"), None);
+    assert_eq!(connect::older_daemon("", "9.9.9"), None);
+    assert_eq!(
+        connect::older_daemon(r#"{"version":"1","port":5,"token":"t"}"#, "9"),
+        None
+    );
 }
 
 #[test]
@@ -435,13 +593,14 @@ async fn a_status_from_an_older_connection_is_dropped() {
 
 // ── the state machine, against a fake machine ─────────────────────────
 
-/// A machine: the answers to the commands, in order, and a tunnel the test
-/// can end.
+/// A machine: the answers to the commands, in order (the link's session
+/// takes one too), and a tunnel the test can end.
 #[derive(Clone, Default)]
 struct Fake {
     answers: Arc<Mutex<VecDeque<CmdOutput>>>,
     ran: Arc<Mutex<Vec<Cmd>>>,
     tunnels: Arc<Mutex<Vec<Cmd>>>,
+    links: Arc<Mutex<Vec<Cmd>>>,
     /// Set to end the current tunnel.
     tunnel_dies: Arc<AtomicBool>,
     /// The tunnel cannot start.
@@ -499,6 +658,19 @@ impl Fake {
             .map(|cmd| format!("{} {}", cmd.program, cmd.args.last().unwrap()))
             .collect()
     }
+
+    fn next(&self) -> CmdOutput {
+        locked(&self.answers)
+            .pop_front()
+            .unwrap_or_else(|| failed("no more answers"))
+    }
+
+    fn tunnel(&self) -> FakeTunnel {
+        FakeTunnel {
+            dies: self.tunnel_dies.clone(),
+            killed: false,
+        }
+    }
 }
 
 impl Runner for Fake {
@@ -506,9 +678,7 @@ impl Runner for Fake {
 
     async fn run(&self, cmd: Cmd) -> Result<CmdOutput, String> {
         locked(&self.ran).push(cmd);
-        Ok(locked(&self.answers)
-            .pop_front()
-            .unwrap_or_else(|| failed("no more answers")))
+        Ok(self.next())
     }
 
     fn spawn_tunnel(&self, cmd: Cmd) -> Result<FakeTunnel, String> {
@@ -516,10 +686,19 @@ impl Runner for Fake {
             return Err("ssh: not found".into());
         }
         locked(&self.tunnels).push(cmd);
-        Ok(FakeTunnel {
-            dies: self.tunnel_dies.clone(),
-            killed: false,
-        })
+        Ok(self.tunnel())
+    }
+
+    async fn open_link(
+        &self,
+        cmd: Cmd,
+        _control_path: PathBuf,
+    ) -> Result<(FakeTunnel, CmdOutput), String> {
+        if self.tunnel_fails {
+            return Err("ssh: not found".into());
+        }
+        locked(&self.links).push(cmd);
+        Ok((self.tunnel(), self.next()))
     }
 
     fn free_port(&self) -> Result<u16, String> {
@@ -550,6 +729,24 @@ fn info() -> NodeInfo {
 
 const NODE_JSON: &str = r#"{"version":"9.9.9","port":40123,"token":"tok","pid":10}"#;
 
+/// What the probe prints: the architecture, the version installed (if
+/// any), whether its daemon started, node.json.
+fn probed(arch: &str, installed: Option<&str>, started: bool, json: &str) -> CmdOutput {
+    let version = installed.map_or(String::new(), |v| format!("{v} x86_64-unknown-linux-gnu\n"));
+    let start = if started {
+        "@@hangar-started\n"
+    } else {
+        "hangar-node: this is another version: not started\n"
+    };
+    ok(&format!(
+        "{arch}\n@@hangar\n{version}@@hangar\n{start}@@hangar\n{json}\n"
+    ))
+}
+
+fn keep() -> CmdOutput {
+    probed("x86_64", Some("9.9.9"), true, NODE_JSON)
+}
+
 fn setup(binary_dir: Option<&Path>) -> Setup {
     Setup {
         node: node(None),
@@ -565,6 +762,7 @@ fn setup(binary_dir: Option<&Path>) -> Setup {
             handshake_tries: 5,
             handshake_wait: Duration::from_millis(1),
         },
+        control_dir: None,
     }
 }
 
@@ -584,25 +782,31 @@ fn connected() -> NodeStatus {
     }
 }
 
+#[test]
+fn the_install_is_skipped_only_for_this_version_started() {
+    // This version there: nothing uploaded, the probe started it.
+    assert_eq!(decide(Some("9.9.9"), "9.9.9"), Decision::Keep);
+    let probe = parse_probe(&keep().stdout).unwrap();
+    assert!(probe.started);
+    // Another version, or none: the upload, whatever the probe said.
+    assert!(matches!(
+        decide(Some("9.0.0"), "9.9.9"),
+        Decision::Update { .. }
+    ));
+    assert_eq!(decide(None, "9.9.9"), Decision::Install);
+}
+
 #[tokio::test]
-async fn a_node_with_this_version_is_started_and_tunnelled_without_an_upload() {
-    let fake = Fake::answering(vec![
-        ok("x86_64\n9.9.9 x86_64-unknown-linux-gnu\n"),
-        ok(""),
-        ok(NODE_JSON),
-    ]);
+async fn a_node_with_this_version_is_probed_started_and_tunnelled_in_one_command() {
+    let fake = Fake::answering(vec![keep()]);
     *locked(&fake.info_refusals) = 2;
     let slot: TunnelSlot<FakeTunnel> = Arc::default();
     let (reports, report) = reporter();
-    let result = connect::connect_once(&fake, &setup(None), &slot, &report).await;
+    let result = connect::connect_once(&fake, &setup(None), &Mux::Off, &slot, &report).await;
     assert_eq!(result, Ok((info(), 21099, "tok".into())));
     assert_eq!(
         fake.ran(),
-        [
-            "ssh uname -m; ~/.local/share/hangar-node/bin/hangar-node version 2>/dev/null || true",
-            "ssh ~/.local/share/hangar-node/bin/hangar-node serve --detach",
-            "ssh cat ~/.local/state/hangar-node/node.json",
-        ]
+        [format!("ssh {}", commands::probe_script("9.9.9"))]
     );
     assert_eq!(
         locked(&fake.tunnels)[0].args.last().map(String::as_str),
@@ -618,7 +822,6 @@ async fn a_node_with_this_version_is_started_and_tunnelled_without_an_upload() {
         *locked(&reports),
         [
             NodeStatus::Connecting(Step::Probe),
-            NodeStatus::Connecting(Step::Start),
             NodeStatus::Connecting(Step::Config),
             NodeStatus::Connecting(Step::Tunnel),
             NodeStatus::Connecting(Step::Handshake),
@@ -627,66 +830,123 @@ async fn a_node_with_this_version_is_started_and_tunnelled_without_an_upload() {
 }
 
 #[tokio::test]
+async fn shared_the_probe_runs_in_the_master_and_the_forward_is_added_to_it() {
+    let fake = Fake::answering(vec![keep(), ok("")]);
+    let slot: TunnelSlot<FakeTunnel> = Arc::default();
+    let (_, report) = reporter();
+    let result = connect::connect_once(&fake, &setup(None), &own(), &slot, &report).await;
+    assert_eq!(result, Ok((info(), 21099, "tok".into())));
+    // One connection: the master's session probed and started the node.
+    assert_eq!(locked(&fake.links).len(), 1);
+    assert_eq!(
+        locked(&fake.links)[0],
+        commands::link(&node(None), OWN, "9.9.9")
+    );
+    // Then only the forward, asked of the master; no tunnel of its own.
+    assert_eq!(
+        *locked(&fake.ran),
+        [commands::forward(&node(None), OWN, 21099, 40123)]
+    );
+    assert!(locked(&fake.tunnels).is_empty());
+    assert!(locked(&slot).is_some());
+}
+
+#[tokio::test]
+async fn shared_a_master_that_ends_before_the_probe_is_a_probe_failure() {
+    let fake = Fake::answering(vec![failed(
+        "ssh: connect to host box port 22: Connection refused",
+    )]);
+    let slot: TunnelSlot<FakeTunnel> = Arc::default();
+    let (_, report) = reporter();
+    let result = connect::connect_once(&fake, &setup(None), &own(), &slot, &report).await;
+    assert_eq!(
+        result,
+        Err(Failure::Ssh {
+            step: Step::Probe,
+            detail: "ssh: connect to host box port 22: Connection refused".into()
+        })
+    );
+}
+
+#[tokio::test]
 async fn a_node_without_hangar_node_gets_the_binary_for_its_architecture() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("hangar-node-aarch64"), b"bin").unwrap();
     let fake = Fake::answering(vec![
-        ok("aarch64\n"),
-        ok(""),
-        ok(""),
-        ok(""),
+        probed("aarch64", None, false, ""),
         ok(""),
         ok(NODE_JSON),
     ]);
     let slot: TunnelSlot<FakeTunnel> = Arc::default();
     let (reports, report) = reporter();
-    let result = connect::connect_once(&fake, &setup(Some(dir.path())), &slot, &report).await;
+    let result =
+        connect::connect_once(&fake, &setup(Some(dir.path())), &Mux::Off, &slot, &report).await;
     assert!(result.is_ok(), "{result:?}");
     let ran = locked(&fake.ran).clone();
+    assert_eq!(ran.len(), 3, "{ran:?}");
+    assert_eq!(ran[1].program, "scp");
     assert_eq!(
-        ran[1].args.last().unwrap(),
-        "mkdir -p ~/.local/share/hangar-node/bin"
-    );
-    assert_eq!(ran[2].program, "scp");
-    assert_eq!(
-        ran[2].args[ran[2].args.len() - 2],
+        ran[1].args[ran[1].args.len() - 2],
         dir.path().join("hangar-node-aarch64").display().to_string()
     );
-    assert!(ran[3].args.last().unwrap().starts_with("chmod +x"));
-    assert!(ran[4].args.last().unwrap().ends_with("serve --detach"));
+    assert_eq!(
+        ran[2],
+        commands::install_and_start(&node(None), &Mux::Off, None)
+    );
     assert!(locked(&reports).contains(&NodeStatus::Connecting(Step::Install)));
+    assert!(locked(&reports).contains(&NodeStatus::Connecting(Step::Start)));
 }
 
 #[tokio::test]
 async fn an_update_stops_the_older_daemon_before_starting_the_new_one() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("hangar-node-x86_64"), b"bin").unwrap();
+    let old = r#"{"version":"9.0.0","port":40000,"token":"old","pid":4242}"#;
     let fake = Fake::answering(vec![
-        ok("x86_64\n9.0.0 x86_64-unknown-linux-gnu\n"),
-        ok(""),
-        ok(""),
-        ok(""),
-        ok(r#"{"version":"9.0.0","port":40000,"token":"old","pid":4242}"#),
-        ok(""),
+        probed("x86_64", Some("9.0.0"), false, old),
         ok(""),
         ok(NODE_JSON),
+        // The forward.
+        ok(""),
     ]);
     let slot: TunnelSlot<FakeTunnel> = Arc::default();
     let (_, report) = reporter();
-    let result = connect::connect_once(&fake, &setup(Some(dir.path())), &slot, &report).await;
+    let result =
+        connect::connect_once(&fake, &setup(Some(dir.path())), &own(), &slot, &report).await;
     assert!(result.is_ok(), "{result:?}");
-    let ran = fake.ran();
-    assert_eq!(ran[5], "ssh kill 4242 2>/dev/null || true");
-    assert!(ran[6].ends_with("serve --detach"));
+    let ran = locked(&fake.ran).clone();
+    assert_eq!(ran[0].program, "scp");
+    assert_eq!(
+        ran[1],
+        commands::install_and_start(&node(None), &own(), Some(4242))
+    );
+}
+
+#[tokio::test]
+async fn this_version_that_does_not_start_is_a_start_failure() {
+    let fake = Fake::answering(vec![ok(
+        "x86_64\n@@hangar\n9.9.9 t\n@@hangar\nhangar-node: no daemon answered within 30s\n@@hangar\n",
+    )]);
+    let slot: TunnelSlot<FakeTunnel> = Arc::default();
+    let (_, report) = reporter();
+    let result = connect::connect_once(&fake, &setup(None), &Mux::Off, &slot, &report).await;
+    assert_eq!(
+        result,
+        Err(Failure::Ssh {
+            step: Step::Start,
+            detail: "hangar-node: no daemon answered within 30s".into()
+        })
+    );
 }
 
 #[tokio::test]
 async fn no_binary_for_the_machine_is_a_clear_failure_before_anything_is_sent() {
     let dir = tempfile::tempdir().unwrap();
-    let fake = Fake::answering(vec![ok("x86_64\n")]);
+    let fake = Fake::answering(vec![probed("x86_64", None, false, "")]);
     let slot: TunnelSlot<FakeTunnel> = Arc::default();
     let (_, report) = reporter();
-    let result = connect::connect_once(&fake, &setup(Some(dir.path())), &slot, &report).await;
+    let result =
+        connect::connect_once(&fake, &setup(Some(dir.path())), &Mux::Off, &slot, &report).await;
     assert!(matches!(
         result,
         Err(Failure::NoBinary { ref arch, ref file, .. }) if arch == "x86_64" && file == "hangar-node-x86_64"
@@ -717,38 +977,37 @@ async fn an_ssh_failure_names_its_step_and_what_ssh_said() {
 
 #[tokio::test]
 async fn a_node_json_that_does_not_read_fails_the_connection() {
-    let fake = Fake::answering(vec![ok("x86_64\n9.9.9 t\n"), ok(""), ok("{}")]);
+    let fake = Fake::answering(vec![probed("x86_64", Some("9.9.9"), true, "{}")]);
     let slot: TunnelSlot<FakeTunnel> = Arc::default();
     let (_, report) = reporter();
-    let result = connect::connect_once(&fake, &setup(None), &slot, &report).await;
+    let result = connect::connect_once(&fake, &setup(None), &Mux::Off, &slot, &report).await;
     assert!(matches!(result, Err(Failure::NodeJson(_))), "{result:?}");
 }
 
 #[tokio::test]
 async fn a_tunnel_that_cannot_start_is_a_local_failure() {
-    let mut fake = Fake::answering(vec![ok("x86_64\n9.9.9 t\n"), ok(""), ok(NODE_JSON)]);
+    let mut fake = Fake::answering(vec![keep()]);
     fake.tunnel_fails = true;
     let slot: TunnelSlot<FakeTunnel> = Arc::default();
     let (_, report) = reporter();
-    let result = connect::connect_once(&fake, &setup(None), &slot, &report).await;
+    let result = connect::connect_once(&fake, &setup(None), &Mux::Off, &slot, &report).await;
     assert_eq!(result, Err(Failure::Local("ssh: not found".into())));
 }
 
 #[tokio::test]
 async fn an_api_that_never_answers_closes_the_tunnel() {
-    let fake = Fake::answering(vec![ok("x86_64\n9.9.9 t\n"), ok(""), ok(NODE_JSON)]);
+    let fake = Fake::answering(vec![keep()]);
     *locked(&fake.info_refusals) = 100;
     let slot: TunnelSlot<FakeTunnel> = Arc::default();
     let (_, report) = reporter();
-    let result = connect::connect_once(&fake, &setup(None), &slot, &report).await;
+    let result = connect::connect_once(&fake, &setup(None), &Mux::Off, &slot, &report).await;
     assert_eq!(result, Err(Failure::Api("Connection refused".into())));
     assert!(locked(&slot).is_none());
 }
 
 #[tokio::test]
 async fn a_tunnel_that_dies_is_opened_again_after_a_wait() {
-    let once = [ok("x86_64\n9.9.9 t\n"), ok(""), ok(NODE_JSON)];
-    let fake = Fake::answering(once.iter().chain(once.iter()).cloned().collect());
+    let fake = Fake::answering(vec![keep(), keep()]);
     let slot: TunnelSlot<FakeTunnel> = Arc::default();
     let (reports, report) = reporter();
     let task = tokio::spawn(connect::run(
@@ -803,6 +1062,82 @@ async fn a_tunnel_that_dies_is_opened_again_after_a_wait() {
         .unwrap();
 }
 
+#[tokio::test]
+async fn the_run_asks_ssh_its_config_once_when_it_may_share() {
+    let dir = tempfile::tempdir().unwrap();
+    let fake = Fake::answering(vec![
+        // `ssh -G`: the person's config shares already.
+        ok("controlmaster auto\ncontrolpath ~/.ssh/cm-%C\n"),
+        keep(),
+    ]);
+    let mut setup = setup(None);
+    setup.control_dir = Some(dir.path().to_path_buf());
+    setup.node.id = format!("theirs-{}", std::process::id());
+    let slot: TunnelSlot<FakeTunnel> = Arc::default();
+    let (reports, report) = reporter();
+    let task = tokio::spawn(connect::run(
+        fake.clone(),
+        setup.clone(),
+        slot.clone(),
+        report,
+    ));
+    for _ in 0..400 {
+        if locked(&reports).contains(&connected()) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert!(locked(&reports).contains(&connected()));
+    assert_eq!(locked(&fake.ran)[0], commands::config_query(&setup.node));
+    assert_eq!(connect::mux_of(&setup.node.id), Mux::Theirs);
+    // Theirs: a tunnel of its own, kept off their master.
+    assert!(line(&locked(&fake.tunnels)[0]).contains("ControlPath=none"));
+    if let Some(mut tunnel) = locked(&slot).take() {
+        tunnel.kill();
+    }
+    let _ = tokio::time::timeout(Duration::from_secs(2), task).await;
+}
+
+/// The real link's reader, a shell standing in for ssh: what its session
+/// printed up to the end mark (which may follow node.json on its line),
+/// and it keeps running; killed, its socket goes. One that ends before the
+/// mark says why on stderr.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_link_is_read_up_to_its_end_mark_and_held_open() {
+    use super::runner::System;
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("sock");
+    std::fs::write(&socket, b"").unwrap();
+    let sh = |script: &str| Cmd {
+        program: "sh".into(),
+        args: vec!["-c".into(), script.into()],
+    };
+    let (mut tunnel, output) = System
+        .open_link(
+            sh(r#"printf 'x86_64\n{"a":1}@@hangar-end\nlater\n'; exec cat"#),
+            socket.clone(),
+        )
+        .await
+        .unwrap();
+    assert!(output.success);
+    assert_eq!(output.stdout, "x86_64\n{\"a\":1}");
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(tunnel.exited(), None, "held open by its stdin");
+    tunnel.kill();
+    assert!(!socket.exists());
+
+    let (_, output) = System
+        .open_link(
+            sh("echo 'Permission denied (publickey).' >&2; exit 255"),
+            socket,
+        )
+        .await
+        .unwrap();
+    assert!(!output.success);
+    assert_eq!(output.stderr.trim(), "Permission denied (publickey).");
+}
+
 /// Against the Docker rig (`scripts/node-test/up.sh`), with a fake
 /// `hangar-node` uploaded as the binary: a shell script that writes a
 /// node.json and serves `/node/info` with Python. Run with
@@ -837,10 +1172,12 @@ async fn rig_connects_to_the_test_container_with_a_fake_hangar_node() {
         },
         version: format!("rig-{}", std::process::id()),
         timing: Timing::default(),
+        control_dir: None,
     };
     let slot: TunnelSlot<super::runner::SystemTunnel> = Arc::default();
     let (reports, report) = reporter();
-    let result = connect::connect_once(&super::runner::System, &setup, &slot, &report).await;
+    let result =
+        connect::connect_once(&super::runner::System, &setup, &Mux::Off, &slot, &report).await;
     let (info, port, token) = result.unwrap_or_else(|f| panic!("{f:?}: {:?}", locked(&reports)));
     assert_eq!(info.version, "fake");
     assert!(!info.hostname.is_empty());

@@ -63,6 +63,8 @@ work="$(mktemp -d "${TMPDIR:-/tmp}/hangar-node-bench.XXXXXX")"
 work="$(cd "$work" && pwd -P)"
 export HANGAR_DATA_ROOT="$work/home"
 export HANGAR_ENDPOINT_FILE="$work/home/hangar/endpoint.json"
+# The app's SSH master sockets (nodes/connect.rs), in the run's folder.
+export HANGAR_NODES_SSH_DIR="$work/ssh"
 export XDG_DATA_HOME="$work/xdg/data" XDG_CACHE_HOME="$work/xdg/cache" XDG_STATE_HOME="$work/xdg/state"
 export HANGAR_NODE_TEST_CONTAINER="$container"
 export HANGAR_NODE_TEST_STATE_DIR="$work/rig"
@@ -320,7 +322,9 @@ connect_run() { # <kind> <latency>: not in a subshell (app_pid is the caller's)
   shown_workspace "$ws"
   t0="$(date +%s%N)"
   start_app "$log"
-  helper connect "${ctl_args[@]}" --since "$t0" --log "$log" --name "connect-$1-$2ms" \
+  local steps=(--log "$log")
+  [ "$1" = local ] && steps=()
+  helper connect "${ctl_args[@]}" --since "$t0" "${steps[@]}" --name "connect-$1-$2ms" \
     "$ws" "$pane" > "$work/connect.json" || { tail -n 20 "$log"; die "connect-$1 ($2 ms) did not finish"; }
   record < "$work/connect.json"
 }

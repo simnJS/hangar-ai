@@ -5,6 +5,9 @@
 //! - `hangar-node serve` runs the node in the foreground (for systemd), and
 //!   `serve --detach` starts it in a session of its own, its output in
 //!   `~/.local/state/hangar-node/node.log`, and returns once it answers;
+//!   `serve --detach --if-version <v>` does so only when this binary is
+//!   version `<v>`, and exits 3 otherwise: the desktop's one SSH call that
+//!   probes the node also starts it when nothing is to be installed;
 //! - `hangar-node --mcp` is the MCP stdio proxy the agents of the node's
 //!   panes start, as `hangar-ai --mcp` is on the desktop.
 //!
@@ -40,7 +43,12 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const TARGET: &str = env!("HANGAR_NODE_TARGET");
 
 #[cfg(target_os = "linux")]
-const USAGE: &str = "usage: hangar-node version | serve [--detach] | --mcp";
+const USAGE: &str = "usage: hangar-node version | serve [--detach [--if-version <v>]] | --mcp";
+
+/// What `serve --detach --if-version` exits with when this is another
+/// version: nothing was started.
+#[cfg(target_os = "linux")]
+const OTHER_VERSION: i32 = 3;
 
 #[cfg(target_os = "linux")]
 fn run(args: &[String]) -> i32 {
@@ -56,6 +64,14 @@ fn run(args: &[String]) -> i32 {
         }
         ["serve"] => report(daemon::serve()),
         ["serve", "--detach"] | ["--detach", "serve"] => report(daemon::detach()),
+        ["serve", "--detach", "--if-version", wanted] => {
+            if *wanted == VERSION {
+                report(daemon::detach())
+            } else {
+                eprintln!("hangar-node: this is {VERSION}, not {wanted}: not started");
+                OTHER_VERSION
+            }
+        }
         ["help"] | ["--help"] | ["-h"] => {
             println!("{USAGE}");
             0
