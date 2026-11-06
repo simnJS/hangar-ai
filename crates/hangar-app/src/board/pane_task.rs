@@ -4,7 +4,7 @@
 use crate::state::Workspace;
 
 use super::model::Task;
-use crate::panes_logic::find_agent_pane;
+use crate::panes_logic::with_finder;
 
 /// Work in progress first, then work waiting for review; the freshest of each.
 fn rank(task: &Task) -> u8 {
@@ -25,23 +25,28 @@ pub fn task_for_pane<'a>(
     active_workspace_id: Option<&str>,
 ) -> Option<&'a Task> {
     let tasks = tasks?;
-    tasks
-        .iter()
-        .filter(|task| {
-            let Some(assignee) = &task.assignee else {
-                return false;
-            };
-            if task.column != "doing" && task.column != "review" {
-                return false;
-            }
-            find_agent_pane(assignee, workspaces, active_workspace_id)
-                .is_some_and(|target| target.pane_id == pane_id)
-        })
-        .min_by(|a, b| {
-            rank(a)
-                .cmp(&rank(b))
-                .then_with(|| b.updated_at.cmp(&a.updated_at))
-        })
+    // Asked from views, so after every message: the names are resolved from
+    // the memo (`panes_logic::with_finder`), not split again for each task.
+    with_finder(workspaces, |finder| {
+        tasks
+            .iter()
+            .filter(|task| {
+                let Some(assignee) = &task.assignee else {
+                    return false;
+                };
+                if task.column != "doing" && task.column != "review" {
+                    return false;
+                }
+                finder
+                    .find(assignee, active_workspace_id)
+                    .is_some_and(|target| target.pane_id == pane_id)
+            })
+            .min_by(|a, b| {
+                rank(a)
+                    .cmp(&rank(b))
+                    .then_with(|| b.updated_at.cmp(&a.updated_at))
+            })
+    })
 }
 
 #[cfg(test)]
