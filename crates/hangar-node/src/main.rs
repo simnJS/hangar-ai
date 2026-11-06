@@ -11,7 +11,9 @@
 //! Linux only: built for another system, the binary says so and exits.
 
 mod api;
+mod control;
 mod daemon;
+mod engine;
 mod events;
 mod files;
 mod panes;

@@ -3,7 +3,7 @@
 //! behind the node's Bearer token (`node.json`).
 //!
 //! - `GET /node/info`: version, target, hostname, home, `claude` and `git` on
-//!   PATH;
+//!   PATH, how many desktops drive its orchestration;
 //! - `GET /node/panes`, `POST /node/panes` (spawn), `POST
 //!   /node/panes/{id}/input` `{data}`, `POST /node/panes/{id}/resize`
 //!   `{cols, rows}`, `DELETE /node/panes/{id}`;
@@ -19,6 +19,12 @@
 //! - `GET /node/memory`: the node's whole memory, contents included, for the
 //!   desktop's memory view (core's `/api/memory` index leaves them out, and
 //!   its writes are what the view sends);
+//! - `GET /node/events?control=1`: the same, from a desktop that drives the
+//!   node's orchestration: core's control requests are its to answer, with
+//!   `POST /node/control/{id}/reply` (control.rs);
+//! - `/node/worktree`, `/node/branch`, `/node/git`, `/node/board/*`,
+//!   `/node/bridge/{pane}`, `/node/delivery/*`: what the desktop's
+//!   orchestration engine does on the node's disk (engine.rs);
 //! - `/api/*`: core's own API, relayed (proxy.rs).
 #![cfg(target_os = "linux")]
 
@@ -32,7 +38,7 @@ use axum::extract::{Path, Query, Request, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{any, get, post};
+use axum::routing::{any, delete, get, post};
 use axum::{Json, Router};
 use hangar_core::pty::PtyManager;
 use hangar_core::Host;
@@ -50,6 +56,8 @@ pub struct Node {
     pub panes: Panes,
     core: proxy::Core,
     home: PathBuf,
+    /// The desktops answering core's control requests (control.rs).
+    pub drivers: Arc<crate::control::Drivers>,
 }
 
 impl Node {
@@ -60,17 +68,22 @@ impl Node {
             panes: Panes::new(pty),
             core,
             home: dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")),
+            drivers: Arc::default(),
         }
+    }
+
+    pub fn host(&self) -> &Host {
+        &self.host
     }
 }
 
-type Shared = Arc<Node>;
+pub type Shared = Arc<Node>;
 
 pub fn router(node: Shared) -> Router {
     Router::new()
         .route("/node/info", get(info))
         .route("/node/panes", get(list_panes).post(spawn))
-        .route("/node/panes/{id}", axum::routing::delete(kill))
+        .route("/node/panes/{id}", delete(kill))
         .route("/node/panes/{id}/input", post(input))
         .route("/node/panes/{id}/resize", post(resize))
         .route("/node/panes/{id}/stream", get(stream))
@@ -80,6 +93,39 @@ pub fn router(node: Shared) -> Router {
         .route("/node/context", get(crate::transcripts::context))
         .route("/node/sessions", get(crate::transcripts::sessions))
         .route("/node/memory", get(memory))
+        .route("/node/control/{id}/reply", post(crate::control::reply))
+        .route(
+            "/node/worktree",
+            post(crate::engine::worktree_add).delete(crate::engine::worktree_remove),
+        )
+        .route("/node/worktree/hook", post(crate::engine::worktree_hook))
+        .route("/node/worktree/copy", post(crate::engine::worktree_copy))
+        .route("/node/branch", delete(crate::engine::branch_delete))
+        .route("/node/git", post(crate::engine::git))
+        .route(
+            "/node/board/claim-worker",
+            post(crate::engine::claim_worker),
+        )
+        .route(
+            "/node/board/release-worker",
+            post(crate::engine::release_worker),
+        )
+        .route("/node/board/update", post(crate::engine::board_update))
+        .route("/node/board/comment", post(crate::engine::board_comment))
+        .route("/node/bridge/{pane}", post(crate::engine::enqueue))
+        .route(
+            "/node/delivery/preflight",
+            post(crate::engine::delivery_preflight),
+        )
+        .route("/node/delivery/run", post(crate::engine::delivery_run))
+        .route(
+            "/node/delivery/cleanup",
+            post(crate::engine::delivery_cleanup),
+        )
+        .route(
+            "/node/delivery/running",
+            get(crate::engine::delivery_running),
+        )
         .route("/api/{*rest}", any(relay))
         .layer(middleware::from_fn_with_state(node.clone(), authorize))
         .with_state(node)
@@ -168,6 +214,8 @@ async fn info(State(node): State<Shared>) -> Response {
         "claude": claude,
         "git": git,
         "pid": std::process::id(),
+        // The desktops answering its control requests (control.rs).
+        "drivers": node.drivers.connected(),
     }))
     .into_response()
 }
@@ -457,14 +505,29 @@ async fn watch(node: Shared, id: String, pane: Arc<Pane>, from: u64, mut socket:
     let _ = socket.send(Message::Close(None)).await;
 }
 
-async fn events(State(node): State<Shared>, upgrade: WebSocketUpgrade) -> Response {
-    let receiver = node.host.subscribe();
-    upgrade.on_upgrade(move |socket| forward_events(receiver, socket))
+#[derive(Deserialize)]
+struct EventsQuery {
+    /// `1`: the desktop driving the node's orchestration follows.
+    #[serde(default)]
+    control: Option<String>,
 }
 
+async fn events(
+    State(node): State<Shared>,
+    Query(query): Query<EventsQuery>,
+    upgrade: WebSocketUpgrade,
+) -> Response {
+    let receiver = node.host.subscribe();
+    let driver = (query.control.as_deref() == Some("1")).then(|| node.drivers.attach());
+    upgrade.on_upgrade(move |socket| forward_events(receiver, socket, driver))
+}
+
+/// `_driver` is held for as long as the socket is up: while it is, core's
+/// control requests have a desktop to answer them.
 async fn forward_events(
     mut receiver: tokio::sync::broadcast::Receiver<hangar_core::Event>,
     mut socket: WebSocket,
+    _driver: Option<crate::control::Driver>,
 ) {
     loop {
         tokio::select! {

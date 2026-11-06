@@ -6,6 +6,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt, StreamExt};
@@ -744,4 +745,345 @@ async fn the_memory_is_the_node_s_and_its_changes_follow() {
             break;
         }
     }
+}
+
+/// A control request of the node's agents, as the desktop that drives the
+/// node sees it on `/node/events?control=1`.
+async fn next_control(events: &mut Socket) -> Value {
+    loop {
+        let event = events.next().await.expect("an event");
+        if event["event"] == "control:request" {
+            return event;
+        }
+    }
+}
+
+/// `hangar-node --mcp` as an agent of the node runs it, its calls answered
+/// one line each.
+struct Mcp {
+    child: std::process::Child,
+    stdin: std::process::ChildStdin,
+    stdout: BufReader<std::process::ChildStdout>,
+}
+
+impl Mcp {
+    fn start(node: &Node, cwd: &Path) -> Mcp {
+        let mut child = command(node.home())
+            .arg("--mcp")
+            .env("HANGAR_WORKSPACE", cwd)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let stdin = child.stdin.take().unwrap();
+        let stdout = BufReader::new(child.stdout.take().unwrap());
+        let mut mcp = Mcp {
+            child,
+            stdin,
+            stdout,
+        };
+        let init = mcp.ask(
+            1,
+            "initialize",
+            json!({ "protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": { "name": "t", "version": "1" } }),
+        );
+        assert!(init["result"].is_object(), "{init}");
+        mcp
+    }
+
+    fn ask(&mut self, id: u32, method: &str, params: Value) -> Value {
+        let line = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
+        writeln!(self.stdin, "{line}").unwrap();
+        let mut answer = String::new();
+        self.stdout.read_line(&mut answer).unwrap();
+        serde_json::from_str(&answer).unwrap()
+    }
+
+    /// A tool's text, and whether it is an error.
+    fn call(&mut self, id: u32, tool: &str, arguments: Value) -> (String, bool) {
+        let answer = self.ask(
+            id,
+            "tools/call",
+            json!({ "name": tool, "arguments": arguments }),
+        );
+        let result = &answer["result"];
+        let text = result["content"][0]["text"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        (text, result["isError"] == true)
+    }
+}
+
+impl Drop for Mcp {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// An orchestrator of the node calls `worker_spawn` through its MCP proxy:
+/// the request reaches the desktop following the node's control requests,
+/// with its id, and the desktop's reply is the agent's answer.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_control_request_goes_to_the_driving_desktop_and_its_reply_comes_back() {
+    let node = Arc::new(Node::start());
+    let mut events = node.socket("/node/events?control=1").await;
+    assert_eq!(node.get("/node/info").1["drivers"], 1);
+
+    let asking = node.clone();
+    let agent = tokio::task::spawn_blocking(move || {
+        let mut mcp = Mcp::start(&asking, asking.home());
+        mcp.call(2, "worker_spawn", json!({ "task": "t1" }))
+    });
+    let request = next_control(&mut events).await;
+    assert_eq!(request["payload"]["op"], "worker_spawn");
+    assert_eq!(request["payload"]["args"]["task"], "t1");
+    let id = request["id"].as_str().unwrap().to_string();
+    assert_eq!(request["payload"]["id"], id.as_str());
+
+    let replying = node.clone();
+    let (status, body) = tokio::task::spawn_blocking(move || {
+        replying.post(
+            &format!("/node/control/{id}/reply"),
+            json!({ "ok": true, "value": { "worker": "Nora", "branch": "hangar/t1" } }),
+        )
+    })
+    .await
+    .unwrap();
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["waited"], true);
+
+    let (text, failed) = agent.await.unwrap();
+    assert!(!failed, "{text}");
+    assert!(text.contains("hangar/t1"), "{text}");
+}
+
+/// Nobody drives the node: its agents hear so at once, rather than after
+/// core's time runs out. A socket that follows the events without
+/// `control=1` (the desktop's memory view) answers nothing and does not count.
+#[tokio::test(flavor = "multi_thread")]
+async fn without_a_driving_desktop_a_control_request_is_unavailable() {
+    let node = Arc::new(Node::start());
+    let _watching = node.socket("/node/events").await;
+    assert_eq!(node.get("/node/info").1["drivers"], 0);
+    let started = Instant::now();
+    let asking = node.clone();
+    let (status, body) =
+        tokio::task::spawn_blocking(move || asking.post("/api/control/pane_list", json!({})))
+            .await
+            .unwrap();
+    assert_eq!(status, 400, "{body}");
+    let said = body["error"].as_str().unwrap();
+    assert!(
+        said.starts_with("Unavailable: the desktop driving this node is not connected"),
+        "{said}"
+    );
+    assert!(started.elapsed() < Duration::from_secs(10), "at once");
+}
+
+/// The desktop goes away while a request it was sent is under way: that
+/// request is refused, rather than left to core's time limit.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_desktop_gone_mid_request_leaves_it_unavailable() {
+    let node = Arc::new(Node::start());
+    let mut events = node.socket("/node/events?control=1").await;
+    let asking = node.clone();
+    let answer =
+        tokio::task::spawn_blocking(move || asking.post("/api/control/pane_list", json!({})));
+    next_control(&mut events).await;
+    events.socket.close(None).await.unwrap();
+    drop(events);
+    let (status, body) = answer.await.unwrap();
+    assert_eq!(status, 400, "{body}");
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap()
+            .starts_with("Unavailable: the desktop driving this node is not connected"),
+        "{body}"
+    );
+}
+
+/// `git` in `dir`, as the test's own author.
+fn git(dir: &Path, args: &[&str]) {
+    let status = Command::new("git")
+        .args([
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "init.defaultBranch=main",
+        ])
+        .args(args)
+        .current_dir(dir)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .unwrap();
+    assert!(status.success(), "git {args:?}");
+}
+
+/// What the desktop's engine does on the node's disk for a worker: its
+/// worktree and branch made and removed, the repository read through the
+/// questions `/node/git` knows, and no other.
+#[test]
+fn a_worker_s_worktree_is_made_read_and_removed_on_the_node() {
+    let node = Node::start();
+    let repo = node.home().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    git(&repo, &["init", "-q"]);
+    std::fs::write(repo.join("README"), "hi\n").unwrap();
+    std::fs::write(repo.join(".env"), "SECRET=1\n").unwrap();
+    std::fs::write(repo.join(".gitignore"), ".env\n").unwrap();
+    git(&repo, &["add", "README", ".gitignore"]);
+    git(&repo, &["commit", "-q", "-m", "first"]);
+    let repo_s = repo.to_str().unwrap().to_string();
+    let tree = node.home().join("repo-worktrees").join("w1");
+    let tree_s = tree.to_str().unwrap().to_string();
+
+    let (status, info) = node.post("/node/git", json!({ "op": "repo_info", "path": repo_s }));
+    assert_eq!(status, 200, "{info}");
+    assert_eq!(info["value"]["isRepo"], true);
+    assert_eq!(info["value"]["branch"], "main");
+
+    let (status, body) = node.post("/node/git", json!({ "op": "dir_exists", "path": tree_s }));
+    assert_eq!((status, &body["value"]), (200, &json!(false)), "{body}");
+
+    let (status, body) = node.post(
+        "/node/worktree",
+        json!({ "repo": repo_s, "path": tree_s, "branch": "hangar/w1", "base": "main" }),
+    );
+    assert_eq!(status, 200, "{body}");
+    assert!(tree.join("README").is_file(), "checked out on the node");
+
+    let (status, copied) = node.post(
+        "/node/worktree/copy",
+        json!({ "from": repo_s, "to": tree_s, "patterns": [".env"] }),
+    );
+    assert_eq!(status, 200, "{copied}");
+    assert_eq!(copied["value"]["copied"], 1);
+    assert!(tree.join(".env").is_file());
+
+    let (status, hook) = node.post(
+        "/node/worktree/hook",
+        json!({ "repo": repo_s, "path": tree_s, "command": "echo made > hooked" }),
+    );
+    assert_eq!(status, 200, "{hook}");
+    assert_eq!(hook["value"]["ok"], true, "{hook}");
+    assert!(tree.join("hooked").is_file());
+
+    let (_, listed) = node.post(
+        "/node/git",
+        json!({ "op": "worktree_list", "path": repo_s }),
+    );
+    let branches: Vec<&str> = listed["value"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|tree| tree["branch"].as_str())
+        .collect();
+    assert!(branches.contains(&"hangar/w1"), "{listed}");
+
+    std::fs::write(tree.join("new.txt"), "x\n").unwrap();
+    let (_, changes) = node.post("/node/git", json!({ "op": "changes", "path": tree_s }));
+    let files: Vec<&str> = changes["value"]["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|file| file["path"].as_str())
+        .collect();
+    assert!(files.contains(&"new.txt"), "{changes}");
+    git(&tree, &["add", "new.txt"]);
+    git(&tree, &["commit", "-q", "-m", "work"]);
+    let (_, ahead) = node.post(
+        "/node/git",
+        json!({ "op": "commits_ahead", "path": repo_s, "base": "main", "head": "hangar/w1" }),
+    );
+    assert_eq!(ahead["value"], 1, "{ahead}");
+
+    for refused in [
+        json!({ "op": "exec", "path": repo_s, "args": ["status"] }),
+        json!({ "op": "push", "path": repo_s }),
+    ] {
+        let (status, body) = node.post("/node/git", refused);
+        assert_eq!(status, 400, "{body}");
+        assert!(
+            body["error"].as_str().unwrap().contains("repo_info"),
+            "{body}"
+        );
+    }
+    let (status, _) = node.post(
+        "/node/worktree",
+        json!({ "repo": "repo", "path": "w", "branch": "b" }),
+    );
+    assert_eq!(status, 400, "a relative path means nothing on the node");
+
+    let (status, removed) = node.call(
+        "DELETE",
+        "/node/worktree",
+        Some(&node.token),
+        Some(json!({ "repo": repo_s, "path": tree_s, "force": true })),
+    );
+    assert_eq!(status, 200, "{removed}");
+    assert_eq!(removed["value"]["removed"], true, "{removed}");
+    assert!(!tree.exists());
+    let (status, deleted) = node.call(
+        "DELETE",
+        "/node/branch",
+        Some(&node.token),
+        Some(json!({ "repo": repo_s, "branch": "hangar/w1", "force": true })),
+    );
+    assert_eq!(status, 200, "{deleted}");
+    assert_eq!(deleted["value"]["deleted"], true, "{deleted}");
+}
+
+/// A worker's claim and release on the node's board, and a brief queued for
+/// its session there.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_worker_claims_its_task_and_is_briefed_on_the_node() {
+    let node = Arc::new(Node::start());
+    let workspace = node.home().join("ws");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let cwd = workspace.to_str().unwrap().to_string();
+    let mut events = node.socket("/node/events").await;
+    let (status, created) = node.post(
+        &format!("/api/tasks?cwd={cwd}"),
+        json!({ "title": "the task" }),
+    );
+    assert_eq!(status, 200, "{created}");
+    let id = created["task"]["id"].as_str().unwrap().to_string();
+
+    let (status, claimed) = node.post(
+        "/node/board/claim-worker",
+        json!({ "cwd": cwd, "id": id, "worker": "Nora", "sharedFolder": false }),
+    );
+    assert_eq!(status, 200, "{claimed}");
+    assert_eq!(claimed["value"]["column"], "doing");
+    assert_eq!(claimed["value"]["assignee"], "Nora");
+    loop {
+        let event = events.next().await.expect("an event");
+        if event["event"] == "board:changed" && event["cwd"] == cwd.as_str() {
+            break;
+        }
+    }
+    let (status, commented) = node.post(
+        "/node/board/comment",
+        json!({ "cwd": cwd, "id": id, "author": "hangar", "text": "checked" }),
+    );
+    assert_eq!(status, 200, "{commented}");
+    let (status, released) = node.post(
+        "/node/board/release-worker",
+        json!({ "cwd": cwd, "id": id, "worker": "Nora", "undo": true }),
+    );
+    assert_eq!(status, 200, "{released}");
+    assert_eq!(released["value"]["column"], "todo");
+
+    let (status, queued) = node.post(
+        "/node/bridge/pane-1",
+        json!({ "text": "Your brief", "from": "hangar" }),
+    );
+    assert_eq!(status, 200, "{queued}");
+    assert_eq!(queued["value"]["text"], "Your brief");
 }
