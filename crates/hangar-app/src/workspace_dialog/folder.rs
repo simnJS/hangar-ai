@@ -107,12 +107,40 @@ pub fn count_of(assignments: &[AgentId], agent: AgentId) -> usize {
         .count()
 }
 
+// ── what the workspace starts with ────────────────────────────────────
+
+/// What a workspace made from a folder starts with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Start {
+    /// The default: one Claude Code pane, the workspace's orchestrator, ready
+    /// to be talked to.
+    Orchestrator,
+    /// The default when Claude Code is not installed: one plain shell, since
+    /// an orchestrator is a Claude Code.
+    Shell,
+    /// The panes chosen under « More options », made exactly as they are
+    /// chosen there.
+    Custom,
+}
+
+/// The panes picked by hand win; else an orchestrator, when Claude Code can
+/// run it.
+pub fn start_of(custom: bool, claude_installed: bool) -> Start {
+    match (custom, claude_installed) {
+        (true, _) => Start::Custom,
+        (false, true) => Start::Orchestrator,
+        (false, false) => Start::Shell,
+    }
+}
+
 // ── the draft ─────────────────────────────────────────────────────────
 
 pub struct FolderForm<'a> {
     pub name: &'a str,
     pub cwd: &'a str,
     pub roots: &'a [Root],
+    pub start: Start,
+    /// The panes of « More options », read for [`Start::Custom`] only.
     pub layout: u8,
     pub assignments: &'a [AgentId],
     pub shell_id: Option<&'a str>,
@@ -125,6 +153,11 @@ pub fn draft_of(form: &FolderForm) -> Option<WorkspaceDraft> {
     if form.cwd.is_empty() {
         return None;
     }
+    let (layout, agents) = match form.start {
+        Start::Orchestrator => (1, vec![AgentId::Claude]),
+        Start::Shell => (1, vec![AgentId::Shell]),
+        Start::Custom => (form.layout, form.assignments.to_vec()),
+    };
     Some(WorkspaceDraft {
         name: match form.name.trim() {
             "" => basename(form.cwd),
@@ -140,8 +173,8 @@ pub fn draft_of(form: &FolderForm) -> Option<WorkspaceDraft> {
             .filter(|root| root.exists && root.path != form.cwd)
             .map(|root| root.path.clone())
             .collect(),
-        layout: form.layout,
-        agents: form.assignments.to_vec(),
+        layout,
+        agents,
         shell_id: form.shell_id.map(str::to_string),
         folder_id: None,
         // Written only when set: absent rather than empty.
@@ -290,12 +323,43 @@ mod tests {
             name,
             cwd,
             roots,
+            start: Start::Custom,
             layout: 4,
             assignments: &[],
             shell_id: None,
             kits: &[],
             claude_account: None,
         }
+    }
+
+    #[test]
+    fn panes_picked_by_hand_win_else_an_orchestrator_when_claude_code_runs() {
+        assert_eq!(start_of(false, true), Start::Orchestrator);
+        assert_eq!(start_of(false, false), Start::Shell);
+        assert_eq!(start_of(true, true), Start::Custom);
+        assert_eq!(start_of(true, false), Start::Custom);
+    }
+
+    #[test]
+    fn the_default_is_one_claude_code_pane_and_its_fallback_one_shell() {
+        let assignments = [
+            AgentId::Shell,
+            AgentId::Claude,
+            AgentId::Shell,
+            AgentId::Shell,
+        ];
+        let mut fields = form("", "/x", &[]);
+        fields.assignments = &assignments;
+        fields.start = Start::Orchestrator;
+        let draft = draft_of(&fields).expect("a draft");
+        assert_eq!((draft.layout, draft.agents), (1, vec![AgentId::Claude]));
+        fields.start = Start::Shell;
+        let draft = draft_of(&fields).expect("a draft");
+        assert_eq!((draft.layout, draft.agents), (1, vec![AgentId::Shell]));
+        // « More options » makes what is chosen there, as before.
+        fields.start = Start::Custom;
+        let draft = draft_of(&fields).expect("a draft");
+        assert_eq!((draft.layout, draft.agents), (4, assignments.to_vec()));
     }
 
     #[test]

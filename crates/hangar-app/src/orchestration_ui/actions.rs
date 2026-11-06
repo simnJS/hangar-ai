@@ -340,6 +340,30 @@ pub fn create(
     )
 }
 
+/// The first pane of a workspace just made becomes its orchestrator, on the
+/// orchestrator's model: the default of the new-workspace dialog, one Claude
+/// Code pane ready to be talked to. Called in the same update as the
+/// creation, so the pane mounts, and launches, as the orchestrator (with
+/// Hangar's server). `None`, and nothing changed, when `pin_refusal` has a
+/// reason (no pane, not Claude Code, the HQ).
+pub fn pin_first_pane(store: &mut impl OrchestrationStore, ws_id: &str) -> Option<PaneId> {
+    let ws = workspace(store, ws_id)?;
+    let pane = ws.panes.first()?.id.clone();
+    if pin_refusal(ws, &pane).is_some() {
+        return None;
+    }
+    let model = orchestration_of(ws).orchestrator_model;
+    store.update_pane(
+        ws_id,
+        &pane,
+        Patch::new(move |pane: &mut Pane| {
+            pane.role = Some(PaneRole::Orchestrator);
+            pane.model = Some(model.clone());
+        }),
+    );
+    Some(pane)
+}
+
 /// What opening the manager needs next.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ManagerStep {
@@ -799,6 +823,55 @@ mod tests {
         assert_eq!(made.agent, AgentId::Claude);
         assert_eq!(create(&mut store, "w", None), None);
         assert_eq!(create(&mut store, "nowhere", None), None);
+    }
+
+    #[test]
+    fn the_first_pane_of_a_new_workspace_becomes_its_orchestrator_when_it_can() {
+        let shell = Pane {
+            id: "s".into(),
+            agent: AgentId::Shell,
+            ..Pane::default()
+        };
+        let mut store = FakeStore::new(vec![
+            Workspace {
+                id: "w".into(),
+                panes: vec![claude("a")],
+                ..Workspace::default()
+            },
+            Workspace {
+                id: "plain".into(),
+                panes: vec![shell],
+                ..Workspace::default()
+            },
+            Workspace {
+                id: "hq".into(),
+                hq: Some(true),
+                panes: vec![claude("m")],
+                ..Workspace::default()
+            },
+            Workspace {
+                id: "empty".into(),
+                ..Workspace::default()
+            },
+        ]);
+        assert_eq!(pin_first_pane(&mut store, "w"), Some("a".into()));
+        let pane = &store.state.workspaces[0].panes[0];
+        assert_eq!(pane.role, Some(PaneRole::Orchestrator));
+        assert_eq!(
+            pane.model.as_deref(),
+            Some(
+                crate::state::roles::orchestration_defaults()
+                    .orchestrator_model
+                    .as_str()
+            )
+        );
+        // Once only; never a shell, the HQ, or a workspace with no pane.
+        assert_eq!(pin_first_pane(&mut store, "w"), None);
+        for ws in ["plain", "hq", "empty", "nowhere"] {
+            assert_eq!(pin_first_pane(&mut store, ws), None, "{ws}");
+        }
+        assert_eq!(store.state.workspaces[1].panes[0].role, None);
+        assert_eq!(store.state.workspaces[2].panes[0].role, None);
     }
 
     fn base() -> RoleRestartInput {
