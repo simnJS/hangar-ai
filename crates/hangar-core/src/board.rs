@@ -1,7 +1,7 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -299,7 +299,8 @@ impl std::fmt::Display for Unreadable {
 const READ_ATTEMPTS: u32 = 3;
 const READ_RETRY: std::time::Duration = std::time::Duration::from_millis(50);
 
-fn read_board(workspace_cwd: &str) -> Result<Board, Unreadable> {
+/// The file the board of `workspace_cwd` is read from, if there is one.
+fn locate(workspace_cwd: &str) -> Option<PathBuf> {
     let shared = shared_workspace(workspace_cwd);
     let mut candidates = vec![board_path(&shared), legacy_board_path(&shared)];
     // A worktree opened as a workspace before boards were shared has a board
@@ -310,9 +311,19 @@ fn read_board(workspace_cwd: &str) -> Result<Board, Unreadable> {
         candidates.push(board_path(workspace_cwd));
         candidates.push(legacy_board_path(workspace_cwd));
     }
-    let Some(path) = candidates.into_iter().find(|candidate| candidate.is_file()) else {
-        return Ok(Board::default());
-    };
+    candidates.into_iter().find(|candidate| candidate.is_file())
+}
+
+/// The board on disk, parsed afresh: what the tests check a write against.
+#[cfg(test)]
+fn read_board(workspace_cwd: &str) -> Result<Board, Unreadable> {
+    match locate(workspace_cwd) {
+        Some(path) => read_file(path),
+        None => Ok(Board::default()),
+    }
+}
+
+fn read_file(path: PathBuf) -> Result<Board, Unreadable> {
     let mut attempt = 1;
     let bytes = loop {
         match fs::read(&path) {
@@ -344,23 +355,16 @@ fn read_board(workspace_cwd: &str) -> Result<Board, Unreadable> {
 /// went: the next one starts on an empty board, and the old one is there to
 /// be repaired by hand. One that cannot be moved, or cannot be read at all,
 /// stays where it is and every change is refused.
-fn board_to_change(workspace_cwd: &str) -> Result<Board, String> {
-    match read_board(workspace_cwd) {
-        Ok(board) => Ok(board),
-        Err(err) => {
-            let Unreadable::Corrupt { path, .. } = &err else {
-                return Err(err.to_string());
-            };
-            match crate::store::quarantine(path) {
-                Some(kept) => Err(format!(
-                    "{err}; it was kept as {} and the board starts empty: try again",
-                    kept.display()
-                )),
-                None => Err(format!(
-                    "{err}; it could not be moved aside, so nothing is written over it"
-                )),
-            }
-        }
+fn set_aside(err: Unreadable) -> String {
+    let Unreadable::Corrupt { path, .. } = &err else {
+        return err.to_string();
+    };
+    match crate::store::quarantine(path) {
+        Some(kept) => format!(
+            "{err}; it was kept as {} and the board starts empty: try again",
+            kept.display()
+        ),
+        None => format!("{err}; it could not be moved aside, so nothing is written over it"),
     }
 }
 
@@ -396,14 +400,67 @@ fn keep_out_of_git(root: &str) {
     }
 }
 
+/// What a board file looked like when it was last parsed or written: its
+/// size, its times and, on Unix, the inode an atomic replace gives it. Any
+/// change to the file — a write by this process, by another one, a hand edit,
+/// a `chmod` — changes one of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Stamp {
+    len: u64,
+    modified: Option<SystemTime>,
+    #[cfg(unix)]
+    inode: (u64, u64),
+    #[cfg(unix)]
+    changed: (i64, i64),
+}
+
+impl Stamp {
+    pub(crate) fn of(path: &Path) -> Option<Stamp> {
+        let meta = fs::metadata(path).ok()?;
+        #[cfg(unix)]
+        use std::os::unix::fs::MetadataExt;
+        Some(Stamp {
+            len: meta.len(),
+            modified: meta.modified().ok(),
+            #[cfg(unix)]
+            inode: (meta.dev(), meta.ino()),
+            #[cfg(unix)]
+            changed: (meta.ctime(), meta.ctime_nsec()),
+        })
+    }
+}
+
+/// A board as parsed from `path` when the file looked like `stamp`.
+struct Parsed {
+    path: PathBuf,
+    stamp: Stamp,
+    board: Arc<Board>,
+}
+
+pub(crate) fn locked<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 /// Serializes every mutation per workspace.
 ///
 /// This is the whole reason the app owns the board instead of letting each
 /// agent edit the file: without a single writer, two agents doing
 /// read-modify-write would both claim the same task and duplicate the work.
+///
+/// The writer is one per board file (a repository and its worktrees share
+/// one), so the agents of one workspace never wait on another's `fsync`. A
+/// read takes no writer: the file is only ever replaced whole
+/// (`write_atomic`), so it sees the board before a change or after it, and
+/// never waits behind one being made durable.
+///
+/// The board last parsed for each workspace is kept with the look of its file
+/// (`Stamp`), and parsed again only when the file changed: the agents list
+/// the board far more often than they change it, and the orchestrator reads
+/// every board every few seconds.
 #[derive(Default)]
 pub struct BoardStore {
-    guard: Mutex<()>,
+    writers: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    parsed: Mutex<HashMap<String, Parsed>>,
 }
 
 impl BoardStore {
@@ -414,32 +471,91 @@ impl BoardStore {
     /// A board that cannot be read shows as an empty one, and is left as it
     /// is on disk: only a change (`update`) sets it aside, and says so.
     pub fn read(&self, cwd: &str) -> Board {
-        let _guard = self.guard.lock().unwrap_or_else(PoisonError::into_inner);
-        let mut board = match read_board(cwd) {
-            Ok(board) => board,
+        let mut board = match self.parsed(cwd) {
+            Ok(board) => Arc::unwrap_or_clone(board),
             Err(err) => {
                 eprintln!("[hangar] {err}");
                 return Board::default();
             }
         };
         if sweep_rechecks(&mut board, &today()) {
-            let _ = write_board(cwd, &board);
+            // Written under the writer, from the latest board: `update`
+            // sweeps it the same way before anything else.
+            if let Ok(swept) = self.update(cwd, |latest| Ok(latest.clone())) {
+                return swept;
+            }
         }
         board
     }
 
-    /// Applies `mutate` under the global lock and persists the result.
+    /// Applies `mutate` under the workspace's lock and persists the result.
     pub fn update<T>(
         &self,
         cwd: &str,
         mutate: impl FnOnce(&mut Board) -> Result<T, String>,
     ) -> Result<T, String> {
-        let _guard = self.guard.lock().unwrap_or_else(PoisonError::into_inner);
-        let mut board = board_to_change(cwd)?;
+        let shared = shared_workspace(cwd);
+        let writer = locked(&self.writers).entry(shared).or_default().clone();
+        let _writing = locked(&writer);
+        let mut board = Arc::unwrap_or_clone(self.parsed(cwd).map_err(set_aside)?);
         sweep_rechecks(&mut board, &today());
         let outcome = mutate(&mut board)?;
         write_board(cwd, &board)?;
+        self.remember(cwd, board);
         Ok(outcome)
+    }
+
+    /// The board of `cwd`, parsed again only when its file changed.
+    fn parsed(&self, cwd: &str) -> Result<Arc<Board>, Unreadable> {
+        let Some(path) = locate(cwd) else {
+            locked(&self.parsed).remove(cwd);
+            return Ok(Arc::default());
+        };
+        // Taken before the read: a file replaced in between is parsed new
+        // under the old stamp, which the next look finds changed.
+        let stamp = Stamp::of(&path);
+        if let Some(stamp) = stamp {
+            let known = locked(&self.parsed);
+            if let Some(parsed) = known.get(cwd) {
+                if parsed.path == path && parsed.stamp == stamp {
+                    return Ok(parsed.board.clone());
+                }
+            }
+        }
+        let board = Arc::new(read_file(path.clone())?);
+        if let Some(stamp) = stamp {
+            locked(&self.parsed).insert(
+                cwd.to_string(),
+                Parsed {
+                    path,
+                    stamp,
+                    board: board.clone(),
+                },
+            );
+        }
+        Ok(board)
+    }
+
+    /// Keeps the board just written, as the file now looks, so the next read
+    /// does not parse back what this one serialized.
+    fn remember(&self, cwd: &str, board: Board) {
+        let path = board_path(&shared_workspace(cwd));
+        let mut known = locked(&self.parsed);
+        match Stamp::of(&path) {
+            Some(stamp) => {
+                known.insert(
+                    cwd.to_string(),
+                    Parsed {
+                        path,
+                        stamp,
+                        board: Arc::new(board),
+                    },
+                );
+            }
+            None => {
+                known.remove(cwd);
+            }
+        }
     }
 }
 
@@ -1239,6 +1355,9 @@ pub fn next_task(board: &Board) -> Option<Task> {
 }
 
 #[cfg(test)]
+pub(crate) mod bench;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -2025,6 +2144,97 @@ mod tests {
         )
         .unwrap();
         assert!(free.blocked.is_none());
+    }
+
+    /// The board kept parsed is the file's: a change another process makes
+    /// (another Hangar, a hand edit) shows on the next read.
+    #[test]
+    fn a_board_changed_on_disk_is_read_again() {
+        let dir = temp_workspace("stamp");
+        let cwd = dir.to_string_lossy().into_owned();
+        let store = BoardStore::default();
+        store.update(&cwd, |board| Ok(todo_task(board))).unwrap();
+        assert_eq!(store.read(&cwd).tasks.len(), 1);
+
+        seed(
+            &board_path(&cwd),
+            ONE_TASK.replace("tache", "tâche").as_str(),
+        );
+        let board = store.read(&cwd);
+        assert_eq!(board.tasks.len(), 1);
+        assert_eq!(board.tasks[0].title, "tâche existante");
+
+        // And a change starts from that board, not from the one kept.
+        store.update(&cwd, |board| Ok(todo_task(board))).unwrap();
+        let on_disk = read_board(&cwd).unwrap();
+        assert_eq!(on_disk.tasks.len(), 2);
+        assert_eq!(on_disk.tasks[0].id, "a");
+
+        fs::remove_file(board_path(&cwd)).unwrap();
+        assert!(store.read(&cwd).tasks.is_empty(), "a board gone is gone");
+    }
+
+    /// A change that is refused leaves the board kept as it was: the next
+    /// read does not show half of it.
+    #[test]
+    fn a_refused_change_leaves_the_kept_board_alone() {
+        let dir = temp_workspace("refused");
+        let cwd = dir.to_string_lossy().into_owned();
+        let store = BoardStore::default();
+        store.update(&cwd, |board| Ok(todo_task(board))).unwrap();
+
+        let refused = store.update(&cwd, |board| -> Result<(), String> {
+            todo_task(board);
+            Err("no".into())
+        });
+        assert!(refused.is_err());
+        assert_eq!(store.read(&cwd).tasks.len(), 1);
+        assert_eq!(read_board(&cwd).unwrap().tasks.len(), 1);
+    }
+
+    /// A change being written (its `fsync` can take tens of milliseconds)
+    /// holds no reader of the board, nor any writer of another workspace's.
+    #[test]
+    fn a_change_in_progress_holds_up_no_read_and_no_other_workspace() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let (here, there) = (temp_workspace("held"), temp_workspace("other"));
+        let (here, there) = (
+            here.to_string_lossy().into_owned(),
+            there.to_string_lossy().into_owned(),
+        );
+        let store: Arc<BoardStore> = Arc::default();
+        store.update(&here, |board| Ok(todo_task(board))).unwrap();
+
+        let (entered, wait_entered) = mpsc::channel();
+        let (release, held) = mpsc::channel::<()>();
+        let writer = {
+            let (store, here) = (store.clone(), here.clone());
+            std::thread::spawn(move || {
+                store.update(&here, |board| {
+                    entered.send(()).unwrap();
+                    held.recv().unwrap();
+                    Ok(todo_task(board))
+                })
+            })
+        };
+        wait_entered.recv().unwrap();
+
+        let (done, finished) = mpsc::channel();
+        {
+            let (store, here, there) = (store.clone(), here.clone(), there.clone());
+            std::thread::spawn(move || {
+                let read = store.read(&here).tasks.len();
+                store.update(&there, |board| Ok(todo_task(board))).unwrap();
+                done.send(read).unwrap();
+            });
+        }
+        let read = finished.recv_timeout(Duration::from_secs(10));
+        release.send(()).unwrap();
+        writer.join().unwrap().unwrap();
+        assert_eq!(read, Ok(1), "the read and the other workspace waited");
+        assert_eq!(store.read(&here).tasks.len(), 2);
     }
 
     /// The board on disk, byte for byte, and the rescues beside it.

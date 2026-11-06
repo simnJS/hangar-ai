@@ -14,11 +14,12 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+use crate::board::{locked, Stamp};
 use crate::host::{Event, Host};
 
 /// Hard ceilings, enforced with an explicit error rather than by truncating.
@@ -598,9 +599,21 @@ impl std::fmt::Display for StoreError {
 /// The store is global, so the contention is real: agents from several
 /// workspaces write to the same file at the same time, and without one writer a
 /// read-modify-write pair would drop whichever fact lost the race.
+///
+/// The memory last parsed is kept with the look of its file (`Stamp`), and a
+/// read whose file has not changed since answers from it without the lock: a
+/// search does not wait behind a write, nor parse the whole file again.
 #[derive(Default)]
 pub struct MemoryStore {
     guard: Mutex<()>,
+    parsed: Mutex<Option<Parsed>>,
+}
+
+/// The memory as parsed from `path` when the file looked like `stamp`.
+struct Parsed {
+    path: PathBuf,
+    stamp: Stamp,
+    memory: Arc<Memory>,
 }
 
 impl MemoryStore {
@@ -608,10 +621,13 @@ impl MemoryStore {
     /// open: every caller renders what it gets, and an empty list is
     /// indistinguishable from a memory that has been lost.
     pub fn read(&self, dir: &Path) -> Result<Memory, StoreError> {
+        if let Some(known) = self.unchanged(dir) {
+            return Ok(Arc::unwrap_or_clone(known));
+        }
         // A panic in another caller's mutation left the file as it was: the
         // write comes after it, so the lock is still good to take.
-        let _guard = self.guard.lock().unwrap_or_else(PoisonError::into_inner);
-        read_memory(dir)
+        let _guard = locked(&self.guard);
+        self.load(dir).map(Arc::unwrap_or_clone)
     }
 
     /// Applies `mutate` under the global lock and persists the result.
@@ -626,11 +642,48 @@ impl MemoryStore {
     ) -> Result<T, StoreError> {
         // A panic in another caller's mutation left the file as it was: the
         // write comes after it, so the lock is still good to take.
-        let _guard = self.guard.lock().unwrap_or_else(PoisonError::into_inner);
-        let mut memory = read_memory(dir)?;
+        let _guard = locked(&self.guard);
+        let known = match self.unchanged(dir) {
+            Some(known) => known,
+            None => self.load(dir)?,
+        };
+        let mut memory = Arc::unwrap_or_clone(known);
         let outcome = mutate(&mut memory).map_err(StoreError::Refused)?;
         write_memory(dir, &memory).map_err(StoreError::Storage)?;
+        let path = memory_path(dir);
+        *locked(&self.parsed) = Stamp::of(&path).map(|stamp| Parsed {
+            path,
+            stamp,
+            memory: Arc::new(memory),
+        });
         Ok(outcome)
+    }
+
+    /// The memory last parsed, if its file still looks as it did then.
+    fn unchanged(&self, dir: &Path) -> Option<Arc<Memory>> {
+        let path = memory_path(dir);
+        let stamp = Stamp::of(&path)?;
+        let known = locked(&self.parsed);
+        let parsed = known.as_ref()?;
+        (parsed.path == path && parsed.stamp == stamp).then(|| parsed.memory.clone())
+    }
+
+    /// Reads the file, and keeps what it held when nothing touched it during
+    /// the read (a write by another process, a rescue moving it aside).
+    fn load(&self, dir: &Path) -> Result<Arc<Memory>, StoreError> {
+        let path = memory_path(dir);
+        let before = Stamp::of(&path);
+        let memory = Arc::new(read_memory(dir)?);
+        let mut known = locked(&self.parsed);
+        *known = match before {
+            Some(stamp) if Stamp::of(&path) == before => Some(Parsed {
+                path,
+                stamp,
+                memory: memory.clone(),
+            }),
+            _ => None,
+        };
+        Ok(memory)
     }
 }
 
@@ -703,6 +756,9 @@ pub fn memory_delete(host: &Host, id: String) -> Result<(), String> {
     notify_changed(host);
     Ok(())
 }
+
+#[cfg(test)]
+mod bench;
 
 #[cfg(test)]
 mod tests {
