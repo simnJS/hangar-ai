@@ -463,8 +463,8 @@ impl Shared {
             .unwrap_or_else(|poison| poison.into_inner())
     }
 
-    /// How many are waiting, for the tests.
-    #[cfg(test)]
+    /// How many are waiting, for the tests (which run on unix).
+    #[cfg(all(test, unix))]
     fn waiting(&self) -> usize {
         self.waiting.load(Ordering::Acquire)
     }
