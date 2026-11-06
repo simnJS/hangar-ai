@@ -338,8 +338,13 @@ mod tests {
 
     #[test]
     fn a_refused_connection_is_unreachable_and_quick() {
-        let (listener, port) = listener();
-        drop(listener);
+        // A port bound but never listened on refuses every connection, and
+        // nobody else can take it while it is held: dropping a listener to
+        // free its port let another test bind it in between (seen on the
+        // Windows runner, which then answered in HTTP).
+        let held = tokio::net::TcpSocket::new_v4().unwrap();
+        held.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let port = held.local_addr().unwrap().port();
         let started = Instant::now();
         let err = fetch(get(port, "/queue")).unwrap_err();
         assert_eq!(err.code, TabError::UNREACHABLE, "{}", err.message);
