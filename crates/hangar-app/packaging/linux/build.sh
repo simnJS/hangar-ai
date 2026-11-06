@@ -60,9 +60,20 @@ rm -rf "$out/.cargo-packager"
 # cargo-generate-rpm writes the package itself, without rpmbuild. It names it
 # <name>-<version>-<release>.<arch>.rpm from the manifest, which is already the
 # Tauri build's Hangar.AI-<version>-1.x86_64.rpm.
+#
+# RPM allows no `-` in a version: a pre-release (2.2.0-rc.1) is written the RPM
+# way, 2.2.0~rc.1 (`~` sorts before the release, as semver's `-` does), and the
+# file takes the same name as the other packages, with the semver version.
+rpm_version="${version//-/\~}"
 (
   cd "$repo"
-  cargo generate-rpm -p crates/hangar-app --profile dist -o "$out/"
+  if [ "$rpm_version" = "$version" ]; then
+    cargo generate-rpm -p crates/hangar-app --profile dist -o "$out/"
+  else
+    cargo generate-rpm -p crates/hangar-app --profile dist -o "$out/" \
+      -s "version = \"$rpm_version\""
+    mv "$out/Hangar.AI-${rpm_version}-1.x86_64.rpm" "$out/Hangar.AI-${version}-1.x86_64.rpm"
+  fi
 )
 
 ls -la "$out"
