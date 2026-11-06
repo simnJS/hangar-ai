@@ -379,6 +379,41 @@ fn the_binary_comes_from_the_override_then_beside_the_executable() {
 }
 
 #[test]
+fn the_binary_is_found_in_a_package_s_resources() {
+    let dir = tempfile::tempdir().unwrap();
+    // macOS: Hangar.AI.app/Contents/{MacOS,Resources}.
+    let contents = dir.path().join("Contents");
+    std::fs::create_dir_all(contents.join("MacOS")).unwrap();
+    std::fs::create_dir_all(contents.join("Resources")).unwrap();
+    let in_resources = contents.join("Resources/hangar-node-aarch64");
+    std::fs::write(&in_resources, b"bin").unwrap();
+    let mac = BinarySource {
+        override_path: None,
+        exe_dir: Some(contents.join("MacOS")),
+    };
+    let found = mac.binary_for("arm64").unwrap();
+    assert_eq!(
+        found.canonicalize().unwrap(),
+        in_resources.canonicalize().unwrap()
+    );
+    // Linux packages: usr/bin beside usr/lib/hangar-ai.
+    let usr = dir.path().join("usr");
+    std::fs::create_dir_all(usr.join("bin")).unwrap();
+    std::fs::create_dir_all(usr.join("lib/hangar-ai")).unwrap();
+    let in_lib = usr.join("lib/hangar-ai/hangar-node-x86_64");
+    std::fs::write(&in_lib, b"bin").unwrap();
+    let linux = BinarySource {
+        override_path: None,
+        exe_dir: Some(usr.join("bin")),
+    };
+    let found = linux.binary_for("x86_64").unwrap();
+    assert_eq!(
+        found.canonicalize().unwrap(),
+        in_lib.canonicalize().unwrap()
+    );
+}
+
+#[test]
 fn a_target_is_one_argument_that_is_not_an_option() {
     assert_eq!(target_problem("me@box"), None);
     assert_eq!(target_problem("box"), None);

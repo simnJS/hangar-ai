@@ -17,12 +17,13 @@ fi
 # The headless node daemon, built for Linux x86_64 and arm64 by the release
 # workflow's `node` job and downloaded into `$target_dir/node` as
 # `hangar-node-x86_64` and `hangar-node-aarch64`. Every desktop package carries
-# both, beside the executable, because that is where the app looks for the file
-# to upload to a node (hangar_app::nodes::model::BinarySource) and a Mac or a
-# Windows desktop drives Linux nodes too. This checks they are there, are ELF
-# files of the right machine, and copies them to each folder given.
+# both, because a Mac or a Windows desktop drives Linux nodes too: Linux and
+# macOS take them from there as resources (usr/lib/hangar-ai, Contents/Resources),
+# Windows beside the executable; hangar_app::nodes::model::BinarySource looks in
+# each. This checks they are there and are ELF files of the right machine, and
+# copies them to each folder given, if any.
 #
-#   stage_node_binaries <target-dir> <dest-dir>...
+#   stage_node_binaries <target-dir> [<dest-dir>...]
 stage_node_binaries() {
   local target_dir="$1" arch dest header machine
   shift

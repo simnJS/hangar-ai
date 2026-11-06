@@ -32,9 +32,9 @@ for binary in hangar-ai hangar-webview; do
   fi
 done
 
-# hangar-node for x86_64 and arm64 beside the executables, where the packager
-# (the `binaries` of the manifest, and the .rpm's assets) takes them from.
-stage_node_binaries "$target_dir" "$target_dir/dist"
+# hangar-node for x86_64 and arm64, checked where the packager's `resources`
+# and the .rpm's assets take them from: target/node (into usr/lib/hangar-ai).
+stage_node_binaries "$target_dir"
 
 # The packager's own AppRun, which it downloads, exports PYTHONHOME, PYTHONPATH
 # and friends pointing into the image, and so breaks every Python that a Hangar

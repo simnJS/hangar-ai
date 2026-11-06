@@ -268,7 +268,11 @@ impl BinarySource {
                 dir: dir.map(|d| d.display().to_string()).unwrap_or_default(),
             });
         }
-        if let Some(path) = dir.map(|dir| dir.join(&file)).filter(|p| p.is_file()) {
+        if let Some(path) = dir
+            .into_iter()
+            .flat_map(|dir| candidates(dir, &file))
+            .find(|p| p.is_file())
+        {
             return Ok(path);
         }
         Err(Failure::NoBinary {
@@ -277,6 +281,18 @@ impl BinarySource {
             dir: dir.map(|d| d.display().to_string()).unwrap_or_default(),
         })
     }
+}
+
+/// Where a release keeps `file`, from the folder of `hangar-ai`: beside it
+/// (Windows, development), in Contents/Resources (macOS: codesign refuses ELF
+/// files in Contents/MacOS), in usr/lib/hangar-ai (the .deb, the .rpm, the
+/// AppImage, whose executable is in usr/bin).
+fn candidates(exe_dir: &Path, file: &str) -> [PathBuf; 3] {
+    [
+        exe_dir.join(file),
+        exe_dir.join("../Resources").join(file),
+        exe_dir.join("../lib/hangar-ai").join(file),
+    ]
 }
 
 /// Why an SSH target cannot be used, or `None`. A target is one argument of
