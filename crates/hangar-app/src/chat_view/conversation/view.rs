@@ -22,6 +22,7 @@ use crate::orchestration_ui::actions::can_create_orchestrator;
 use crate::state::roles::orchestrator_of;
 use crate::state::{AgentActivity, Pane, Workspace};
 
+use super::calls::{self, Piece};
 use super::settled::settled;
 use super::thread::{Outgoing, Sent};
 use super::{Blocked, Chat, Msg, State, blocked, msg, rich, titles};
@@ -158,14 +159,16 @@ fn messages<'a>(
         Some(ChatPending::Question { tool_use_id, .. }) => Some(tool_use_id.as_str()),
         _ => None,
     };
-    for item in &chat.thread.items {
-        // The question the pane waits on is the card below, not an item.
-        if let Body::Question { tool_use_id, .. } = &item.body
-            && Some(tool_use_id.as_str()) == pending_question
-        {
-            continue;
-        }
-        list = list.push(item_view(ctx, ws, chat, item, &task_title));
+    // The question the pane waits on is the card below, not an item.
+    let items = chat.thread.items.iter().filter(|item| {
+        !matches!(&item.body, Body::Question { tool_use_id, .. }
+            if Some(tool_use_id.as_str()) == pending_question)
+    });
+    for piece in calls::pieces(items) {
+        list = list.push(match piece {
+            Piece::One(item) => item_view(ctx, ws, chat, item, &task_title),
+            Piece::Run(run) => run_view(ctx, ws, chat, &run, &task_title),
+        });
     }
     for out in &chat.thread.outgoing {
         list = list.push(outgoing(ctx, pane, out));
@@ -316,6 +319,81 @@ fn item_view<'a>(
         } => asked(ctx, questions, answer.as_deref()),
         Body::Notice { text: words } => notice(t, words.clone()),
     }
+}
+
+/// A run of calls, folded into one quiet line saying what they did; the
+/// calls, each its own line as alone, once pressed.
+fn run_view<'a>(
+    ctx: Ctx<'a>,
+    ws: &'a Workspace,
+    chat: &'a Chat,
+    run: &[&'a ChatItem],
+    task_title: &dyn Fn(&str) -> Option<String>,
+) -> Element<'a, Message> {
+    let t = ctx.theme;
+    let Some(first) = run.first() else {
+        return Space::new().into();
+    };
+    let key = Piece::key(first);
+    let open = chat.expanded.contains(&key);
+    let tally = calls::tally(run);
+    let mut line = row![
+        icon(
+            if open {
+                Icon::ChevronDown
+            } else {
+                Icon::ChevronRight
+            },
+            11.0,
+        )
+        .color(t.colors.fg_subtle),
+        text(calls::summary(ctx.i18n, &tally))
+            .size(tokens::font_size::CAPTION)
+            .style(style::text::subtle(t)),
+    ]
+    .spacing(tokens::space::SM)
+    .align_y(Alignment::Center);
+    if tally.failed > 0 {
+        line = line.push(
+            text(format!(
+                "· {}",
+                ctx.i18n.tn(Key::ChatConvCallsFailed, tally.failed, &[])
+            ))
+            .size(tokens::font_size::CAPTION)
+            .color(t.colors.warning),
+        );
+    }
+    if tally.running > 0 {
+        line = line.push(
+            text(format!(
+                "· {}",
+                ctx.i18n.tn(Key::ChatConvCallsRunning, tally.running, &[])
+            ))
+            .size(tokens::font_size::CAPTION)
+            .color(t.colors.state_working),
+        );
+    }
+    let head = button(line)
+        .padding([tokens::space::XXS, tokens::space::MD])
+        .width(Length::Fill)
+        .style(style::button::row(t, false))
+        .on_press(msg(Msg::Toggle(ws.id.clone(), key)));
+    if !open {
+        return head.into();
+    }
+    let mut list = column![].spacing(tokens::space::XXS);
+    for item in run {
+        list = list.push(item_view(ctx, ws, chat, item, task_title));
+    }
+    column![
+        head,
+        container(list).padding(Padding {
+            left: tokens::space::LG,
+            ..Padding::ZERO
+        })
+    ]
+    .spacing(tokens::space::XXS)
+    .into()
 }
 
 /// A bubble of the person's, on the right.
@@ -628,6 +706,20 @@ fn outgoing<'a>(ctx: Ctx<'a>, pane: &'a Pane, out: &'a Outgoing) -> Element<'a, 
     mine(t, bubble, !matches!(out.state, Sent::Typed))
 }
 
+/// The tallest the body of a card gets: past it, it scrolls, and its
+/// title and buttons stay in sight.
+const CARD_BODY_HEIGHT: f32 = 340.0;
+
+/// A card's parts: its title row, what it shows (scrolled when tall) and
+/// its buttons (always shown).
+struct CardParts<'a> {
+    title: Element<'a, Message>,
+    body: Element<'a, Message>,
+    actions: Element<'a, Message>,
+    /// The body's scroll, per question shown: a new one starts at its top.
+    scroll: iced::widget::Id,
+}
+
 /// The card of what the pane waits on the person for.
 fn card<'a>(
     ctx: Ctx<'a>,
@@ -636,7 +728,7 @@ fn card<'a>(
     chat: &'a Chat,
 ) -> Option<Element<'a, Message>> {
     let t = ctx.theme;
-    let body = match chat.thread.pending.as_ref()? {
+    let parts = match chat.thread.pending.as_ref()? {
         ChatPending::Question { questions, .. } => question_card(ctx, ws, pane, chat, questions),
         ChatPending::Permission {
             tool,
@@ -645,7 +737,19 @@ fn card<'a>(
             ..
         } => permission_card(ctx, ws, pane, chat, tool, title, detail.as_deref()),
     };
-    let mut stack = column![body].spacing(tokens::space::MD);
+    let body = container(
+        scrollable(container(parts.body).padding(Padding {
+            right: tokens::space::LG,
+            ..Padding::ZERO
+        }))
+        .id(parts.scroll)
+        .height(Length::Shrink)
+        .style(style::scrollable::default(t)),
+    )
+    .max_height(CARD_BODY_HEIGHT);
+    let mut stack = column![parts.title, body].spacing(tokens::space::LG);
+    // What happened to the last answer, right above the buttons: never out
+    // of sight.
     if chat.deciding {
         stack = stack.push(hangar_ui::text::hint(t, ctx.t(Key::ChatConvBusy)));
     }
@@ -660,6 +764,7 @@ fn card<'a>(
             .size(tokens::font_size::CAPTION),
         );
     }
+    stack = stack.push(parts.actions);
     Some(centred(
         container(
             container(stack)
@@ -689,6 +794,18 @@ fn card_title<'a>(t: &'a Theme, words: String) -> Element<'a, Message> {
     .into()
 }
 
+/// A question's header, as a chip.
+fn header_chip<'a>(t: &'a Theme, header: &'a str) -> Element<'a, Message> {
+    container(
+        text(header)
+            .size(tokens::font_size::MICRO)
+            .style(style::text::muted(t)),
+    )
+    .padding([0.0, tokens::space::SM])
+    .style(style::container::chip(t))
+    .into()
+}
+
 /// An option of a question, chosen or not.
 fn choice<'a>(
     t: &'a Theme,
@@ -707,7 +824,8 @@ fn choice<'a>(
         text(label)
             .size(tokens::font_size::UI)
             .style(style::text::primary(t))
-    ];
+    ]
+    .width(Length::Fill);
     if let Some(description) = description.filter(|d| !d.trim().is_empty()) {
         words = words.push(
             text(description)
@@ -734,46 +852,65 @@ fn choice<'a>(
     .into()
 }
 
+/// A question's answer in words: the labels picked, then the person's own.
+fn said(answer: &Answer) -> String {
+    answer
+        .selected
+        .iter()
+        .cloned()
+        .chain(answer.other.clone())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The question card: one question at a time, as Claude Code asks them —
+/// its header and words, its options and "Other", the step it is (1/3),
+/// Back and Next, and on the last one the answers given and Send.
 fn question_card<'a>(
     ctx: Ctx<'a>,
     ws: &'a Workspace,
     pane: &'a Pane,
     chat: &'a Chat,
     questions: &'a [Question],
-) -> Element<'a, Message> {
+) -> CardParts<'a> {
     let t = ctx.theme;
     let form = &chat.form;
     let free = !chat.deciding;
-    let mut stack = column![card_title(
-        t,
-        ctx.i18n
-            .t_with(
-                Key::ChatConvQuestionTitle,
-                &args!("name" => pane.name.as_str())
-            )
-            .into_owned(),
-    )]
-    .spacing(tokens::space::LG);
-    for (at, question) in questions.iter().enumerate() {
-        let mut block = column![].spacing(tokens::space::SM);
-        let mut head = row![].spacing(tokens::space::MD).align_y(Alignment::Center);
-        if !question.header.trim().is_empty() {
-            head = head.push(
-                container(
-                    text(question.header.as_str())
-                        .size(tokens::font_size::MICRO)
-                        .style(style::text::muted(t)),
+    let count = questions.len();
+    let at = form.step();
+    let last = at + 1 >= count;
+    let mut title = row![
+        container(card_title(
+            t,
+            ctx.i18n
+                .t_with(
+                    Key::ChatConvQuestionTitle,
+                    &args!("name" => pane.name.as_str())
                 )
-                .padding([0.0, tokens::space::SM])
-                .style(style::container::chip(t)),
-            );
+                .into_owned(),
+        ))
+        .width(Length::Fill)
+    ]
+    .align_y(Alignment::Center);
+    if count > 1 {
+        title = title.push(
+            text(format!("{}/{count}", at + 1))
+                .size(tokens::font_size::CAPTION)
+                .font(fonts::mono())
+                .style(style::text::muted(t)),
+        );
+    }
+    let mut block = column![].spacing(tokens::space::SM);
+    if let Some(question) = questions.get(at) {
+        if !question.header.trim().is_empty() {
+            block = block.push(header_chip(t, question.header.as_str()));
         }
-        head = head.push(
+        block = block.push(
             text(question.question.as_str())
                 .size(tokens::font_size::UI_LG)
+                .width(Length::Fill)
                 .style(style::text::primary(t)),
         );
-        block = block.push(head);
         if question.multi_select {
             block = block.push(hangar_ui::text::hint(t, ctx.t(Key::ChatConvQuestionMulti)));
         }
@@ -824,19 +961,120 @@ fn question_card<'a>(
                 }));
             block = block.push(crate::keymap::guard(ctx, field));
         }
-        stack = stack.push(block);
     }
-    let ready = form.answers(questions).is_some();
-    stack = stack.push(
-        row![
-            Space::new().width(Length::Fill),
-            ui_button::primary(t, ctx.t(Key::ChatConvQuestionSubmit))
-                .icon(Icon::Send)
-                .on_press_maybe((ready && free).then(|| msg(Msg::SubmitAnswer(ws.id.clone())))),
-        ]
-        .align_y(Alignment::Center),
-    );
-    stack.into()
+    if last && count > 1 {
+        block = block.push(recap(ctx, ws, form, questions, free));
+    }
+    let answered = form.answered(questions, at);
+    let mut actions = row![].spacing(tokens::space::MD).align_y(Alignment::Center);
+    if at > 0 {
+        actions = actions.push(
+            ui_button::secondary(t, ctx.t(Key::ChatConvQuestionBack)).on_press_maybe(free.then(
+                || {
+                    msg(Msg::Step {
+                        ws: ws.id.clone(),
+                        to: at - 1,
+                    })
+                },
+            )),
+        );
+    }
+    // Why the button waits, said rather than a button that does nothing.
+    let waits: Element<'a, Message> = if answered {
+        Space::new().width(Length::Fill).into()
+    } else {
+        container(hangar_ui::text::hint(
+            t,
+            ctx.t(Key::ChatConvQuestionNeedsAnswer),
+        ))
+        .width(Length::Fill)
+        .into()
+    };
+    actions = actions.push(waits);
+    actions = actions.push(if last {
+        let ready = form.answers(questions).is_some();
+        ui_button::primary(t, ctx.t(Key::ChatConvQuestionSubmit))
+            .icon(Icon::Send)
+            .on_press_maybe((ready && free).then(|| msg(Msg::SubmitAnswer(ws.id.clone()))))
+    } else {
+        ui_button::primary(t, ctx.t(Key::ChatConvQuestionNext))
+            .icon_after(Icon::ChevronRight)
+            .on_press_maybe((answered && free).then(|| {
+                msg(Msg::Step {
+                    ws: ws.id.clone(),
+                    to: at + 1,
+                })
+            }))
+    });
+    CardParts {
+        title: title.into(),
+        body: block.into(),
+        actions: actions.into(),
+        scroll: iced::widget::Id::from(format!("chat-view-question-{}-{at}", form.tool_use_id)),
+    }
+}
+
+/// The answers given so far, each a way back to its question.
+fn recap<'a>(
+    ctx: Ctx<'a>,
+    ws: &'a Workspace,
+    form: &'a super::Form,
+    questions: &'a [Question],
+    free: bool,
+) -> Element<'a, Message> {
+    let t = ctx.theme;
+    let mut list = column![
+        text(ctx.t(Key::ChatConvQuestionRecap))
+            .size(tokens::font_size::MICRO)
+            .font(fonts::ui_semibold())
+            .style(style::text::subtle(t))
+    ]
+    .spacing(tokens::space::XS);
+    for (at, question) in questions.iter().enumerate() {
+        let answer = form
+            .answers_at(questions, at)
+            .map(|answer| said(&answer))
+            .unwrap_or_else(|| ctx.t(Key::ChatConvQuestionNoAnswer).into_owned());
+        let named = if question.header.trim().is_empty() {
+            (at + 1).to_string()
+        } else {
+            question.header.clone()
+        };
+        list = list.push(
+            button(
+                row![
+                    container(
+                        text(named)
+                            .size(tokens::font_size::MICRO)
+                            .style(style::text::muted(t)),
+                    )
+                    .padding([0.0, tokens::space::SM])
+                    .style(style::container::chip(t)),
+                    text(answer)
+                        .size(tokens::font_size::CAPTION)
+                        .width(Length::Fill)
+                        .style(style::text::secondary(t)),
+                ]
+                .spacing(tokens::space::MD)
+                .align_y(Alignment::Center),
+            )
+            .padding([tokens::space::XS, tokens::space::MD])
+            .width(Length::Fill)
+            .style(style::button::row(t, false))
+            .on_press_maybe(free.then(|| {
+                msg(Msg::Step {
+                    ws: ws.id.clone(),
+                    to: at,
+                })
+            })),
+        );
+    }
+    container(list)
+        .padding(Padding {
+            top: tokens::space::MD,
+            ..Padding::ZERO
+        })
+        .into()
 }
 
 fn permission_card<'a>(
@@ -847,7 +1085,7 @@ fn permission_card<'a>(
     tool: &'a str,
     title: &'a str,
     detail: Option<&'a str>,
-) -> Element<'a, Message> {
+) -> CardParts<'a> {
     let t = ctx.theme;
     let free = !chat.deciding;
     let tasks = ctx.model.live.board.tasks(&ws.cwd);
@@ -858,8 +1096,30 @@ fn permission_card<'a>(
             .map(|task| task.title.clone())
     };
     let what = titles::title(ctx.i18n, tool, title, detail, &task_title);
-    let mut stack = column![
-        card_title(
+    let mut body = column![
+        text(what)
+            .size(tokens::font_size::UI_LG)
+            .style(style::text::secondary(t)),
+    ]
+    .spacing(tokens::space::MD);
+    if let Some(detail) = detail {
+        body = body.push(mono_block(
+            t,
+            clipped(&titles::detail(tool, detail), DETAIL_LINES),
+        ));
+    }
+    let actions = row![
+        Space::new().width(Length::Fill),
+        ui_button::secondary(t, ctx.t(Key::ChatConvPermissionDeny))
+            .on_press_maybe(free.then(|| msg(Msg::Permit(ws.id.clone(), false)))),
+        ui_button::primary(t, ctx.t(Key::ChatConvPermissionAllow))
+            .icon(Icon::Check)
+            .on_press_maybe(free.then(|| msg(Msg::Permit(ws.id.clone(), true)))),
+    ]
+    .spacing(tokens::space::MD)
+    .align_y(Alignment::Center);
+    CardParts {
+        title: card_title(
             t,
             ctx.i18n
                 .t_with(
@@ -868,30 +1128,10 @@ fn permission_card<'a>(
                 )
                 .into_owned(),
         ),
-        text(what)
-            .size(tokens::font_size::UI_LG)
-            .style(style::text::secondary(t)),
-    ]
-    .spacing(tokens::space::MD);
-    if let Some(detail) = detail {
-        stack = stack.push(mono_block(
-            t,
-            clipped(&titles::detail(tool, detail), DETAIL_LINES),
-        ));
+        body: body.into(),
+        actions: actions.into(),
+        scroll: iced::widget::Id::new("chat-view-permission"),
     }
-    stack = stack.push(
-        row![
-            Space::new().width(Length::Fill),
-            ui_button::secondary(t, ctx.t(Key::ChatConvPermissionDeny))
-                .on_press_maybe(free.then(|| msg(Msg::Permit(ws.id.clone(), false)))),
-            ui_button::primary(t, ctx.t(Key::ChatConvPermissionAllow))
-                .icon(Icon::Check)
-                .on_press_maybe(free.then(|| msg(Msg::Permit(ws.id.clone(), true)))),
-        ]
-        .spacing(tokens::space::MD)
-        .align_y(Alignment::Center),
-    );
-    stack.into()
 }
 
 /// The words that say why the input is disabled.

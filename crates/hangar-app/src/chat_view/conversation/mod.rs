@@ -29,6 +29,7 @@
 //! (`settled`, keyed by `Chat::revision`), and an unchanged message keeps
 //! the Markdown it was parsed into (`Chat::prose`).
 
+mod calls;
 pub mod rich;
 mod settled;
 mod thread;
@@ -199,7 +200,9 @@ impl Chat {
     }
 }
 
-/// The person's choices on the question the pane waits on.
+/// The person's choices on the question the pane waits on, one question at
+/// a time as Claude Code's own dialog asks them: `step` is the question
+/// shown, the last one with the recap and Send.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Form {
     tool_use_id: String,
@@ -208,6 +211,8 @@ pub struct Form {
     /// By question: "Other" is chosen, and its words.
     other_on: Vec<bool>,
     other: Vec<String>,
+    /// The question shown.
+    step: usize,
 }
 
 impl Form {
@@ -217,7 +222,13 @@ impl Form {
             picked: vec![Vec::new(); questions],
             other_on: vec![false; questions],
             other: vec![String::new(); questions],
+            step: 0,
         }
+    }
+
+    /// The question shown, within the questions asked.
+    pub fn step(&self) -> usize {
+        self.step.min(self.picked.len().saturating_sub(1))
     }
 
     fn pick(&mut self, question: &Question, at: usize, option: usize) {
@@ -252,8 +263,42 @@ impl Form {
         }
     }
 
-    /// The answers, one per question, once each has one: the labels picked
-    /// and the person's own words.
+    /// Question `at`'s answer, once it has one: the labels picked and the
+    /// person's own words.
+    fn answer_at(&self, question: &Question, at: usize) -> Option<Answer> {
+        let selected: Vec<String> = self
+            .picked
+            .get(at)?
+            .iter()
+            .filter_map(|&o| question.options.get(o))
+            .map(|option| option.label.clone())
+            .collect();
+        let other = Some(self.other.get(at)?.trim().to_string())
+            .filter(|words| self.other_on[at] && !words.is_empty());
+        (!selected.is_empty() || other.is_some()).then_some(Answer { selected, other })
+    }
+
+    /// Question `at`'s answer, by index into `questions`.
+    pub fn answers_at(&self, questions: &[Question], at: usize) -> Option<Answer> {
+        self.answer_at(questions.get(at)?, at)
+    }
+
+    /// Question `at` has an answer: Next goes on.
+    pub fn answered(&self, questions: &[Question], at: usize) -> bool {
+        self.answers_at(questions, at).is_some()
+    }
+
+    /// Goes to question `to`: back to any, on only past questions answered.
+    fn go(&mut self, questions: &[Question], to: usize) {
+        if to >= questions.len() {
+            return;
+        }
+        if (self.step()..to).all(|at| self.answered(questions, at)) {
+            self.step = to;
+        }
+    }
+
+    /// The answers, one per question, once each has one.
     fn answers(&self, questions: &[Question]) -> Option<Vec<Answer>> {
         if self.picked.len() != questions.len() {
             return None;
@@ -261,16 +306,7 @@ impl Form {
         questions
             .iter()
             .enumerate()
-            .map(|(at, question)| {
-                let selected: Vec<String> = self.picked[at]
-                    .iter()
-                    .filter_map(|&o| question.options.get(o))
-                    .map(|option| option.label.clone())
-                    .collect();
-                let other = Some(self.other[at].trim().to_string())
-                    .filter(|words| self.other_on[at] && !words.is_empty());
-                (!selected.is_empty() || other.is_some()).then_some(Answer { selected, other })
-            })
+            .map(|(at, question)| self.answer_at(question, at))
             .collect()
     }
 }
@@ -309,6 +345,11 @@ pub enum Msg {
         ws: WsId,
         question: usize,
         text: String,
+    },
+    /// Back or Next on the question card: the question shown.
+    Step {
+        ws: WsId,
+        to: usize,
     },
     SubmitAnswer(WsId),
     Permit(WsId, bool),
@@ -589,6 +630,7 @@ fn touches(msg_: &Msg) -> Option<&str> {
         | Msg::Pick { .. }
         | Msg::Other { .. }
         | Msg::OtherText { .. }
+        | Msg::Step { .. }
         | Msg::Start(_)
         | Msg::Link(_) => None,
     }
@@ -721,6 +763,14 @@ fn route(st: &mut State, m: &mut Model, msg_: Msg) -> Task<Message> {
                 && let Some(words) = chat.form.other.get_mut(question)
             {
                 *words = text;
+            }
+            Task::none()
+        }
+        Msg::Step { ws, to } => {
+            if let Some(chat) = st.chats.get_mut(&ws)
+                && let Some(ChatPending::Question { questions, .. }) = &chat.thread.pending
+            {
+                chat.form.go(questions, to);
             }
             Task::none()
         }

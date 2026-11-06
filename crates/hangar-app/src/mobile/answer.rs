@@ -752,7 +752,8 @@ mod replay {
 
     const Q1: &str = "Le moteur d'un serveur GMod (srcds) et son Lua tournent sur un seul thread, et le jeu ne peut pas être rendu entièrement multithread sans réécrire le moteur. Quelle approche veux-tu ?";
     const Q2: &str = "Sur quelle plateforme le serveur tourne-t-il ?";
-    const Q3: &str = "Qu'est-ce qui ralentit ton serveur aujourd'hui ? Ça me dit quoi optimiser en premier.";
+    const Q3: &str =
+        "Qu'est-ce qui ralentit ton serveur aujourd'hui ? Ça me dit quoi optimiser en premier.";
 
     /// The person's prompt: long descriptions on the first, a recommended
     /// option first on the second, several answers on the third.
@@ -890,12 +891,21 @@ mod replay {
                 (true, true) => "[✔] ".into(),
                 (true, false) => "[ ] ".into(),
             };
-            lines.push(format!("{} {}. {boxed}{}", mark(index), index + 1, option.label));
+            lines.push(format!(
+                "{} {}. {boxed}{}",
+                mark(index),
+                index + 1,
+                option.label
+            ));
             lines.extend(wrapped(&option.description, "     ", WIDTH - 5));
         }
         let type_row = q.options.len();
         if q.multi_select {
-            let words = if typed.is_empty() { "Type something" } else { typed };
+            let words = if typed.is_empty() {
+                "Type something"
+            } else {
+                typed
+            };
             lines.push(format!("{} {}. [ ] {words}", mark(type_row), type_row + 1));
             let next = if at + 1 == questions.len() {
                 "Submit"
@@ -906,7 +916,11 @@ mod replay {
             lines.push(rule());
             lines.push(format!("  {}. Chat about this", type_row + 2));
         } else {
-            let words = if typed.is_empty() { "Type something." } else { typed };
+            let words = if typed.is_empty() {
+                "Type something."
+            } else {
+                typed
+            };
             lines.push(format!("{} {}. {words}", mark(type_row), type_row + 1));
             lines.push(rule());
             lines.push(format!("  {}. Chat about this", type_row + 2));
@@ -997,10 +1011,7 @@ mod replay {
                 other: None,
             },
             Answer {
-                selected: vec![
-                    "I/O et base de données".into(),
-                    "Calculs Lua lourds".into(),
-                ],
+                selected: vec!["I/O et base de données".into(), "Calculs Lua lourds".into()],
                 other: None,
             },
         ]
@@ -1038,7 +1049,10 @@ mod replay {
         assert!(!untouched(&lines, &questions[1]));
         let moved = question_screen(&questions, 0, &[false; 3], 1, &[], "");
         let lines = dialog_of(&moved, &questions).unwrap();
-        assert!(!untouched(&lines, &questions[0]), "someone moved the cursor");
+        assert!(
+            !untouched(&lines, &questions[0]),
+            "someone moved the cursor"
+        );
     }
 
     #[tokio::test]
@@ -1097,7 +1111,11 @@ mod replay {
         let choices = choices_from(&questions, &given()).unwrap();
         let review = review_screen(
             &questions,
-            &[OWN, "Linux seulement", "Calculs Lua lourds, I/O et base de données"],
+            &[
+                OWN,
+                "Linux seulement",
+                "Calculs Lua lourds, I/O et base de données",
+            ],
         );
         let io = replay(&review);
         assert_eq!(
@@ -1112,10 +1130,7 @@ mod replay {
         let questions = questions();
         let choices = choices_from(&questions, &given()).unwrap();
         let io = Replay {
-            screens: vec![(
-                0,
-                question_screen(&questions, 0, &[false; 3], 2, &[], ""),
-            )],
+            screens: vec![(0, question_screen(&questions, 0, &[false; 3], 2, &[], ""))],
             typed: Mutex::new(Vec::new()),
         };
         assert_eq!(

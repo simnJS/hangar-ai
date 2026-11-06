@@ -326,6 +326,26 @@ pub enum Key {
     ChatConvActionRunning,
     /// `chatConv.busy`
     ChatConvBusy,
+    /// `chatConv.calls.commands`
+    ChatConvCallsCommands,
+    /// `chatConv.calls.edits`
+    ChatConvCallsEdits,
+    /// `chatConv.calls.failed`
+    ChatConvCallsFailed,
+    /// `chatConv.calls.memory`
+    ChatConvCallsMemory,
+    /// `chatConv.calls.messages`
+    ChatConvCallsMessages,
+    /// `chatConv.calls.other`
+    ChatConvCallsOther,
+    /// `chatConv.calls.reads`
+    ChatConvCallsReads,
+    /// `chatConv.calls.running`
+    ChatConvCallsRunning,
+    /// `chatConv.calls.searches`
+    ChatConvCallsSearches,
+    /// `chatConv.calls.tasks`
+    ChatConvCallsTasks,
     /// `chatConv.disabled.answering`
     ChatConvDisabledAnswering,
     /// `chatConv.disabled.loading`
@@ -370,14 +390,22 @@ pub enum Key {
     ChatConvPlaceholder,
     /// `chatConv.question.asked`
     ChatConvQuestionAsked,
+    /// `chatConv.question.back`
+    ChatConvQuestionBack,
     /// `chatConv.question.multi`
     ChatConvQuestionMulti,
+    /// `chatConv.question.needsAnswer`
+    ChatConvQuestionNeedsAnswer,
+    /// `chatConv.question.next`
+    ChatConvQuestionNext,
     /// `chatConv.question.noAnswer`
     ChatConvQuestionNoAnswer,
     /// `chatConv.question.other`
     ChatConvQuestionOther,
     /// `chatConv.question.otherPlaceholder`
     ChatConvQuestionOtherPlaceholder,
+    /// `chatConv.question.recap`
+    ChatConvQuestionRecap,
     /// `chatConv.question.submit`
     ChatConvQuestionSubmit,
     /// `chatConv.question.title`
@@ -3849,7 +3877,7 @@ pub enum Key {
 }
 
 /// How many keys there are.
-pub const KEY_COUNT: usize = 1916;
+pub const KEY_COUNT: usize = 1930;
 
 impl Key {
     /// Every key, in the order of their ids.
@@ -4010,6 +4038,16 @@ impl Key {
         Key::ChatConvActionResult,
         Key::ChatConvActionRunning,
         Key::ChatConvBusy,
+        Key::ChatConvCallsCommands,
+        Key::ChatConvCallsEdits,
+        Key::ChatConvCallsFailed,
+        Key::ChatConvCallsMemory,
+        Key::ChatConvCallsMessages,
+        Key::ChatConvCallsOther,
+        Key::ChatConvCallsReads,
+        Key::ChatConvCallsRunning,
+        Key::ChatConvCallsSearches,
+        Key::ChatConvCallsTasks,
         Key::ChatConvDisabledAnswering,
         Key::ChatConvDisabledLoading,
         Key::ChatConvDisabledNotClaude,
@@ -4032,10 +4070,14 @@ impl Key {
         Key::ChatConvPermissionTitle,
         Key::ChatConvPlaceholder,
         Key::ChatConvQuestionAsked,
+        Key::ChatConvQuestionBack,
         Key::ChatConvQuestionMulti,
+        Key::ChatConvQuestionNeedsAnswer,
+        Key::ChatConvQuestionNext,
         Key::ChatConvQuestionNoAnswer,
         Key::ChatConvQuestionOther,
         Key::ChatConvQuestionOtherPlaceholder,
+        Key::ChatConvQuestionRecap,
         Key::ChatConvQuestionSubmit,
         Key::ChatConvQuestionTitle,
         Key::ChatConvQueued,
@@ -5931,6 +5973,16 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "chatConv.action.result", en: Text::plain("Result"), fr: Text::plain("Résultat") },
     Message { id: "chatConv.action.running", en: Text::plain("Running"), fr: Text::plain("En cours") },
     Message { id: "chatConv.busy", en: Text::plain("Typing your answer…"), fr: Text::plain("Saisie de votre réponse…") },
+    Message { id: "chatConv.calls.commands", en: Text::plural("{n} command", "{n} commands"), fr: Text::plural("{n} commande", "{n} commandes") },
+    Message { id: "chatConv.calls.edits", en: Text::plural("{n} file edited", "{n} files edited"), fr: Text::plural("{n} fichier modifié", "{n} fichiers modifiés") },
+    Message { id: "chatConv.calls.failed", en: Text::plain("{n} failed"), fr: Text::plain("{n} en échec") },
+    Message { id: "chatConv.calls.memory", en: Text::plural("{n} memory note", "{n} memory notes"), fr: Text::plural("{n} note en mémoire", "{n} notes en mémoire") },
+    Message { id: "chatConv.calls.messages", en: Text::plural("{n} message sent", "{n} messages sent"), fr: Text::plural("{n} message envoyé", "{n} messages envoyés") },
+    Message { id: "chatConv.calls.other", en: Text::plural("{n} call", "{n} calls"), fr: Text::plural("{n} appel", "{n} appels") },
+    Message { id: "chatConv.calls.reads", en: Text::plural("{n} file read", "{n} files read"), fr: Text::plural("{n} fichier lu", "{n} fichiers lus") },
+    Message { id: "chatConv.calls.running", en: Text::plain("{n} running"), fr: Text::plain("{n} en cours") },
+    Message { id: "chatConv.calls.searches", en: Text::plural("{n} search", "{n} searches"), fr: Text::plural("{n} recherche", "{n} recherches") },
+    Message { id: "chatConv.calls.tasks", en: Text::plural("{n} task created", "{n} tasks created"), fr: Text::plural("{n} tâche créée", "{n} tâches créées") },
     Message { id: "chatConv.disabled.answering", en: Text::plain("An answer is being typed into {name}: wait for it."), fr: Text::plain("Une réponse est en cours de saisie dans {name}\u{202f}: attendez qu’elle finisse.") },
     Message { id: "chatConv.disabled.loading", en: Text::plain("Hangar is starting: wait a moment."), fr: Text::plain("Hangar démarre\u{202f}: patientez un instant.") },
     Message { id: "chatConv.disabled.notClaude", en: Text::plain("{name} is not a Claude Code pane."), fr: Text::plain("{name} n’est pas un panneau Claude Code.") },
@@ -5953,10 +6005,14 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "chatConv.permission.title", en: Text::plain("{name} asks to use {tool}"), fr: Text::plain("{name} demande à utiliser {tool}") },
     Message { id: "chatConv.placeholder", en: Text::plain("Message {name}…"), fr: Text::plain("Message à {name}…") },
     Message { id: "chatConv.question.asked", en: Text::plain("Asked: {question}"), fr: Text::plain("Question\u{202f}: {question}") },
+    Message { id: "chatConv.question.back", en: Text::plain("Back"), fr: Text::plain("Retour") },
     Message { id: "chatConv.question.multi", en: Text::plain("Pick any that apply"), fr: Text::plain("Choisissez tout ce qui convient") },
+    Message { id: "chatConv.question.needsAnswer", en: Text::plain("Choose an answer to go on."), fr: Text::plain("Choisissez une réponse pour continuer.") },
+    Message { id: "chatConv.question.next", en: Text::plain("Next"), fr: Text::plain("Suivant") },
     Message { id: "chatConv.question.noAnswer", en: Text::plain("No answer"), fr: Text::plain("Sans réponse") },
     Message { id: "chatConv.question.other", en: Text::plain("Other"), fr: Text::plain("Autre") },
     Message { id: "chatConv.question.otherPlaceholder", en: Text::plain("Your own words"), fr: Text::plain("Vos propres mots") },
+    Message { id: "chatConv.question.recap", en: Text::plain("Your answers"), fr: Text::plain("Vos réponses") },
     Message { id: "chatConv.question.submit", en: Text::plain("Send the answer"), fr: Text::plain("Envoyer la réponse") },
     Message { id: "chatConv.question.title", en: Text::plain("{name} asks"), fr: Text::plain("{name} demande") },
     Message { id: "chatConv.queued", en: Text::plain("Queued: {name} gets it once Claude Code is up"), fr: Text::plain("En file\u{202f}: {name} le recevra dès que Claude Code sera prêt") },

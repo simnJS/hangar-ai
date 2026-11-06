@@ -297,18 +297,36 @@ fn each_kind_of_item_is_drawn() {
     let wanted = [
         "Plan the search box",
         "Hangar",
+        // The three calls in a row: one quiet line, folded.
+        "2 commands, 1 task created",
+        "· 1 failed",
+        "· 1 running",
         "Created task “Search box”",
-        "Used board_create_task",
-        "Ran cargo test",
-        "Running",
-        "Ran make",
-        "Failed",
         "Asked: Which colour?",
         "→ Red",
         "Conversation compacted",
         "Show all",
         "Leo",
         "Enter to send, Shift+Enter for a new line",
+    ];
+    let expected: Vec<&str> = wanted
+        .iter()
+        .copied()
+        .filter(|words| *words != "Created task “Search box”")
+        .collect();
+    assert_eq!(shown_texts(&st, &m, &wanted), expected);
+
+    // The run opens on a press: each call its own line, as alone.
+    let asked = clicks(&st, &m, &["2 commands, 1 task created"]);
+    assert!(matches!(asked.as_slice(), [Msg::Toggle(_, id)] if id == "run:c1"));
+    apply(&mut st, &mut m, asked);
+    let wanted = [
+        "Created task “Search box”",
+        "Used board_create_task",
+        "Ran cargo test",
+        "Running",
+        "Ran make",
+        "Failed",
     ];
     let expected: Vec<&str> = wanted
         .iter()
@@ -437,31 +455,29 @@ fn question(asked: &str, multi: bool) -> Question {
     }
 }
 
-#[test]
-fn a_question_card_takes_the_choices_and_answers_through_the_desk() {
-    let mut m = shop(true);
-    let mut st = State::default();
-    let questions = vec![
-        question("Which colour?", false),
-        Question {
-            question: "Which sizes?".into(),
-            header: "Sizes".into(),
-            multi_select: true,
-            options: vec![
-                QuestionOption {
-                    label: "Small".into(),
-                    description: String::new(),
-                },
-                QuestionOption {
-                    label: "Large".into(),
-                    description: String::new(),
-                },
-            ],
-        },
-    ];
+fn sizes() -> Question {
+    Question {
+        question: "Which sizes?".into(),
+        header: "Sizes".into(),
+        multi_select: true,
+        options: vec![
+            QuestionOption {
+                label: "Small".into(),
+                description: String::new(),
+            },
+            QuestionOption {
+                label: "Large".into(),
+                description: String::new(),
+            },
+        ],
+    }
+}
+
+/// Leo waits on `questions`, asked as "toolu_q".
+fn asked_questions(st: &mut State, m: &mut Model, questions: &[Question]) {
     read_into(
-        &mut st,
-        &mut m,
+        st,
+        m,
         page(
             vec![
                 person("u1", "Make a shirt"),
@@ -469,55 +485,80 @@ fn a_question_card_takes_the_choices_and_answers_through_the_desk() {
                     "q1",
                     Body::Question {
                         tool_use_id: "toolu_q".into(),
-                        questions: questions.clone(),
+                        questions: questions.to_vec(),
                         answer: None,
                     },
                 ),
             ],
             Some(ChatPending::Question {
                 tool_use_id: "toolu_q".into(),
-                questions: questions.clone(),
+                questions: questions.to_vec(),
             }),
         ),
     );
-    assert_eq!(
-        shown_texts(
-            &st,
-            &m,
-            &[
-                "Leo asks",
-                "Which colour?",
-                "Which sizes?",
-                "Pick any that apply",
-                "Answer the question above first."
-            ]
-        )
-        .len(),
-        5
-    );
+}
+
+#[test]
+fn a_question_card_asks_one_question_at_a_time_and_answers_through_the_desk() {
+    let mut m = shop(true);
+    let mut st = State::default();
+    let questions = vec![question("Which colour?", false), sizes()];
+    asked_questions(&mut st, &mut m, &questions);
+    // The first question alone, its step, and why Next waits.
+    let wanted = [
+        "Leo asks",
+        "1/2",
+        "Colour",
+        "Which colour?",
+        "Warm",
+        "Next",
+        "Choose an answer to go on.",
+        "Answer the question above first.",
+        "Which sizes?",
+        "Back",
+        "Send the answer",
+    ];
+    assert_eq!(shown_texts(&st, &m, &wanted), wanted[..8]);
     assert!(
         shown_texts(&st, &m, &["Asked: Which colour?"]).is_empty(),
         "the question waiting is the card, not an item"
     );
+    let asked = clicks(&st, &m, &["Next"]);
+    assert!(asked.is_empty(), "Next waits for an answer: {asked:?}");
 
-    // Nothing to send before every question has an answer.
+    // Answered: Next goes on, the hint goes.
+    let asked = clicks(&st, &m, &["Blue"]);
+    apply(&mut st, &mut m, asked);
+    assert!(shown_texts(&st, &m, &["Choose an answer to go on."]).is_empty());
+    let asked = clicks(&st, &m, &["Next"]);
+    assert!(matches!(asked.as_slice(), [Msg::Step { to: 1, .. }]));
+    apply(&mut st, &mut m, asked);
+
+    // The last question: Back, the answers so far, Send waiting.
+    let wanted = [
+        "2/2",
+        "Which sizes?",
+        "Pick any that apply",
+        "Back",
+        "Your answers",
+        "Blue",
+        "No answer",
+        "Send the answer",
+        "Which colour?",
+        "Next",
+    ];
+    assert_eq!(shown_texts(&st, &m, &wanted), wanted[..8]);
     let asked = clicks(&st, &m, &["Send the answer"]);
     assert!(asked.is_empty(), "disabled: {asked:?}");
 
-    let asked = clicks(&st, &m, &["Blue", "Small", "Large"]);
+    // Back, to give the person's own words instead.
+    let asked = clicks(&st, &m, &["Back"]);
+    assert!(matches!(asked.as_slice(), [Msg::Step { to: 0, .. }]));
     apply(&mut st, &mut m, asked);
-    // "Other" on the multi-select question, with the person's words.
-    let pkg = Packages::default();
-    let other = {
-        let ctx = ctx(&m, &pkg);
-        let ws = m.workspace(WS).unwrap();
-        let mut ui = simulate(view(&st, ctx, ws));
-        // The second "Other": the first question's is above it.
-        ui.click("Other").expect("an Other choice");
-        ours(ui.into_messages())
-    };
-    assert!(matches!(other.as_slice(), [Msg::Other { question: 0, .. }]));
-    apply(&mut st, &mut m, other);
+    assert_eq!(shown_texts(&st, &m, &["Which colour?"]), ["Which colour?"]);
+    let asked = clicks(&st, &m, &["Other"]);
+    assert!(matches!(asked.as_slice(), [Msg::Other { question: 0, .. }]));
+    apply(&mut st, &mut m, asked);
     apply(
         &mut st,
         &mut m,
@@ -527,7 +568,19 @@ fn a_question_card_takes_the_choices_and_answers_through_the_desk() {
             text: " Teal ".into(),
         }],
     );
-    // "Other" on a single-select question replaces its option.
+    for label in ["Next", "Small", "Large"] {
+        let asked = clicks(&st, &m, &[label]);
+        apply(&mut st, &mut m, asked);
+    }
+    // "Other" on a single-select question replaced its option.
+    assert_eq!(
+        shown_texts(&st, &m, &["Teal", "Small, Large", "Blue"]),
+        ["Teal", "Small, Large"]
+    );
+    // An answer of the recap takes back to its question.
+    let asked = clicks(&st, &m, &["Teal"]);
+    assert!(matches!(asked.as_slice(), [Msg::Step { to: 0, .. }]));
+
     let asked = clicks(&st, &m, &["Send the answer"]);
     apply(&mut st, &mut m, asked);
     assert_eq!(
@@ -569,6 +622,182 @@ fn a_question_card_takes_the_choices_and_answers_through_the_desk() {
         }],
     );
     assert_eq!(calls(&st)[before..], [Call::Read { before: None }]);
+}
+
+#[test]
+fn an_answer_not_delivered_is_said_on_the_card_and_it_stays_answerable() {
+    let mut m = shop(true);
+    let mut st = State::default();
+    let questions = vec![sizes()];
+    asked_questions(&mut st, &mut m, &questions);
+    // A lone question: no step, Send at once.
+    assert!(shown_texts(&st, &m, &["1/1", "Next", "Your answers"]).is_empty());
+    let asked = clicks(&st, &m, &["Large"]);
+    apply(&mut st, &mut m, asked);
+    let asked = clicks(&st, &m, &["Send the answer"]);
+    apply(&mut st, &mut m, asked);
+    assert!(matches!(calls(&st).last(), Some(Call::Answer { .. })));
+    let refused = "An answer is being typed into \"Leo\" already.";
+    apply(
+        &mut st,
+        &mut m,
+        vec![Msg::Decided {
+            ws: WS.into(),
+            result: Err(refused.into()),
+        }],
+    );
+    // The pane still waits on it: the card, its choices and its refusal.
+    asked_questions(&mut st, &mut m, &questions);
+    let said = format!("Not done: {refused}");
+    assert_eq!(shown_texts(&st, &m, &[said.as_str()]), [said.as_str()]);
+    let asked = clicks(&st, &m, &["Send the answer"]);
+    assert!(matches!(asked.as_slice(), [Msg::SubmitAnswer(_)]));
+}
+
+#[test]
+fn a_tall_question_scrolls_inside_its_card_and_keeps_its_buttons_in_sight() {
+    let mut m = shop(true);
+    let mut st = State::default();
+    let long = "A description long enough to wrap over several lines of the card, as the person's real questions do. ".repeat(4);
+    let tall = Question {
+        question: "Which approach?".into(),
+        header: "Approach".into(),
+        multi_select: false,
+        options: (1..=4)
+            .map(|n| QuestionOption {
+                label: format!("Option {n}"),
+                description: long.clone(),
+            })
+            .collect(),
+    };
+    asked_questions(&mut st, &mut m, &[tall, sizes()]);
+    let asked = clicks(&st, &m, &["Option 1"]);
+    apply(&mut st, &mut m, asked);
+    // Next is on screen and takes the click, however tall the options.
+    let asked = clicks(&st, &m, &["Next"]);
+    assert!(matches!(asked.as_slice(), [Msg::Step { to: 1, .. }]));
+    assert_eq!(
+        shown_texts(&st, &m, &["Answer the question above first."]).len(),
+        1,
+        "the input stays below the card"
+    );
+}
+
+/* ── runs of calls ─────────────────────────────────────────────── */
+
+fn call(id: &str, tool: &str, state: CallState) -> ChatItem {
+    item(
+        id,
+        Body::Action {
+            tool: tool.into(),
+            title: format!("Used {tool}"),
+            detail: None,
+            result: None,
+            state,
+        },
+    )
+}
+
+#[test]
+fn calls_in_a_row_are_a_run_split_by_any_message_and_a_lone_call_stays_itself() {
+    use super::calls::{Piece, pieces};
+    let items = [
+        call("c1", "Bash", CallState::Done),
+        call("c2", "Bash", CallState::Done),
+        person("u1", "go on"),
+        call("c3", "Read", CallState::Done),
+        item(
+            "a1",
+            Body::Assistant {
+                text: "Done.".into(),
+            },
+        ),
+        call("c4", "Bash", CallState::Done),
+        call("c5", "mcp__hangar__board_create_task", CallState::Done),
+        call("c6", "Edit", CallState::Running),
+    ];
+    let ids = |piece: &Piece| match piece {
+        Piece::One(item) => vec![item.id.clone()],
+        Piece::Run(run) => run.iter().map(|item| item.id.clone()).collect(),
+    };
+    let shown: Vec<(bool, Vec<String>)> = pieces(&items)
+        .iter()
+        .map(|piece| (matches!(piece, Piece::Run(_)), ids(piece)))
+        .collect();
+    let of = |run: bool, ids: &[&str]| (run, ids.iter().map(|id| id.to_string()).collect());
+    assert_eq!(
+        shown,
+        [
+            of(true, &["c1", "c2"]),
+            of(false, &["u1"]),
+            of(false, &["c3"]),
+            of(false, &["a1"]),
+            of(true, &["c4", "c5", "c6"]),
+        ]
+    );
+}
+
+#[test]
+fn a_run_counts_its_calls_by_kind_and_its_failures() {
+    use super::calls::{Kind, tally};
+    let mut failed = call("c3", "Bash", CallState::Done);
+    if let Body::Action { result, .. } = &mut failed.body {
+        *result = Some(CallResult {
+            ok: false,
+            text: "exit 1".into(),
+        });
+    }
+    let items = [
+        call("c1", "Bash", CallState::Done),
+        call("c2", "PowerShell", CallState::Error),
+        failed,
+        call("c4", "mcp__hangar__board_create_task", CallState::Done),
+        call("c5", "mcp__hangar__board_create_task", CallState::Done),
+        call("c6", "mcp__hangar__memory_write", CallState::Done),
+        call("c7", "mcp__hangar__workspace_set_check", CallState::Running),
+    ];
+    let run: Vec<&ChatItem> = items.iter().collect();
+    let tally = tally(&run);
+    assert_eq!(
+        tally.kinds,
+        [
+            (Kind::Command, 3),
+            (Kind::Task, 2),
+            (Kind::Memory, 1),
+            (Kind::Other, 1)
+        ]
+    );
+    assert_eq!((tally.failed, tally.running), (2, 1));
+
+    let mut m = shop(true);
+    let mut st = State::default();
+    read_into(&mut st, &mut m, page(items.to_vec(), None));
+    let wanted = [
+        "3 commands, 2 tasks created, 1 memory note, 1 call",
+        "· 2 failed",
+        "· 1 running",
+        "Used Bash",
+    ];
+    assert_eq!(shown_texts(&st, &m, &wanted), wanted[..3]);
+}
+
+#[test]
+fn a_run_reads_in_french() {
+    use super::calls::{summary, tally};
+    use hangar_i18n::{Key, Locale, Translator};
+    let items = [
+        call("c1", "Bash", CallState::Done),
+        call("c2", "Bash", CallState::Error),
+        call("c3", "mcp__hangar__board_create_task", CallState::Done),
+    ];
+    let run: Vec<&ChatItem> = items.iter().collect();
+    let tally = tally(&run);
+    let fr = Translator::new(Locale::Fr);
+    assert_eq!(summary(fr, &tally), "2 commandes, 1 tâche créée");
+    assert_eq!(
+        fr.tn(Key::ChatConvCallsFailed, tally.failed, &[]),
+        "1 en échec"
+    );
 }
 
 /* ── permissions ───────────────────────────────────────────────── */
