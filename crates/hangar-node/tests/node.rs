@@ -36,6 +36,8 @@ fn command(home: &Path) -> Command {
         "XDG_STATE_HOME",
         "XDG_CONFIG_HOME",
         "XDG_CACHE_HOME",
+        // The transcripts are the test home's own (`~/.claude/projects`).
+        "CLAUDE_CONFIG_DIR",
     ] {
         command.env_remove(var);
     }
@@ -580,4 +582,166 @@ fn the_mcp_proxy_reaches_the_node() {
     assert!(answers[0]["result"].is_object(), "{answers:?}");
     let text = answers[1]["result"]["content"][0]["text"].as_str().unwrap();
     assert!(text.contains("\"columns\""), "{text}");
+}
+
+/// A Claude Code transcript as the node's would be, under the test home:
+/// `~/.claude/projects/<cwd with every other character a dash>/<id>.jsonl`.
+fn write_transcript(home: &Path, cwd: &str, session: &str, lines: &[Value]) {
+    let folder: String = cwd
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let dir = home.join(".claude/projects").join(folder);
+    std::fs::create_dir_all(&dir).unwrap();
+    let text: String = lines.iter().map(|line| format!("{line}\n")).collect();
+    std::fs::write(dir.join(format!("{session}.jsonl")), text).unwrap();
+}
+
+fn transcript_line(kind: &str, uuid: &str, cwd: &str, extra: Value) -> Value {
+    let mut line = json!({
+        "parentUuid": null,
+        "isSidechain": false,
+        "type": kind,
+        "uuid": uuid,
+        "timestamp": "2026-11-06T05:00:00.000Z",
+        "cwd": cwd,
+        "sessionId": "sess-1",
+        "version": "2.9.0",
+    });
+    for (key, value) in extra.as_object().unwrap() {
+        line[key] = value.clone();
+    }
+    line
+}
+
+fn a_conversation(cwd: &str) -> Vec<Value> {
+    vec![
+        transcript_line(
+            "user",
+            "u1",
+            cwd,
+            json!({
+                "message": { "role": "user", "content": "fix the build" },
+                "origin": { "kind": "human" },
+                "promptSource": "typed",
+            }),
+        ),
+        transcript_line(
+            "assistant",
+            "a1",
+            cwd,
+            json!({
+                "message": {
+                    "id": "msg_a1",
+                    "model": "claude-opus-5-5",
+                    "role": "assistant",
+                    "content": [{ "type": "text", "text": "done" }],
+                    "usage": {
+                        "input_tokens": 2,
+                        "cache_creation_input_tokens": 100,
+                        "cache_read_input_tokens": 1000,
+                        "output_tokens": 8,
+                    },
+                },
+                "requestId": "req_1",
+            }),
+        ),
+    ]
+}
+
+#[test]
+fn the_transcripts_are_read_on_the_node() {
+    let node = Node::start();
+    let cwd = node.home().join("demo");
+    std::fs::create_dir_all(&cwd).unwrap();
+    let cwd = cwd.to_str().unwrap().to_owned();
+    let session = "4f1c2d3e-0000-4000-8000-000000000001";
+
+    // Nothing written yet: no page, no gauge, no session.
+    let (status, empty) = node.get(&format!("/node/chat?session={session}&cwd={cwd}"));
+    assert_eq!(status, 200, "{empty}");
+    assert_eq!(empty["page"], Value::Null);
+    let (status, none) = node.get(&format!("/node/context?session={session}&cwd={cwd}"));
+    assert_eq!((status, &none["usage"]), (200, &Value::Null), "{none}");
+    let (status, listed) = node.get(&format!("/node/sessions?cwd={cwd}"));
+    assert_eq!((status, listed["sessions"].clone()), (200, json!([])));
+
+    write_transcript(node.home(), &cwd, session, &a_conversation(&cwd));
+
+    let (status, page) = node.get(&format!("/node/chat?session={session}&cwd={cwd}&limit=10"));
+    assert_eq!(status, 200, "{page}");
+    let items = page["page"]["items"].as_array().expect("items");
+    let texts: Vec<&str> = items
+        .iter()
+        .filter_map(|item| item["text"].as_str())
+        .collect();
+    assert_eq!(texts, ["fix the build", "done"], "{page}");
+
+    let (status, usage) = node.get(&format!("/node/context?session={session}&cwd={cwd}"));
+    assert_eq!(status, 200, "{usage}");
+    assert_eq!(
+        usage["usage"],
+        json!({ "usedTokens": 2 + 100 + 1000 + 8, "model": "claude-opus-5-5" })
+    );
+
+    let (status, ids) = node.get(&format!("/node/sessions?cwd={cwd}"));
+    assert_eq!(status, 200, "{ids}");
+    assert_eq!(ids["sessions"][0]["id"], session);
+    assert_eq!(
+        ids["sessions"][0]["label"], "",
+        "the hunt's listing opens nothing"
+    );
+    let modified = ids["sessions"][0]["modifiedMs"].as_u64().unwrap();
+    assert!(modified > 0);
+    assert!(ids["now"].as_u64().unwrap() >= modified, "the node's clock");
+    let (status, labelled) = node.get(&format!("/node/sessions?cwd={cwd}&labels=1"));
+    assert_eq!(status, 200, "{labelled}");
+    assert_eq!(labelled["sessions"][0]["id"], session);
+    assert_eq!(labelled["sessions"][0]["label"], "fix the build");
+
+    // What is not a session id, a cursor or a cwd is refused.
+    assert_eq!(
+        node.get(&format!("/node/chat?session=../x&cwd={cwd}")).0,
+        400
+    );
+    assert_eq!(
+        node.get(&format!(
+            "/node/chat?session={session}&cwd={cwd}&before=nope"
+        ))
+        .0,
+        400
+    );
+    assert_eq!(node.get("/node/sessions").0, 400);
+    // Behind the token like every route.
+    let path = format!("/node/sessions?cwd={cwd}");
+    assert_eq!(node.call("GET", &path, None, None).0, 401);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_memory_is_the_node_s_and_its_changes_follow() {
+    let node = Node::start();
+    let mut events = node.socket("/node/events").await;
+    let (status, created) = node.post(
+        "/api/memory?cwd=/w",
+        json!({ "title": "Build", "content": "cargo build", "tags": ["ci"] }),
+    );
+    assert_eq!(status, 200, "{created}");
+    let (status, listed) = node.get("/api/memory");
+    assert_eq!(status, 200, "{listed}");
+    assert_eq!(listed["entries"][0]["title"], "Build");
+    assert!(
+        listed["entries"][0].get("content").is_none(),
+        "core's index"
+    );
+    // The whole store, contents included, for the desktop's view.
+    let (status, whole) = node.get("/node/memory");
+    assert_eq!(status, 200, "{whole}");
+    assert_eq!(whole["entries"][0]["content"], "cargo build");
+    assert_eq!(whole["entries"][0]["tags"], json!(["ci"]));
+    loop {
+        let event = events.next().await.expect("an event");
+        if event["event"] == "memory:changed" {
+            break;
+        }
+    }
 }

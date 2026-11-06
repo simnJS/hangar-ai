@@ -14,6 +14,11 @@
 //!   the same socket;
 //! - `GET /node/events` (WebSocket): core's events (events.rs);
 //! - `GET /node/fs?path=`: a folder's entries (files.rs);
+//! - `GET /node/chat`, `GET /node/context`, `GET /node/sessions`: the Claude
+//!   Code transcripts of the node (transcripts.rs);
+//! - `GET /node/memory`: the node's whole memory, contents included, for the
+//!   desktop's memory view (core's `/api/memory` index leaves them out, and
+//!   its writes are what the view sends);
 //! - `/api/*`: core's own API, relayed (proxy.rs).
 #![cfg(target_os = "linux")]
 
@@ -71,6 +76,10 @@ pub fn router(node: Shared) -> Router {
         .route("/node/panes/{id}/stream", get(stream))
         .route("/node/events", get(events))
         .route("/node/fs", get(fs))
+        .route("/node/chat", get(crate::transcripts::chat))
+        .route("/node/context", get(crate::transcripts::context))
+        .route("/node/sessions", get(crate::transcripts::sessions))
+        .route("/node/memory", get(memory))
         .route("/api/{*rest}", any(relay))
         .layer(middleware::from_fn_with_state(node.clone(), authorize))
         .with_state(node)
@@ -493,6 +502,18 @@ async fn fs(State(node): State<Shared>, Query(query): Query<FsQuery>) -> Respons
             "outside the home directory: ask for an absolute path",
         ),
         Ok(Err(crate::files::Refusal::Unreadable(err))) => error(StatusCode::NOT_FOUND, &err),
+        Err(failed) => failed.into_response(),
+    }
+}
+
+/// The memory as the desktop's memory view draws it: every entry with its
+/// content, in one answer. An unreadable store is an error, never an empty
+/// list: the view says so rather than show a memory that seems blank.
+async fn memory(State(node): State<Shared>) -> Response {
+    let host = node.host.clone();
+    match blocking(move || hangar_core::memory::memory_load(&host)).await {
+        Ok(Ok(memory)) => Json(json!({ "entries": memory.entries })).into_response(),
+        Ok(Err(err)) => error(StatusCode::INTERNAL_SERVER_ERROR, &err),
         Err(failed) => failed.into_response(),
     }
 }
