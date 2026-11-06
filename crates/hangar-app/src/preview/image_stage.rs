@@ -739,8 +739,7 @@ mod tests {
             Size::new(200.0, 200.0),
             iced::Element::from(stage),
         );
-        let dir = std::env::temp_dir().join(format!("hangar-stage-anim-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::kit_tabs::testdir::scratch("stage-anim");
         let iced_theme = iced::Theme::Dark;
         // The clock starts at the first draw: the first frame.
         let first = middle(&ui.snapshot(&iced_theme).unwrap(), &dir, "first");

@@ -456,7 +456,7 @@ mod tests {
 
     #[test]
     fn the_runtime_is_made_with_the_cache_it_was_given_before_it_was_made() {
-        let dir = std::env::temp_dir().join(format!("hangar-kit-runtime-{}", std::process::id()));
+        let dir = crate::kit_tabs::testdir::scratch("kit-runtime");
         let mut runtime = Runtime::default();
         runtime.cache_in(Some(dir.clone()));
         let made = runtime.runtime().expect("an engine");
@@ -483,7 +483,7 @@ mod tests {
 
     #[test]
     fn a_module_that_is_not_webassembly_is_refused_in_words() {
-        let dir = std::env::temp_dir().join(format!("hangar-kit-module-{}", std::process::id()));
+        let dir = crate::kit_tabs::testdir::scratch("kit-module");
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("tab.wasm");
         std::fs::write(&file, b"not a module").unwrap();
@@ -512,7 +512,7 @@ mod tests {
 
     #[test]
     fn a_module_is_read_and_compiled_by_a_job_once_at_a_time() {
-        let dir = std::env::temp_dir().join(format!("hangar-kit-job-{}", std::process::id()));
+        let dir = crate::kit_tabs::testdir::scratch("kit-job");
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("tab.wasm");
         std::fs::write(&file, b"not a module").unwrap();

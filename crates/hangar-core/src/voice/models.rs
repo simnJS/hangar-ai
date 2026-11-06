@@ -385,18 +385,7 @@ mod tests {
     use crate::paths::Paths;
 
     fn temp_dir(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "hangar-voice-models-{tag}-{}-{}",
-            std::process::id(),
-            // Digits only: a SystemTime's Debug form has characters Windows
-            // refuses in a folder name.
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |d| d.as_nanos())
-        ));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        dir
+        crate::testdir::scratch(&format!("voice-models-{tag}"))
     }
 
     const BODY: &[u8] = b"not really a whisper checkpoint";

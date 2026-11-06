@@ -1015,11 +1015,8 @@ fn address(dir: &Path, file: &str) -> String {
 #[tokio::test]
 async fn serves_a_page_from_the_folders_the_preview_may_read_and_nothing_else() {
     let _turn = crate::preview::tests::ROOTS.lock().await;
-    let dir = std::env::temp_dir().join(format!("hangar-webview-serve-{}", std::process::id()));
-    let outside =
-        std::env::temp_dir().join(format!("hangar-webview-outside-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    std::fs::create_dir_all(&outside).unwrap();
+    let dir = crate::kit_tabs::testdir::scratch("webview-serve");
+    let outside = crate::kit_tabs::testdir::scratch("webview-outside");
     std::fs::write(
         dir.join("index.html"),
         "<!doctype html><title>x</title><p>hi</p>",
@@ -1104,8 +1101,7 @@ fn routes_hand_other_windows_events_to_whoever_asked() {
 #[ignore = "needs the helper built with --features engine, and a display"]
 async fn an_html_page_a_pdf_and_a_video_load_through_the_scheme_in_the_real_helper() {
     let _turn = crate::preview::tests::ROOTS.lock().await;
-    let dir = std::env::temp_dir().join(format!("hangar-webview-real-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = crate::kit_tabs::testdir::scratch("webview-real");
     let dir = dir.canonicalize().unwrap();
     let page = dir.join("page.html");
     std::fs::write(
@@ -1194,8 +1190,7 @@ async fn an_html_page_a_pdf_and_a_video_load_through_the_scheme_in_the_real_help
 #[ignore = "needs the helper built with --features engine, and a display"]
 async fn a_video_is_played_from_ranges_in_the_real_helper() {
     let _turn = crate::preview::tests::ROOTS.lock().await;
-    let dir = std::env::temp_dir().join(format!("hangar-webview-video-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = crate::kit_tabs::testdir::scratch("webview-video");
     let dir = dir.canonicalize().unwrap();
     let clip = dir.join("clip.mp4");
     std::fs::write(
@@ -1269,8 +1264,7 @@ async fn a_video_is_played_from_ranges_in_the_real_helper() {
 #[ignore = "needs the helper built with --features engine, and a display"]
 async fn windows_follow_what_is_seen_in_the_real_helper() {
     let _turn = crate::preview::tests::ROOTS.lock().await;
-    let dir = std::env::temp_dir().join(format!("hangar-webview-follow-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = crate::kit_tabs::testdir::scratch("webview-follow");
     let dir = dir.canonicalize().unwrap();
     let copy = |variable: &str, name: &str| {
         let to = dir.join(name);

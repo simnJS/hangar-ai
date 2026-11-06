@@ -447,12 +447,7 @@ mod tests {
     }
 
     fn scratch() -> PathBuf {
-        let root = std::env::temp_dir().join(format!(
-            "hangar-instructions-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
-        fs::create_dir_all(&root).unwrap();
-        root
+        crate::testdir::scratch("instructions")
     }
 
     /// A `CLAUDE.md` and a `.gitignore` that are not UTF-8 (saved as UTF-16 or
@@ -508,11 +503,7 @@ mod tests {
     /// earlier version left in `AGENTS.md` is neither touched nor counted.
     #[test]
     fn the_playbook_goes_to_claude_md_only() {
-        let root = std::env::temp_dir().join(format!(
-            "hangar-instructions-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
-        fs::create_dir_all(&root).unwrap();
+        let root = crate::testdir::scratch("instructions");
         let old = format!("# Notes\n\n{}\n", playbook());
         fs::write(root.join("AGENTS.md"), &old).unwrap();
         let cwd = root.to_string_lossy().into_owned();

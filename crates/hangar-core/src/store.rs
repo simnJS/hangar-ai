@@ -387,10 +387,7 @@ mod tests {
 
     /// A host on a folder of its own, and where its state file is.
     fn host(tag: &str) -> (Host, PathBuf) {
-        let root = std::env::temp_dir().join(format!(
-            "hangar-store-{tag}-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
+        let root = crate::testdir::scratch(&format!("store-{tag}"));
         let host = Host::with_paths(Paths::rooted(&root));
         let path = state_path(&host).expect("a data folder");
         (host, path)
@@ -496,12 +493,7 @@ mod tests {
     }
 
     fn scratch(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "hangar-atomic-{tag}-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
-        fs::create_dir_all(&dir).unwrap();
-        dir
+        crate::testdir::scratch(&format!("atomic-{tag}"))
     }
 
     /// Only the file asked for is in the folder: no temporary one left.

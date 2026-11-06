@@ -273,9 +273,7 @@ mod tests {
     const CLAUDE_SIDECHAIN: &str = r#"{"type":"assistant","isSidechain":true,"message":{"model":"claude-fable-5","usage":{"input_tokens":9,"cache_creation_input_tokens":0,"cache_read_input_tokens":50000,"output_tokens":1,"service_tier":"standard"}}}"#;
 
     fn temp_file(tag: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("hangar-context-{tag}-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(&dir).unwrap();
+        let dir = crate::testdir::scratch(&format!("context-{tag}"));
         dir.join("transcript.jsonl")
     }
 

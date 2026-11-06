@@ -216,12 +216,7 @@ pub(super) mod tests {
 
     /// A remote.json of its own, in a folder no other test uses.
     pub fn scratch_file(tag: &str) -> PathBuf {
-        std::env::temp_dir()
-            .join(format!(
-                "hangar-remote-{tag}-{}",
-                uuid::Uuid::new_v4().simple()
-            ))
-            .join("remote.json")
+        crate::testdir::scratch(&format!("remote-{tag}")).join("remote.json")
     }
 
     #[cfg(unix)]

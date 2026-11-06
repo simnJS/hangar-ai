@@ -215,8 +215,7 @@ struct Granted {
 impl Granted {
     async fn new(name: &str) -> Granted {
         let turn = crate::preview::tests::ROOTS.lock().await;
-        let base = std::env::temp_dir().join(format!("hangar-md-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
+        let base = crate::kit_tabs::testdir::scratch(&format!("md-{name}"));
         let dir = base.join("docs");
         let outside = base.join("elsewhere");
         std::fs::create_dir_all(&dir).unwrap();

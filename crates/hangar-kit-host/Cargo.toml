@@ -32,5 +32,7 @@ base64.workspace = true
 chrono.workspace = true
 
 [dev-dependencies]
+# Scratch folders the tests make, removed when the test ends (panic included).
+tempfile = "3"
 # Drives the widgets that are hangar-ui's as a person would (render/tests.rs).
 iced_test.workspace = true

@@ -599,9 +599,7 @@ mod tests {
     }
 
     fn temp_dir(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("hangar-stats-{tag}-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(&dir).unwrap();
-        dir
+        crate::testdir::scratch(&format!("stats-{tag}"))
     }
 
     fn assistant(id: &str, at: &str, output: u64) -> String {

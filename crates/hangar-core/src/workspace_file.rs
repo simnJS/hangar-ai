@@ -265,7 +265,7 @@ mod tests {
 
     #[test]
     fn a_workspace_file_resolves_to_its_folders() {
-        let dir = std::env::temp_dir().join("hangar-code-workspace-test");
+        let dir = crate::testdir::scratch("code-workspace");
         let present = dir.join("app");
         fs::create_dir_all(&present).unwrap();
         let file = dir.join("demo.code-workspace");

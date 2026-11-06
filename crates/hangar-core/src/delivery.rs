@@ -2655,9 +2655,7 @@ mod tests {
 
     fn repo(tag: &str) -> Repo {
         let unique = uuid::Uuid::new_v4().simple().to_string();
-        let root =
-            std::env::temp_dir().join(format!("hangar-delivery-test-{tag}-{}", &unique[..8]));
-        fs::create_dir_all(&root).unwrap();
+        let root = crate::testdir::scratch(&format!("delivery-test-{tag}"));
         let root = dunce::canonicalize(&root).unwrap();
         let main = root.join("repo");
         fs::create_dir_all(&main).unwrap();
@@ -3521,7 +3519,7 @@ mod tests {
 
     #[test]
     fn only_the_last_trees_that_passed_are_kept() {
-        let dir = std::env::temp_dir().join(format!("hangar-passed-{}", uuid::Uuid::new_v4()));
+        let dir = crate::testdir::scratch("passed");
         let mut request = request(&repo("passed-cap"));
         request.data_dir = Some(dir.to_string_lossy().into_owned());
         for n in 0..PASSED_TREES + 5 {

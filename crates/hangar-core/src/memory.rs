@@ -709,9 +709,7 @@ mod tests {
     use super::*;
 
     fn temp_dir(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("hangar-memory-{tag}-{}", new_id()));
-        fs::create_dir_all(&dir).expect("temp dir");
-        dir
+        crate::testdir::scratch(&format!("memory-{tag}"))
     }
 
     fn fact(title: &str, content: &str) -> NewMemory {

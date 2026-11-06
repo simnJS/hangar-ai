@@ -141,8 +141,7 @@ mod tests {
     #[test]
     fn the_endpoint_file_and_its_folder_are_the_owner_s_alone() {
         use std::os::unix::fs::PermissionsExt;
-        let root =
-            std::env::temp_dir().join(format!("hangar-endpoint-{}", uuid::Uuid::new_v4().simple()));
+        let root = crate::testdir::scratch("endpoint");
         let dir = root.join(".hangar");
         fs::create_dir_all(&dir).unwrap();
         // A folder made by an earlier version, readable by all.

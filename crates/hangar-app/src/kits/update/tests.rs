@@ -15,7 +15,7 @@ use crate::kits::testing::{
 use crate::state::types::{AppState, Pane};
 
 fn env() -> Env {
-    let dir = std::env::temp_dir().join(format!("hangar-kits-update-{}", std::process::id()));
+    let dir = crate::kit_tabs::testdir::scratch("kits-update");
     Env {
         host: Host::with_paths(Paths::rooted(&dir)),
         pty: Arc::new(PtyManager::default()),

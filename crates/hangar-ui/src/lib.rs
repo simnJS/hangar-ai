@@ -109,6 +109,8 @@ pub mod shortcut_field;
 pub mod split;
 pub mod tabs;
 pub mod tail_text;
+#[cfg(test)]
+mod testdir;
 pub mod text;
 pub mod tip;
 pub mod toast;

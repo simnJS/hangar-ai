@@ -1688,11 +1688,7 @@ mod tests {
     // -- real clones -----------------------------------------------------------
 
     fn temp_dir(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "hangar-clone-{tag}-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
-        std::fs::create_dir_all(&dir).expect("temp dir");
+        let dir = crate::testdir::scratch(&format!("clone-{tag}"));
         PathBuf::from(
             std::fs::canonicalize(&dir)
                 .expect("canonical")

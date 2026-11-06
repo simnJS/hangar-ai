@@ -277,16 +277,9 @@ pub fn claude_installed() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_dir(tag: &str) -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or_default();
-        let dir = std::env::temp_dir().join(format!("hangar-sessions-{tag}-{nanos}"));
-        fs::create_dir_all(&dir).expect("temp dir");
-        dir
+        crate::testdir::scratch(&format!("sessions-{tag}"))
     }
 
     /// The case a reset leaves behind: an id Claude Code handed out, and no

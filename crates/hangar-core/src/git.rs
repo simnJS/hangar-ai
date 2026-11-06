@@ -3015,12 +3015,7 @@ mod tests {
     }
 
     fn temp_dir(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "hangar-git-{tag}-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
-        std::fs::create_dir_all(&dir).expect("temp dir");
-        dir
+        crate::testdir::scratch(&format!("git-{tag}"))
     }
 
     fn write(root: &Path, relative: &str, body: &str) {
@@ -4400,8 +4395,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_hook_leaving_a_background_process_holding_its_pipes_still_returns() {
-        let dir = std::env::temp_dir().join(format!("hangar-hook-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::testdir::scratch("hook");
         let started = Instant::now();
         let report = run_hook(
             "echo installed; (sleep 30 &) ; exit 0",

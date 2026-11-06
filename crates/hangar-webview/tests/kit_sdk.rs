@@ -107,8 +107,11 @@ fn serve(request: &SchemeRequest) -> SchemeResponse {
 #[test]
 #[ignore = "opens a window: needs a display"]
 fn a_kit_page_with_the_real_sdk_calls_hangar_through_the_relay_under_its_policy() {
-    let root = std::env::temp_dir().join(format!("hangar-kit-sdk-{}", std::process::id()));
-    std::fs::create_dir_all(&root).unwrap();
+    let scratch = tempfile::Builder::new()
+        .prefix("hangar-kit-sdk-")
+        .tempdir()
+        .unwrap();
+    let root = scratch.path().to_path_buf();
     install(&root);
 
     let (client, events) = Client::spawn(HELPER).unwrap();

@@ -272,8 +272,7 @@ mod stacking {
 
         let mut ui = simulate(Element::from(over));
         let snapshot = ui.snapshot(&iced::Theme::Dark).expect("it draws");
-        let dir = std::env::temp_dir().join(format!("hangar-layer-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::testdir::scratch("layer");
         snapshot
             .matches_image(dir.join("stacked"))
             .expect("written");
@@ -324,8 +323,7 @@ mod stacking {
 
         let mut ui = simulate(Element::from(both));
         let snapshot = ui.snapshot(&iced::Theme::Dark).expect("it draws");
-        let dir = std::env::temp_dir().join(format!("hangar-layer-sib-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::testdir::scratch("layer-sib");
         snapshot
             .matches_image(dir.join("stacked"))
             .expect("written");
@@ -383,8 +381,7 @@ mod shadows {
 
         let mut ui = simulate(Element::from(dock(page, Some(card))));
         let snapshot = ui.snapshot(&iced::Theme::Light).expect("it draws");
-        let dir = std::env::temp_dir().join(format!("hangar-layer-shadow-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::testdir::scratch("layer-shadow");
         snapshot.matches_image(dir.join("shadow")).expect("written");
         let file = std::fs::read_dir(&dir)
             .unwrap()

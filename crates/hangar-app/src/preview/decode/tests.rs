@@ -266,8 +266,7 @@ fn an_avif_is_decoded_to_pixels() {
 
 #[test]
 fn a_file_over_the_cap_is_not_read() {
-    let dir = std::env::temp_dir().join(format!("hangar-decode-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = crate::kit_tabs::testdir::scratch("decode");
     let small = dir.join("small.bin");
     std::fs::write(&small, b"abc").unwrap();
     assert_eq!(read_file(&small).unwrap(), b"abc");
