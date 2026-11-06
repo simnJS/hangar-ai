@@ -107,6 +107,11 @@ pub struct Terminal {
     generation: u64,
     /// The generation at which each visible row last changed.
     row_generation: Vec<u64>,
+    /// How many rows the view has moved down over its content, in all: a
+    /// scroll of the view with nothing else changed moves the rows'
+    /// generations along with it, and the widget moves its cached rows by
+    /// the same amount, so only the rows that came into view are drawn anew.
+    row_shift: i64,
     /// Bumped when the cursor moves or changes shape, so the widget can
     /// restart its blink: a cursor that just moved is always drawn.
     cursor_generation: u64,
@@ -149,6 +154,7 @@ impl Terminal {
             epoch: 1,
             generation: 1,
             row_generation: vec![1; rows],
+            row_shift: 0,
             cursor_generation: 0,
             last_cursor,
             bell_at: None,
@@ -561,23 +567,60 @@ impl Terminal {
                 return;
             }
         };
-        self.term.scroll_display(scroll);
+        self.scroll_view(scroll);
     }
 
     pub(crate) fn set_display_offset(&mut self, offset: usize) {
         let current = self.term.grid().display_offset() as i32;
         let target = offset.min(self.term.history_size()) as i32;
         if target != current {
-            self.term.scroll_display(Scroll::Delta(target - current));
+            self.scroll_view(Scroll::Delta(target - current));
         }
     }
 
     /// Jumps back to the live screen, as typing does.
     pub fn scroll_to_bottom(&mut self) {
-        self.term.scroll_display(Scroll::Bottom);
+        self.scroll_view(Scroll::Bottom);
         // Called from outside `perform` too: the rows must be marked changed
         // here, or the widget keeps drawing the rows of the old offset.
         self.sync_damage();
+    }
+
+    /// Moves the view over the history.
+    ///
+    /// The emulator calls any move of the view a full damage, which would
+    /// have every row drawn anew: a notch of the wheel over a big terminal
+    /// planned its 240 rows again (task bddfd5c6). The content does not
+    /// change, it moves. So what changed before is recorded first, then the
+    /// rows' generations move with the view and only the rows that came into
+    /// sight are marked changed; [`Terminal::row_shift`] tells the widget how
+    /// far its cached rows moved.
+    fn scroll_view(&mut self, scroll: Scroll) {
+        self.sync_damage();
+        let before = self.term.grid().display_offset() as i64;
+        self.term.scroll_display(scroll);
+        let shift = self.term.grid().display_offset() as i64 - before;
+        if shift == 0 {
+            return;
+        }
+        let rows = self.row_generation.len();
+        if shift.unsigned_abs() as usize >= rows {
+            // Nothing in sight stays: `sync_damage` marks every row.
+            return;
+        }
+        let by = shift.unsigned_abs() as usize;
+        self.generation += 1;
+        let generation = self.generation;
+        if shift > 0 {
+            // Further back: the content moves down, older rows come in on top.
+            self.row_generation.rotate_right(by);
+            self.row_generation[..by].fill(generation);
+        } else {
+            self.row_generation.rotate_left(by);
+            self.row_generation[rows - by..].fill(generation);
+        }
+        self.row_shift += shift;
+        self.term.reset_damage();
     }
 
     /// How many lines above the live screen the view is. Zero at the bottom.
@@ -799,6 +842,10 @@ impl Terminal {
 
     pub(crate) fn row_generation(&self, row: usize) -> u64 {
         self.row_generation.get(row).copied().unwrap_or(0)
+    }
+
+    pub(crate) fn row_shift(&self) -> i64 {
+        self.row_shift
     }
 
     pub(crate) fn cursor_generation(&self) -> u64 {
@@ -1103,6 +1150,49 @@ mod tests {
             term.feed(format!("row {i}\r\n").as_bytes());
         }
         assert_eq!(term.history_size(), 5);
+    }
+
+    #[test]
+    fn a_scroll_of_the_view_marks_only_the_rows_that_came_into_sight() {
+        let mut term = terminal(20, 10);
+        for i in 0..100 {
+            term.feed(format!("line {i}\r\n").as_bytes());
+        }
+        let generations =
+            |term: &Terminal| (0..10).map(|r| term.row_generation(r)).collect::<Vec<_>>();
+        let before = generations(&term);
+        term.perform(Action::Scroll(ScrollTo::Lines(3)));
+        let after = generations(&term);
+        assert_eq!(term.row_shift(), 3);
+        // The seven rows still in sight moved down three, generation and all.
+        assert_eq!(after[3..], before[..7]);
+        assert!(after[..3].iter().all(|g| !before.contains(g)));
+        // Back down two: they move up.
+        term.perform(Action::Scroll(ScrollTo::Lines(-2)));
+        assert_eq!(term.row_shift(), 1);
+        assert_eq!(generations(&term)[..8], after[2..]);
+        // Further than a screen: every row is new.
+        let before = generations(&term);
+        term.perform(Action::Scroll(ScrollTo::Lines(40)));
+        assert!(generations(&term).iter().all(|g| !before.contains(g)));
+        // Back to the live screen, as typing does.
+        term.scroll_to_bottom();
+        assert_eq!(term.display_offset(), 0);
+    }
+
+    #[test]
+    fn output_while_scrolled_back_still_marks_the_rows_it_changed() {
+        let mut term = terminal(20, 10);
+        for i in 0..100 {
+            term.feed(format!("line {i}\r\n").as_bytes());
+        }
+        term.perform(Action::Scroll(ScrollTo::Lines(3)));
+        let before: Vec<u64> = (0..10).map(|r| term.row_generation(r)).collect();
+        let shift = term.row_shift();
+        term.feed(b"more\r\n");
+        // Not a move of the view: no shift, and the rows are marked.
+        assert_eq!(term.row_shift(), shift);
+        assert!((0..10).all(|r| term.row_generation(r) != before[r]));
     }
 
     #[test]
