@@ -19,6 +19,7 @@ Every release, with its installers, is on the
 
 ### Changed
 
+- In the chat view, the hidden terminals start their shells at once instead of waiting for a size they never get: a workspace in the chat view is ready in 0.38 s instead of 0.66 s.
 - Terminal output is parsed faster (+6 % on a listing, +8 % on an agent's interface): the scan for title and link sequences skips plain text in one search.
 
 ### Fixed
