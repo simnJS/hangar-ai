@@ -20,6 +20,7 @@ Every release, with its installers, is on the
 ### Changed
 
 - Released builds use link-time optimization across the whole program, rarely used code is built for size and unused image codecs are left out: Hangar's executable is 44 % smaller (119 → 67 MB, hangar-node 17 → 10 MB) and parses terminal output a few percent faster. TIFF and ICO images no longer show in kit tabs.
+- At rest, the panes no longer wake the window several times a second: about once every 20 s (43 wake-ups a minute → 3 with a shell pane), and Hangar's CPU at rest falls by about 40 %.
 - Drawing costs half as much or less: a busy terminal 0.97 → 0.48 ms a frame, 16 printing panes 2.7 → 1.3 ms, scrolling back through history 4 → 1 ms (a scroll plans only the rows that came into sight), selection 3.9 → 0.9 ms, the statistics view 1.8 → 0.95 ms. The terminals' lock no longer makes the window wait behind panes that print.
 - Output from panes that are not on screen no longer makes Hangar rebuild and redraw its window 60 times a second: with eight agents printing, Hangar's CPU falls from 8.1 % to 2.9 % in the chat view and from 6.4 % to 5.8 % in the panes view.
 - On relaunch, the next wave of resumed sessions starts as soon as the previous one is under way (its agent printed and went quiet) instead of a fixed 2 s later: eight sessions in the chat view are all back in 3.2 s instead of 9.1 s. Agents that keep printing still hold the next wave as long as before.
