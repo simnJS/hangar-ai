@@ -8,6 +8,7 @@ use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use axum::serve::ListenerExt;
 use hangar_core::Host;
 
 use crate::state::{self, NodeFile};
@@ -88,6 +89,11 @@ async fn run(
         std::process::id()
     );
     let app = crate::api::router(node.clone());
+    // A key's echo is a few bytes: sent at once, not held back by Nagle's
+    // algorithm until the last segment is acknowledged.
+    let listener = listener.tap_io(|tcp| {
+        let _ = tcp.set_nodelay(true);
+    });
     axum::serve(listener, app)
         .with_graceful_shutdown(stopped())
         .await

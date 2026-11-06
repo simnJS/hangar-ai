@@ -28,6 +28,19 @@ pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// far below it.
 const MAX_MESSAGE: usize = 16 * 1024 * 1024;
 
+/// Room made in a socket's buffer before each read: a flood comes in frames
+/// of up to 64 KiB (hangar-node's `panes::BATCH_BYTES`).
+const READ_ROOM: usize = 128 * 1024;
+
+/// A connection to the node: a key's echo, a few bytes, is sent at once
+/// rather than held back by Nagle's algorithm until the last segment is
+/// acknowledged.
+async fn connect(host: &str) -> std::io::Result<TcpStream> {
+    let stream = TcpStream::connect(host).await?;
+    stream.set_nodelay(true)?;
+    Ok(stream)
+}
+
 /// An answer of the node, whatever its status.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Answer {
@@ -113,9 +126,7 @@ async fn exchange(
     body: Option<&Value>,
 ) -> Result<Answer, String> {
     let host = authority(client)?;
-    let mut stream = TcpStream::connect(host)
-        .await
-        .map_err(|err| err.to_string())?;
+    let mut stream = connect(host).await.map_err(|err| err.to_string())?;
     let payload = body.map(Value::to_string).unwrap_or_default();
     let mut head = format!(
         "{method} {path} HTTP/1.1\r\nHost: {host}\r\nAuthorization: Bearer {}\r\n\
@@ -126,12 +137,10 @@ async fn exchange(
         head.push_str("Content-Type: application/json\r\n");
     }
     head.push_str(&format!("Content-Length: {}\r\n\r\n", payload.len()));
+    // One write: the head and the body in one segment.
+    head.push_str(&payload);
     stream
         .write_all(head.as_bytes())
-        .await
-        .map_err(|err| err.to_string())?;
-    stream
-        .write_all(payload.as_bytes())
         .await
         .map_err(|err| err.to_string())?;
     let mut raw = Vec::new();
@@ -208,8 +217,10 @@ pub enum Incoming {
 #[derive(Debug)]
 pub struct Socket {
     stream: TcpStream,
-    /// What was read and not parsed into a frame yet.
+    /// What was read; the frames before `at` are parsed already (dropped at
+    /// the next read, so a buffer of many frames is not shifted once each).
     buf: Vec<u8>,
+    at: usize,
     /// A message whose fragments are still coming: its opcode and bytes.
     partial: Option<(u8, Vec<u8>)>,
     /// Pongs owed, sent by [`Socket::flush`].
@@ -219,19 +230,36 @@ pub struct Socket {
 impl Socket {
     /// Opens `path` on the node as a WebSocket.
     pub async fn connect(client: &NodeClient, path: &str) -> Result<Socket, WsError> {
-        tokio::time::timeout(REQUEST_TIMEOUT, Self::handshake(client, path))
+        Self::connect_offering(client, path, None).await
+    }
+
+    /// [`Socket::connect`], offering subprotocol `protocol`: a node that
+    /// does not know it picks none, and the socket opens all the same.
+    pub async fn connect_offering(
+        client: &NodeClient,
+        path: &str,
+        protocol: Option<&str>,
+    ) -> Result<Socket, WsError> {
+        tokio::time::timeout(REQUEST_TIMEOUT, Self::handshake(client, path, protocol))
             .await
             .map_err(|_| WsError::Io(format!("{path}: no answer")))?
     }
 
-    async fn handshake(client: &NodeClient, path: &str) -> Result<Socket, WsError> {
+    async fn handshake(
+        client: &NodeClient,
+        path: &str,
+        protocol: Option<&str>,
+    ) -> Result<Socket, WsError> {
         let host = authority(client).map_err(WsError::Io)?;
-        let mut stream = TcpStream::connect(host).await.map_err(io)?;
+        let mut stream = connect(host).await.map_err(io)?;
         let key = base64::engine::general_purpose::STANDARD.encode(uuid::Uuid::new_v4().as_bytes());
+        let offer = protocol
+            .map(|protocol| format!("Sec-WebSocket-Protocol: {protocol}\r\n"))
+            .unwrap_or_default();
         let request = format!(
             "GET {path} HTTP/1.1\r\nHost: {host}\r\nAuthorization: Bearer {}\r\n\
              Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\n\
-             Sec-WebSocket-Version: 13\r\n\r\n",
+             Sec-WebSocket-Version: 13\r\n{offer}\r\n",
             client.token
         );
         stream.write_all(request.as_bytes()).await.map_err(io)?;
@@ -265,6 +293,7 @@ impl Socket {
         Ok(Socket {
             stream,
             buf: buf[end + 4..].to_vec(),
+            at: 0,
             partial: None,
             pongs: Vec::new(),
         })
@@ -274,6 +303,11 @@ impl Socket {
     /// one `read_buf`), so it goes into a `select!` beside the sending side.
     /// `false` once the node closed the connection.
     pub async fn fill(&mut self) -> Result<bool, WsError> {
+        // Dropping what was parsed and making room cancels nothing: the
+        // bytes not parsed stay, at the front.
+        self.buf.drain(..self.at);
+        self.at = 0;
+        self.buf.reserve(READ_ROOM);
         let read = self.stream.read_buf(&mut self.buf).await.map_err(io)?;
         Ok(read > 0)
     }
@@ -282,9 +316,16 @@ impl Socket {
     /// answered at the next [`Socket::flush`].
     pub fn next(&mut self) -> Result<Option<Incoming>, WsError> {
         loop {
-            let Some((fin, opcode, payload)) = parse_frame(&mut self.buf)? else {
+            let Some(Frame {
+                fin,
+                opcode,
+                payload,
+                used,
+            }) = frame_at(&self.buf[self.at..])?
+            else {
                 return Ok(None);
             };
+            self.at += used;
             match opcode {
                 0x8 => return Ok(Some(Incoming::Close)),
                 0x9 => self.pongs.push(payload),
@@ -372,8 +413,29 @@ pub fn client_frame(opcode: u8, payload: &[u8], key: [u8; 4]) -> Vec<u8> {
 }
 
 /// One frame off the front of `buf`, when it is all there: whether it is
-/// final, its opcode and its payload, unmasked.
+/// final, its opcode and its payload, unmasked. (The tests' fake node reads
+/// the desktop's frames with it.)
+#[cfg(test)]
 pub fn parse_frame(buf: &mut Vec<u8>) -> Result<Option<(bool, u8, Vec<u8>)>, WsError> {
+    let Some(frame) = frame_at(buf)? else {
+        return Ok(None);
+    };
+    buf.drain(..frame.used);
+    Ok(Some((frame.fin, frame.opcode, frame.payload)))
+}
+
+/// A frame read off a buffer.
+struct Frame {
+    fin: bool,
+    opcode: u8,
+    /// Unmasked.
+    payload: Vec<u8>,
+    /// The bytes it took in the buffer.
+    used: usize,
+}
+
+/// The frame at the front of `buf`, when it is all there.
+fn frame_at(buf: &[u8]) -> Result<Option<Frame>, WsError> {
     if buf.len() < 2 {
         return Ok(None);
     }
@@ -420,6 +482,10 @@ pub fn parse_frame(buf: &mut Vec<u8>) -> Result<Option<(bool, u8, Vec<u8>)>, WsE
             *byte ^= key[i % 4];
         }
     }
-    buf.drain(..at + len);
-    Ok(Some((fin, opcode, payload)))
+    Ok(Some(Frame {
+        fin,
+        opcode,
+        payload,
+        used: at + len,
+    }))
 }

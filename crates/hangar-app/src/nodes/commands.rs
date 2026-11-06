@@ -124,6 +124,12 @@ pub fn read_node_json(node: &NodeConfig) -> Cmd {
 /// Step 5: the node's API on `local` here, kept open by the runner. It exits
 /// if the forward cannot be set up rather than lingering without it, and
 /// notices a dead link within a minute.
+///
+/// What it carries is the panes' keys and echoes: marked interactive
+/// (`IPQoS=af21`) whereas ssh marks a session with no terminal as bulk
+/// (`cs1`, which Wi-Fi queues as background), and not compressed whatever
+/// the person's config says for their own sessions (zlib on every few-byte
+/// frame, at both ends).
 pub fn tunnel(node: &NodeConfig, local: u16, remote: u16) -> Cmd {
     Cmd::new("ssh")
         .args(common(node))
@@ -134,6 +140,10 @@ pub fn tunnel(node: &NodeConfig, local: u16, remote: u16) -> Cmd {
             "ServerAliveInterval=15",
             "-o",
             "ServerAliveCountMax=3",
+            "-o",
+            "IPQoS=af21",
+            "-o",
+            "Compression=no",
             "-N",
             "-L",
         ])

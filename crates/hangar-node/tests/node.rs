@@ -164,6 +164,11 @@ impl Node {
     }
 
     async fn socket(&self, path: &str) -> Socket {
+        self.socket_with(path, None).await
+    }
+
+    /// A socket offering `protocol` (`Sec-WebSocket-Protocol`).
+    async fn socket_with(&self, path: &str, protocol: Option<&str>) -> Socket {
         let mut request = format!("ws://127.0.0.1:{}{path}", self.port)
             .into_client_request()
             .unwrap();
@@ -171,10 +176,16 @@ impl Node {
             "authorization",
             format!("Bearer {}", self.token).parse().unwrap(),
         );
+        if let Some(protocol) = protocol {
+            request
+                .headers_mut()
+                .insert("sec-websocket-protocol", protocol.parse().unwrap());
+        }
         let (socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
         Socket {
             socket,
             frames: Vec::new(),
+            binary: 0,
         }
     }
 }
@@ -207,6 +218,8 @@ struct Socket {
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
     >,
     frames: Vec<Value>,
+    /// How many of them came as binary frames (`hangar-binary`).
+    binary: usize,
 }
 
 impl Socket {
@@ -227,6 +240,16 @@ impl Socket {
                 Message::Text(text) => {
                     let frame: Value = serde_json::from_str(text.as_str()).unwrap();
                     self.frames.push(frame.clone());
+                    return Some(frame);
+                }
+                // The seq in 8 bytes, big-endian, then the data: kept as
+                // the JSON frame it stands for.
+                Message::Binary(bytes) => {
+                    let seq = u64::from_be_bytes(bytes[..8].try_into().unwrap());
+                    let data = std::str::from_utf8(&bytes[8..]).unwrap();
+                    let frame = json!({ "seq": seq, "data": data });
+                    self.frames.push(frame.clone());
+                    self.binary += 1;
                     return Some(frame);
                 }
                 Message::Close(_) => return None,
@@ -404,6 +427,62 @@ async fn input_comes_back_and_history_replays_from_a_seq() {
     let mut whole = node.socket("/node/panes/p-cat/stream?from=0").await;
     whole.until("beta", 2).await;
     assert!(whole.text().starts_with("alpha"), "{:?}", whole.text());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stream_that_asks_gets_its_output_in_binary_frames() {
+    let node = Node::start();
+    node.spawn("p-bin", "exec cat");
+    let mut stream = node
+        .socket_with("/node/panes/p-bin/stream?from=0", Some("hangar-binary"))
+        .await;
+    stream.send(json!({ "input": "é\u{1b}[1malpha\n" })).await;
+    // The terminal echoes the escape as `^[`; cat gives it back as is.
+    stream.until("é\u{1b}[1malpha", 1).await;
+    assert!(stream.binary > 0);
+    assert_eq!(stream.binary, stream.frames.len(), "{:?}", stream.frames);
+    // Its end stays JSON.
+    assert_eq!(node.delete("/node/panes/p-bin").0, 200);
+    assert_eq!(
+        stream.until_exit().await,
+        json!({ "exit": { "code": null } })
+    );
+
+    // Without the subprotocol (an older desktop), JSON as before.
+    node.spawn("p-text", "echo hi; exec sleep 60");
+    let mut text = node.socket("/node/panes/p-text/stream?from=0").await;
+    text.until("hi", 1).await;
+    assert_eq!(text.binary, 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_flood_replays_in_few_frames() {
+    let node = Node::start();
+    // Lines, read off the PTY a few at a time: tens of thousands of chunks.
+    node.spawn("p-lines", "seq 1 100000; echo flooded; exec sleep 60");
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        let seq = node.pane("p-lines").unwrap()["seq"].as_u64().unwrap();
+        if seq > 688_000 {
+            break;
+        }
+        assert!(Instant::now() < deadline, "only {seq} bytes");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let mut stream = node
+        .socket_with("/node/panes/p-lines/stream?from=0", Some("hangar-binary"))
+        .await;
+    stream.until("flooded", 1).await;
+    let text = stream.text();
+    assert!(text.contains("\r\n99999\r\n100000\r\n"));
+    // Chunks joined up to 16 KiB in the history: 700 KB in about 45 frames.
+    assert!(
+        stream.frames.len() <= 100,
+        "{} frames for {} bytes",
+        stream.frames.len(),
+        text.len()
+    );
+    assert_eq!(node.delete("/node/panes/p-lines").0, 200);
 }
 
 #[tokio::test(flavor = "multi_thread")]
