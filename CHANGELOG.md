@@ -29,6 +29,7 @@ Every release, with its installers, is on the
 
 ### Fixed
 
+- A Hangar started in a folder inside a worktree no longer removes other workers' worktrees: the sweep of orphan worktrees at start only removes the worktree of a task that is done, and never one a live process works in; landing a delivery and stopping a worker keep a folder another pane or process uses.
 - Kits, Windows: removing a kit's clone folder retries for a moment when a git process that was just stopped still holds it, instead of failing.
 - Tests remove the temporary folders they create, even when they fail; a full test run used to leave thousands behind in `/tmp`.
 
