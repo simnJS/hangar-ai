@@ -47,17 +47,19 @@ fn answered<T: Serialize>(outcome: Result<T, String>) -> Response {
     }
 }
 
-/// A body's path that must be there and absolute: the node's helpers run
-/// from the daemon's own folder, where a relative path means nothing the
-/// desktop meant.
-fn absolute(name: &str, path: &str) -> Result<(), Response> {
-    if path.trim().is_empty() || !std::path::Path::new(path).is_absolute() {
-        return Err(error(
-            StatusCode::BAD_REQUEST,
-            &format!("{name} must be an absolute path on the node"),
-        ));
-    }
-    Ok(())
+/// The first of `paths` that is not absolute, refused: the node's helpers
+/// run from the daemon's own folder, where a relative path means nothing
+/// the desktop meant.
+fn not_absolute(paths: &[(&str, &str)]) -> Option<Response> {
+    paths
+        .iter()
+        .find(|(_, path)| path.trim().is_empty() || !std::path::Path::new(path).is_absolute())
+        .map(|(name, _)| {
+            error(
+                StatusCode::BAD_REQUEST,
+                &format!("{name} must be an absolute path on the node"),
+            )
+        })
 }
 
 #[derive(Deserialize)]
@@ -78,7 +80,7 @@ fn yes() -> bool {
 }
 
 pub async fn worktree_add(Json(body): Json<AddBody>) -> Response {
-    if let Err(refused) = absolute("repo", &body.repo).and(absolute("path", &body.path)) {
+    if let Some(refused) = not_absolute(&[("repo", &body.repo), ("path", &body.path)]) {
         return refused;
     }
     if body.branch.trim().is_empty() {
@@ -105,7 +107,7 @@ pub struct RemoveBody {
 }
 
 pub async fn worktree_remove(Json(body): Json<RemoveBody>) -> Response {
-    if let Err(refused) = absolute("repo", &body.repo).and(absolute("path", &body.path)) {
+    if let Some(refused) = not_absolute(&[("repo", &body.repo), ("path", &body.path)]) {
         return refused;
     }
     answered(hangar_core::git::git_worktree_remove(body.repo, body.path, body.force, None).await)
@@ -121,7 +123,7 @@ pub struct HookBody {
 /// The workspace's `postCreate`, which the person wrote in its settings, run
 /// in the worktree just made — as the desktop runs it for a local one.
 pub async fn worktree_hook(Json(body): Json<HookBody>) -> Response {
-    if let Err(refused) = absolute("repo", &body.repo).and(absolute("path", &body.path)) {
+    if let Some(refused) = not_absolute(&[("repo", &body.repo), ("path", &body.path)]) {
         return refused;
     }
     answered(hangar_core::git::git_worktree_hook(body.repo, body.path, Some(body.command)).await)
@@ -135,7 +137,7 @@ pub struct CopyBody {
 }
 
 pub async fn worktree_copy(Json(body): Json<CopyBody>) -> Response {
-    if let Err(refused) = absolute("from", &body.from).and(absolute("to", &body.to)) {
+    if let Some(refused) = not_absolute(&[("from", &body.from), ("to", &body.to)]) {
         return refused;
     }
     answered(
@@ -152,7 +154,7 @@ pub struct BranchBody {
 }
 
 pub async fn branch_delete(Json(body): Json<BranchBody>) -> Response {
-    if let Err(refused) = absolute("repo", &body.repo) {
+    if let Some(refused) = not_absolute(&[("repo", &body.repo)]) {
         return refused;
     }
     answered(hangar_core::git::git_branch_delete(body.repo, body.branch, body.force).await)

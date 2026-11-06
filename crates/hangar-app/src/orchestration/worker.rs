@@ -1042,10 +1042,12 @@ async fn start_steps(
         target: target.as_deref(),
         worktree: tree.as_ref().map(|(_, path)| path.as_str()),
         port_base: start.port_base,
+        // The shared build cache is this machine's: a worker on a node has
+        // none (its folder is not this machine's to look into).
         build_cache: hangar_core::build_cache::env_for(
             std::path::Path::new(&ws.cwd),
             &ws.id,
-            settings.shared_build_cache,
+            settings.shared_build_cache && ws.node.is_none(),
         )
         .into_iter()
         .map(|(name, _)| name)

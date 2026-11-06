@@ -416,6 +416,18 @@ fn frame(
 /// included (some were lost: what they would have refreshed is read again).
 pub async fn follow_events(
     node: String,
+    emit: impl FnMut(Value),
+    backoff: Backoff,
+    resolve: impl Fn(&str) -> Option<NodeClient>,
+) {
+    follow_events_at(node, "/node/events", emit, backoff, resolve).await;
+}
+
+/// [`follow_events`] on `path`: `/node/events?control=1` for the desktop
+/// that drives the node's orchestration, whose control requests it answers.
+pub async fn follow_events_at(
+    node: String,
+    path: &str,
     mut emit: impl FnMut(Value),
     backoff: Backoff,
     resolve: impl Fn(&str) -> Option<NodeClient>,
@@ -423,7 +435,7 @@ pub async fn follow_events(
     let mut wait = backoff.first;
     loop {
         if let Some(client) = resolve(&node)
-            && let Ok(mut socket) = Socket::connect(&client, "/node/events").await
+            && let Ok(mut socket) = Socket::connect(&client, path).await
         {
             wait = backoff.first;
             // What changed while it was not followed is unknown.

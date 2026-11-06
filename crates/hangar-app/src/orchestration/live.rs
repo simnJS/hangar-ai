@@ -3,6 +3,12 @@
 //! model writes, which P18's `control::update` applies on the UI thread
 //! (`Message::Control(control::Msg::Model(cmd, answer))`, PACKAGES.md,
 //! rule 6).
+//!
+//! A workspace on a node (`Workspace.node`) is the node's to act on: its
+//! git, its board, its panes' queues and its memory go through the node's
+//! API (`nodes::engine`), never this machine's disk. The port the runtime
+//! makes for one workspace's operation knows its node (`LivePort::on`);
+//! the ports of the engines' rounds find it from the folder or the pane.
 
 use std::sync::{Arc, Mutex};
 
@@ -33,6 +39,18 @@ use crate::state::{PaneActivity, PanePatch, Snapshot};
 #[derive(Clone, Debug)]
 pub struct LivePort {
     handle: OrchestrationHandle,
+    /// The node of the workspace this port acts for, when it is a remote
+    /// one: everything it does lands there.
+    node: Option<String>,
+}
+
+/// The boards of the remote workspaces, as last read from their nodes, by
+/// folder: what the engines' synchronous reads see (`EngineIo::load_board`),
+/// read again before each of their rounds (`refresh_remote_boards`).
+fn remote_boards() -> &'static Mutex<std::collections::HashMap<String, Vec<Task>>> {
+    static BOARDS: std::sync::OnceLock<Mutex<std::collections::HashMap<String, Vec<Task>>>> =
+        std::sync::OnceLock::new();
+    BOARDS.get_or_init(Default::default)
 }
 
 /// `f` on Tokio's blocking pool: board files and the memory are read there.
@@ -84,17 +102,71 @@ fn sweep_leftovers_once(folders: Vec<String>) {
 
 impl LivePort {
     pub(super) fn new(handle: OrchestrationHandle) -> Self {
-        let port = LivePort { handle };
+        let port = LivePort { handle, node: None };
+        // A remote workspace's folder is a path on its node: nothing of
+        // this machine's to sweep.
         sweep_leftovers_once(
             port.snapshot()
                 .state
                 .workspaces
                 .iter()
+                .filter(|ws| ws.node.is_none())
                 .map(|ws| ws.cwd.clone())
                 .filter(|cwd| !cwd.is_empty())
                 .collect(),
         );
         port
+    }
+
+    /// The port for an operation on a workspace of node `node` (`None`: a
+    /// local one).
+    pub(super) fn on(handle: OrchestrationHandle, node: Option<String>) -> Self {
+        LivePort {
+            node,
+            ..LivePort::new(handle)
+        }
+    }
+
+    /// The node `cwd` is on: this port's, else the remote workspace that
+    /// has that folder.
+    fn node_for(&self, cwd: &str) -> Option<String> {
+        self.node
+            .clone()
+            .or_else(|| crate::nodes::engine::node_of_cwd(&self.snapshot().state, cwd))
+    }
+
+    /// The node pane `pane` runs on.
+    fn node_of_pane(&self, pane: &str) -> Option<String> {
+        crate::nodes::engine::node_of_pane(&self.snapshot().state, pane)
+    }
+
+    /// The client of node `node`, or why there is none.
+    fn client(node: &str) -> Result<crate::nodes::NodeClient, String> {
+        crate::nodes::remote::client_of(node)
+    }
+
+    /// The remote boards among `cwds` read from their nodes, for the
+    /// engines' round about to read them. Called on the blocking pool only
+    /// (the runtime's `with_engines`): it waits on the nodes.
+    pub(super) fn refresh_remote_boards(&self, cwds: &[String]) {
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let state = self.snapshot().state.clone();
+        for cwd in cwds {
+            let Some(node) = crate::nodes::engine::node_of_cwd(&state, cwd) else {
+                continue;
+            };
+            let Ok(client) = Self::client(&node) else {
+                continue;
+            };
+            if let Ok(tasks) = runtime.block_on(crate::board::actions::read_remote(&client, cwd)) {
+                remote_boards()
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .insert(cwd.clone(), tasks);
+            }
+        }
     }
 
     fn snapshot(&self) -> Arc<Snapshot> {
@@ -127,13 +199,75 @@ impl LivePort {
             .send(Message::Control(crate::control::Msg::Model(cmd, answer)));
     }
 
+    /// Queued for the pane's session: on its node for a remote pane (in
+    /// the background: nothing waits on a queue), here otherwise.
     fn enqueue_now(&self, pane: &str, text: &str, from: &str) {
+        if let Some(node) = self.node_of_pane(pane) {
+            let (pane, text, from) = (pane.to_string(), text.to_string(), from.to_string());
+            if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                runtime.spawn(async move {
+                    let sent = match Self::client(&node) {
+                        Ok(client) => {
+                            crate::nodes::engine::enqueue(&client, &pane, &text, Some(&from)).await
+                        }
+                        Err(error) => Err(error),
+                    };
+                    if let Err(error) = sent {
+                        eprintln!("a message for {pane} did not reach node {node}: {error}");
+                    }
+                });
+            }
+            return;
+        }
         hangar_core::bridge::bridge_enqueue(
             &self.host(),
             pane.into(),
             text.into(),
             Some(from.into()),
         );
+    }
+
+    /// Queued for the pane's session, once there: what a worker's start
+    /// waits for (its brief).
+    async fn enqueue_waited(&self, pane: &str, text: &str, from: &str) -> Result<(), String> {
+        match self.node_of_pane(pane) {
+            Some(node) => {
+                crate::nodes::engine::enqueue(&Self::client(&node)?, pane, text, Some(from)).await
+            }
+            None => {
+                self.enqueue_now(pane, text, from);
+                Ok(())
+            }
+        }
+    }
+
+    async fn board_tasks(&self, cwd: &str) -> Result<Vec<Task>, String> {
+        if let Some(node) = self.node_for(cwd) {
+            return crate::board::actions::read_remote(&Self::client(&node)?, cwd).await;
+        }
+        let cwd = cwd.to_string();
+        blocking(move || hangar_core::board_load(cwd).tasks).await
+    }
+
+    /// The memory of this port's node, or this machine's: what a remote
+    /// pane's briefing gives it is the node's own.
+    async fn memory(&self) -> Result<Vec<MemoryEntry>, String> {
+        if let Some(node) = &self.node {
+            return crate::memory::remote::load(&Self::client(node)?).await;
+        }
+        let host = self.host();
+        blocking(move || hangar_core::memory::memory_load(&host).map(|memory| memory.entries))
+            .await?
+    }
+
+    async fn repo(&self, cwd: &str) -> RepoInfo {
+        match self.node_for(cwd) {
+            Some(node) => match Self::client(&node) {
+                Ok(client) => crate::nodes::engine::repo_info(&client, cwd).await,
+                Err(_) => RepoInfo::default(),
+            },
+            None => hangar_core::git::git_repo_info(cwd.into()).await,
+        }
     }
 }
 
@@ -147,6 +281,14 @@ impl EngineIo for LivePort {
     }
 
     fn load_board(&self, cwd: &str) -> Result<Vec<Task>, String> {
+        if self.node_for(cwd).is_some() {
+            return remote_boards()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .get(cwd)
+                .cloned()
+                .ok_or_else(|| format!("the board of {cwd} was not read from its node yet"));
+        }
         Ok(hangar_core::board_load(cwd.into()).tasks)
     }
 
@@ -237,9 +379,13 @@ impl WorkerPort for LivePort {
     /// the panes' readers hold, and an async thread waiting on it stalls
     /// every task scheduled behind it.
     async fn kill_pane(&self, pane: &str) -> Result<(), String> {
-        // A pane of a remote workspace is its node's to kill.
+        // A pane of a remote workspace is its node's to kill, mounted here
+        // or not yet.
         if let Some(killed) = crate::nodes::remote::kill_pane(pane).await {
             return killed;
+        }
+        if let Some(node) = self.node_of_pane(pane) {
+            return crate::nodes::remote::kill(&Self::client(&node)?, pane).await;
         }
         let (pty, pane) = (
             self.handle.services().core().pty().clone(),
@@ -255,6 +401,9 @@ impl WorkerPort for LivePort {
         if let Some(alive) = crate::nodes::remote::alive(pane) {
             return alive;
         }
+        if self.node_of_pane(pane).is_some() {
+            return false;
+        }
         let (pty, pane) = (
             self.handle.services().core().pty().clone(),
             pane.to_string(),
@@ -265,11 +414,16 @@ impl WorkerPort for LivePort {
     }
 
     async fn enqueue(&self, pane: &str, text: &str, from: &str) -> Result<(), String> {
-        self.enqueue_now(pane, text, from);
-        Ok(())
+        self.enqueue_waited(pane, text, from).await
     }
 
     async fn dir_exists(&self, path: &str) -> bool {
+        if let Some(node) = self.node_for(path) {
+            return match Self::client(&node) {
+                Ok(client) => crate::nodes::engine::dir_exists(&client, path).await,
+                Err(_) => false,
+            };
+        }
         let path = path.to_string();
         blocking(move || hangar_core::store::dir_exists(path))
             .await
@@ -281,8 +435,7 @@ impl WorkerPort for LivePort {
     }
 
     async fn board_load(&self, cwd: &str) -> Result<Vec<Task>, String> {
-        let cwd = cwd.to_string();
-        blocking(move || hangar_core::board_load(cwd).tasks).await
+        self.board_tasks(cwd).await
     }
 
     async fn claim(
@@ -292,6 +445,16 @@ impl WorkerPort for LivePort {
         worker: &str,
         shared_folder: bool,
     ) -> Result<Task, String> {
+        if let Some(node) = self.node_for(cwd) {
+            return crate::nodes::engine::claim_worker(
+                &Self::client(&node)?,
+                cwd,
+                id,
+                worker,
+                shared_folder,
+            )
+            .await;
+        }
         let (host, cwd, id, worker) = (
             self.host(),
             cwd.to_string(),
@@ -305,6 +468,16 @@ impl WorkerPort for LivePort {
     }
 
     async fn release(&self, cwd: &str, id: &str, worker: &str, undo: bool) -> Result<Task, String> {
+        if let Some(node) = self.node_for(cwd) {
+            return crate::nodes::engine::release_worker(
+                &Self::client(&node)?,
+                cwd,
+                id,
+                worker,
+                undo,
+            )
+            .await;
+        }
         let (host, cwd, id, worker) = (
             self.host(),
             cwd.to_string(),
@@ -315,10 +488,13 @@ impl WorkerPort for LivePort {
     }
 
     async fn repo_info(&self, path: &str) -> RepoInfo {
-        hangar_core::git::git_repo_info(path.into()).await
+        self.repo(path).await
     }
 
     async fn worktree_list(&self, path: &str) -> Result<Vec<Worktree>, String> {
+        if let Some(node) = self.node_for(path) {
+            return crate::nodes::engine::worktree_list(&Self::client(&node)?, path).await;
+        }
         hangar_core::git::git_worktree_list(path.into()).await
     }
 
@@ -330,6 +506,17 @@ impl WorkerPort for LivePort {
         create_branch: bool,
         base_ref: Option<&str>,
     ) -> Result<(), String> {
+        if let Some(node) = self.node_for(path) {
+            return crate::nodes::engine::worktree_add(
+                &Self::client(&node)?,
+                path,
+                worktree_path,
+                branch,
+                create_branch,
+                base_ref,
+            )
+            .await;
+        }
         hangar_core::git::git_worktree_add(
             path.into(),
             worktree_path.into(),
@@ -348,6 +535,15 @@ impl WorkerPort for LivePort {
         worktree_path: &str,
         force: bool,
     ) -> Result<RemoveResult, String> {
+        if let Some(node) = self.node_for(path) {
+            return crate::nodes::engine::worktree_remove(
+                &Self::client(&node)?,
+                path,
+                worktree_path,
+                force,
+            )
+            .await;
+        }
         hangar_core::git::git_worktree_remove(path.into(), worktree_path.into(), force, None).await
     }
 
@@ -357,6 +553,15 @@ impl WorkerPort for LivePort {
         worktree_path: &str,
         command: &str,
     ) -> Result<Option<HookReport>, String> {
+        if let Some(node) = self.node_for(path) {
+            return crate::nodes::engine::worktree_hook(
+                &Self::client(&node)?,
+                path,
+                worktree_path,
+                command,
+            )
+            .await;
+        }
         hangar_core::git::git_worktree_hook(path.into(), worktree_path.into(), Some(command.into()))
             .await
     }
@@ -367,6 +572,10 @@ impl WorkerPort for LivePort {
         branch: &str,
         force: bool,
     ) -> Result<DeleteBranchResult, String> {
+        if let Some(node) = self.node_for(path) {
+            return crate::nodes::engine::branch_delete(&Self::client(&node)?, path, branch, force)
+                .await;
+        }
         hangar_core::git::git_branch_delete(path.into(), branch.into(), force).await
     }
 
@@ -376,15 +585,26 @@ impl WorkerPort for LivePort {
         to: &str,
         patterns: &[&str],
     ) -> Result<CopyResult, String> {
+        if let Some(node) = self.node_for(from) {
+            return crate::nodes::engine::copy_ignored(&Self::client(&node)?, from, to, patterns)
+                .await;
+        }
         let patterns = patterns.iter().map(|pattern| pattern.to_string()).collect();
         hangar_core::git::git_copy_untracked(from.into(), to.into(), patterns, Some(true)).await
     }
 
     async fn changes(&self, path: &str) -> Result<Changes, String> {
+        if let Some(node) = self.node_for(path) {
+            return crate::nodes::engine::changes(&Self::client(&node)?, path).await;
+        }
         hangar_core::git::git_changes(path.into(), None).await
     }
 
     async fn commits_ahead(&self, path: &str, base: &str, head: &str) -> Result<u32, String> {
+        if let Some(node) = self.node_for(path) {
+            return crate::nodes::engine::commits_ahead(&Self::client(&node)?, path, base, head)
+                .await;
+        }
         hangar_core::git::git_commits_ahead(path.into(), base.into(), head.into()).await
     }
 }
@@ -399,14 +619,11 @@ impl BriefingPort for LivePort {
     }
 
     async fn load_board(&self, cwd: &str) -> Result<Vec<Task>, String> {
-        let cwd = cwd.to_string();
-        blocking(move || hangar_core::board_load(cwd).tasks).await
+        self.board_tasks(cwd).await
     }
 
     async fn load_memory(&self) -> Result<Vec<MemoryEntry>, String> {
-        let host = self.host();
-        blocking(move || hangar_core::memory::memory_load(&host).map(|memory| memory.entries))
-            .await?
+        self.memory().await
     }
 
     fn journal(&self, workspace_id: &str) -> Vec<JournalEntry> {
@@ -424,7 +641,7 @@ impl BriefingPort for LivePort {
     /// A repository when git says so; git missing reads as not one, as the
     /// TS's `repo.installed && repo.isRepo` did.
     async fn is_repo(&self, cwd: &str) -> Result<Option<bool>, String> {
-        let repo = hangar_core::git::git_repo_info(cwd.into()).await;
+        let repo = self.repo(cwd).await;
         Ok(Some(repo.installed && repo.is_repo))
     }
 
@@ -448,19 +665,16 @@ impl ProjectsPort for LivePort {
     }
 
     async fn load_board(&self, cwd: &str) -> Result<Vec<Task>, String> {
-        let cwd = cwd.to_string();
-        blocking(move || hangar_core::board_load(cwd).tasks).await
+        self.board_tasks(cwd).await
     }
 
     async fn load_memory(&self) -> Result<Vec<MemoryEntry>, String> {
-        let host = self.host();
-        blocking(move || hangar_core::memory::memory_load(&host).map(|memory| memory.entries))
-            .await?
+        self.memory().await
     }
 
     /// Without git installed, nobody can tell.
     async fn is_repo(&self, cwd: &str) -> Result<Option<bool>, String> {
-        let repo = hangar_core::git::git_repo_info(cwd.into()).await;
+        let repo = self.repo(cwd).await;
         Ok(repo.installed.then_some(repo.is_repo))
     }
 

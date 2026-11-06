@@ -12,12 +12,15 @@
 
 pub mod commands;
 pub mod connect;
+pub mod engine;
 pub mod model;
 mod page;
 pub mod remote;
 pub mod runner;
 pub mod wire;
 
+#[cfg(test)]
+mod orchestrate_tests;
 #[cfg(test)]
 mod remote_tests;
 #[cfg(test)]
@@ -232,17 +235,90 @@ fn apply_status(
     follow
 }
 
-/// What the node says changed: its boards are read again (`board:changed`,
-/// or events lost). The memory of a remote workspace is not drawn yet.
+/// What the node says, followed as the desktop that drives it
+/// (`/node/events?control=1`): its control requests, run here against its
+/// workspaces and answered there (`control::Msg::Node`); its panes' bridge
+/// reports, as a local pane's (their activity, the orchestrator's news);
+/// its boards changed (or events lost: everything is read again).
 async fn follow_events(sv: Services, node: String) {
+    let id = node.clone();
     let emit = move |event: serde_json::Value| {
-        let board = event.get("event").and_then(serde_json::Value::as_str) == Some("board:changed")
-            || event.get("lagged").is_some();
-        if board {
-            sv.send(Message::Board(crate::board::Msg::Reload));
+        for message in event_messages(&id, &sv.snapshot().state, event) {
+            sv.send(message);
         }
     };
-    remote::follow_events(node, emit, remote::Backoff::default(), remote::directory).await;
+    remote::follow_events_at(
+        node,
+        "/node/events?control=1",
+        emit,
+        remote::Backoff::default(),
+        remote::directory,
+    )
+    .await;
+}
+
+/// What one event of node `node` becomes here.
+pub(crate) fn event_messages(
+    node: &str,
+    state: &crate::state::types::AppState,
+    event: serde_json::Value,
+) -> Vec<Message> {
+    use serde_json::Value;
+    let text = |key: &str| event.get(key).and_then(Value::as_str).map(str::to_owned);
+    if event.get("lagged").is_some() {
+        return vec![Message::Board(crate::board::Msg::Reload)];
+    }
+    match text("event").as_deref() {
+        Some(name @ ("control:request" | "control:internal")) => {
+            let payload = event.get("payload");
+            let id = text("id").or_else(|| {
+                payload
+                    .and_then(|payload| payload.get("id"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            });
+            let op = payload
+                .and_then(|payload| payload.get("op"))
+                .and_then(Value::as_str);
+            let (Some(id), Some(op)) = (id, op) else {
+                return Vec::new();
+            };
+            let args = payload
+                .and_then(|payload| payload.get("args"))
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({}));
+            let channel = if name == "control:request" {
+                crate::services::Channel::Agent
+            } else {
+                crate::services::Channel::Internal
+            };
+            vec![Message::Control(crate::control::Msg::Node(
+                crate::control::NodeRequest {
+                    node: node.to_owned(),
+                    id,
+                    op: op.to_owned(),
+                    args,
+                    channel,
+                },
+            ))]
+        }
+        // Only a pane of this node's: a node speaks for its own panes.
+        Some("bridge:event") => match (text("paneId"), event.get("payload")) {
+            (Some(pane), Some(payload))
+                if engine::node_of_pane(state, &pane).as_deref() == Some(node) =>
+            {
+                vec![Message::Core(CoreEvent::Bridge {
+                    pane,
+                    event: payload.clone(),
+                })]
+            }
+            _ => Vec::new(),
+        },
+        Some("board:changed") => vec![Message::Core(CoreEvent::BoardChanged {
+            cwd: text("cwd").unwrap_or_default(),
+        })],
+        _ => Vec::new(),
+    }
 }
 
 fn disconnect(st: &mut State, live: &mut Live, id: &str) {
