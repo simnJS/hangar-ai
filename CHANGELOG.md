@@ -8,6 +8,13 @@ change behaviour as well as add to it. The 0.x history is grouped by minor versi
 Every release, with its installers, is on the
 [releases page](https://github.com/hangar-ai/hangar/releases).
 
+## [Unreleased]
+
+### Added
+
+- **Chat view (experimental).** Turn it on in Settings › Experiments, then switch any workspace between its panes and a chat with its orchestrator. Claude Code keeps running in the panes behind it; a side panel lists the board's tasks with the progress their agents report, and kits, previews and the 3D view open beside the chat as they do in the grid.
+- Agents can report how far along a task is (`board_report_progress`, over MCP and HTTP): a percentage and a short note, shown with the task. Workers are asked to report at each real step.
+
 ## [2.1.0] - 2026-11-06
 
 ### Changed
