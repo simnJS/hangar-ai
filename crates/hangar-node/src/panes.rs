@@ -4,11 +4,10 @@
 //! streams watching it (api.rs). A desktop that reconnects asks for what came
 //! after the last `seq` it saw.
 //!
-//! Core hands over what the PTY held when it was read, up to 64 KiB
-//! (`pty::drain`), which during a flood is already more than a line; the
-//! history still joins small chunks, and a stream sends the live frames
-//! already waiting as one ([`gather`]), so a flood is a few large frames
-//! however core's reads fell.
+//! Core hands over what each read of the PTY gave, a line or less while a
+//! command floods it (50 bytes on average for `seq`): the history joins
+//! small chunks, and a stream sends the live frames already waiting as one
+//! ([`gather`]), so a flood is a few large frames rather than one per line.
 #![cfg(target_os = "linux")]
 
 use std::collections::{HashMap, VecDeque};
