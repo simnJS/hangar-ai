@@ -526,9 +526,9 @@ pub fn start(
     )
 }
 
-/// How often a pane of a remote workspace looks again for its node, while
-/// the node is not connected.
-const NODE_WAIT: Duration = Duration::from_secs(1);
+/// How long a pane of a remote workspace waits on its node's publication
+/// before looking again (a look is cheap; the wait wakes at the publish).
+const NODE_WAIT: Duration = Duration::from_secs(30);
 
 /// Starts the shell of a remote pane on its node, once the node is
 /// connected (waiting for it as long as it takes: the pane says meanwhile
@@ -539,11 +539,11 @@ async fn start_remote(
     spawn: RemoteSpawn,
     tr: Translator,
 ) -> Result<SpawnReport, String> {
+    // Woken as soon as the node is published, not on a polling tick.
     let client = loop {
-        if let Some(client) = remote::directory(&node) {
+        if let Some(client) = remote::wait_for(&node, NODE_WAIT).await {
             break client;
         }
-        tokio::time::sleep(NODE_WAIT).await;
     };
     let started = remote::start(&client, &spawn)
         .await

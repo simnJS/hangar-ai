@@ -19,6 +19,7 @@ Every release, with its installers, is on the
 
 ### Changed
 
+- Output from panes that are not on screen no longer makes Hangar rebuild and redraw its window 60 times a second: with eight agents printing, Hangar's CPU falls from 8.1 % to 2.9 % in the chat view and from 6.4 % to 5.8 % in the panes view.
 - In the chat view, the hidden terminals start their shells at once instead of waiting for a size they never get: a workspace in the chat view is ready in 0.38 s instead of 0.66 s.
 - On Linux with a Vulkan GPU, Hangar no longer also sets up an OpenGL context it never draws with: about 27 MB less memory at rest and a faster start (0.40 → 0.36 s with 4 shells). A `WGPU_BACKEND` you set yourself is kept, and the one Hangar sets does not reach your panes' shells.
 - Terminal output is parsed faster (+6 % on a listing, +8 % on an agent's interface): the scan for title and link sequences skips plain text in one search.
