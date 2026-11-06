@@ -47,3 +47,7 @@ Thumbs.db
 
 # Cargo build output of the native workspace
 /target/
+
+# Nodes test rig: its dedicated keys, and the files up.sh generates
+scripts/node-test/.keys/
+scripts/node-test/ssh_config
