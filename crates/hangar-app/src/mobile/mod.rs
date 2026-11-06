@@ -65,20 +65,21 @@ pub struct State {
     runtime: Option<live::Runtime>,
 }
 
-impl State {
-    /// Hangar Mobile's runtime state, for `desk`'s calls: `None` until the
-    /// state is in and the orchestration runtime runs (`Msg::Start`).
-    #[allow(dead_code)] // The chat view (chat_view/) calls it; nothing does yet.
-    pub fn mobile(&self) -> Option<Arc<engine::Mobile>> {
-        self.runtime.as_ref().map(|runtime| runtime.mobile.clone())
-    }
-}
-
 /// The package's shared read-model; lives in `Model.live.mobile`. Nothing of
 /// Hangar Mobile is drawn in the window but its settings (P13), which ask
-/// core directly.
+/// core directly, and the chat view, which calls `desk` with `mobile()`.
 #[derive(Debug, Default)]
-pub struct Live;
+pub struct Live {
+    mobile: Option<Arc<engine::Mobile>>,
+}
+
+impl Live {
+    /// Hangar Mobile's runtime state, for `desk`'s calls: `None` until the
+    /// state is in and the orchestration runtime runs (`Msg::Start`).
+    pub fn mobile(&self) -> Option<Arc<engine::Mobile>> {
+        self.mobile.clone()
+    }
+}
 
 /// The package's messages, routed by the shell as `Message::Mobile(Msg)`.
 #[derive(Debug, Clone)]
@@ -101,6 +102,7 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
             };
             let runtime = live::Runtime::start(sv.clone(), handle);
             let hook = Hook::Mobile(Arc::new(engine::Hook(runtime.mobile.clone())));
+            m.live.mobile.mobile = Some(runtime.mobile.clone());
             st.runtime = Some(runtime);
             Task::done(Message::Control(crate::control::Msg::Install(hook)))
         }

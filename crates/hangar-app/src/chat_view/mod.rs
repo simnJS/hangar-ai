@@ -16,8 +16,9 @@
 //! view panes are drawn by the panes' own widget (`panes::view_tools`), so
 //! the previews and the kits do not know where they are shown.
 //!
-//! The conversation and the tasks are their own modules, placeholders for
-//! now, each with its State and Msg routed through this package.
+//! The conversation and the tasks are their own modules, each with its
+//! State and Msg routed through this package; the conversation also hears
+//! the core's events and has a tick of its own (`conversation`).
 
 pub mod conversation;
 pub mod tasks;
@@ -67,19 +68,26 @@ pub fn shown(m: &Model, ws: &Workspace) -> bool {
     ws.chat_view == Some(true) && available(m)
 }
 
-pub fn update(st: &mut State, m: &mut Model, _sv: &Services, msg: Msg) -> Task<Message> {
+pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
     match msg {
         Msg::SetShown(ws, on) => {
-            m.apply(StoreAction::SetChatView { ws, on });
-            Task::none()
+            m.apply(StoreAction::SetChatView { ws: ws.clone(), on });
+            if on {
+                conversation::on_shown(&mut st.conversation, m, &ws)
+            } else {
+                Task::none()
+            }
         }
-        Msg::Conversation(msg) => conversation::update(&mut st.conversation, m, msg),
+        Msg::Conversation(msg) => conversation::update(&mut st.conversation, m, sv, msg),
         Msg::Tasks(msg) => tasks::update(&mut st.tasks, m, msg),
     }
 }
 
-pub fn subscription(_st: &State, _m: &Model) -> Subscription<Message> {
-    Subscription::none()
+pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
+    Subscription::batch([
+        conversation::subscription(&st.conversation, m),
+        tasks::subscription(&st.tasks, m),
+    ])
 }
 
 pub fn on_intent(
@@ -92,12 +100,19 @@ pub fn on_intent(
 }
 
 pub fn on_event(
-    _st: &mut State,
-    _m: &mut Model,
+    st: &mut State,
+    m: &mut Model,
     _sv: &Services,
-    _event: &CoreEvent,
+    event: &CoreEvent,
 ) -> Option<Task<Message>> {
-    None
+    let tasks: Vec<Task<Message>> = [
+        conversation::on_event(&mut st.conversation, m, event),
+        tasks::on_event(&mut st.tasks, m, event),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    (!tasks.is_empty()).then(|| Task::batch(tasks))
 }
 
 /// The chat view of `ws`, filling the main area.

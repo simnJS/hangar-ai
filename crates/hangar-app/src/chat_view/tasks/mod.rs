@@ -87,14 +87,12 @@ pub fn update(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
 
 /// Nothing to listen to: the panel follows the board package's cache, which
 /// reads a board again on its own when core says it changed.
-#[allow(dead_code)] // wired in chat_view/mod.rs by the orchestrator
 pub fn subscription(_st: &State, _m: &Model) -> Subscription<Message> {
     Subscription::none()
 }
 
 /// Nothing either: a new read of the board is a new `Arc` in the cache,
 /// which the next frame sees ([`model::Cache`]); an event comes before it.
-#[allow(dead_code)] // wired in chat_view/mod.rs by the orchestrator
 pub fn on_event(_st: &mut State, _m: &mut Model, _event: &CoreEvent) -> Option<Task<Message>> {
     None
 }

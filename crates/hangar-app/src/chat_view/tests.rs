@@ -165,7 +165,10 @@ fn the_chat_view_draws_the_conversation_the_tasks_and_a_kit_tab_in_the_tools_are
     let _ = ui
         .snapshot(&hangar_theme::to_iced(ctx.theme))
         .expect("it draws");
-    assert!(ui.find("Conversation").is_ok());
+    assert!(
+        ui.find("No orchestrator in this workspace").is_ok(),
+        "the conversation: its empty state, the workspace has no orchestrator"
+    );
     assert!(ui.find("Tasks").is_ok());
     assert!(ui.find("CI runs").is_ok(), "the kit tab, in the tools area");
     // A press in the tab's pane gives it the focus, as in the grid.
@@ -202,7 +205,13 @@ fn a_workspace_without_a_view_pane_has_no_tools_area() {
 #[test]
 fn the_main_window_switches_between_the_grid_and_the_chat_view_and_back_unchanged() {
     let (mut m, pkg, _) = shop("chat-frame", true);
-    let wanted = ["Ava", "Leo", "CI runs", "Conversation", "Tasks"];
+    let wanted = [
+        "Ava",
+        "Leo",
+        "CI runs",
+        "No orchestrator in this workspace",
+        "Tasks",
+    ];
     let grid = m.workspace("chat-frame").unwrap().clone();
     assert_eq!(
         on_screen(&m, &pkg, &wanted),
@@ -213,7 +222,7 @@ fn the_main_window_switches_between_the_grid_and_the_chat_view_and_back_unchange
     set(&mut m, "chat-frame", true);
     assert_eq!(
         on_screen(&m, &pkg, &wanted),
-        ["CI runs", "Conversation", "Tasks"],
+        ["CI runs", "No orchestrator in this workspace", "Tasks"],
         "the chat view: no terminal, the tab in the tools area"
     );
     // The terminals are still mounted: only what draws them changed.

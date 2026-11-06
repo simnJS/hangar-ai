@@ -114,14 +114,33 @@ impl std::fmt::Debug for State {
 /// `deliveringIn`): « Fusionner » shows its spinner from it, and hibernation
 /// keeps their workspaces awake. The snapshot's `delivering` is meant to be
 /// made from `delivering()`.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct Live {
     /// How many holders each task's delivery has, by workspace: the person's
     /// landing and the engine's own run of it end separately.
     runs: HashMap<WsId, HashMap<String, u32>>,
+    /// The port the operations run against, once another package's handler
+    /// is installed on the bus (`Msg::Install`): what the window's own calls
+    /// to `mobile::desk` take (the chat view).
+    port: Option<Port>,
+}
+
+impl std::fmt::Debug for Live {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Live")
+            .field("runs", &self.runs)
+            .field("port", &self.port.is_some())
+            .finish()
+    }
 }
 
 impl Live {
+    /// The port, for `mobile::desk`'s calls: `None` until a handler is
+    /// installed on the bus, Hangar Mobile's among them.
+    pub fn port(&self) -> Option<Port> {
+        self.port.clone()
+    }
+
     /// Whether a delivery of this workspace is running (`isDelivering`).
     pub fn is_delivering(&self, ws: &str) -> bool {
         self.runs.get(ws).is_some_and(|tasks| !tasks.is_empty())
@@ -192,6 +211,7 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
         Msg::Model(cmd, answer) => writes::carry_out(m, cmd, answer),
         Msg::Install(hook) => {
             st.shared.install(hook);
+            m.live.control.port = Some(st.port(sv));
             Task::none()
         }
     }
