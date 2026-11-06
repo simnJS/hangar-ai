@@ -30,24 +30,26 @@ download page and `latest.json` link to them.
 ### hangar-node
 
 Every desktop package also carries the headless node daemon for Linux x86_64 and
-arm64, as two files **beside the executable**: `hangar-node-x86_64` and
-`hangar-node-aarch64`. The desktop uploads the one that matches a node's
-`uname -m` over SSH (`crates/hangar-app/src/nodes/model.rs`, `BinarySource`:
-`HANGAR_NODE_BINARY`, else `hangar-node-<arch>` in the running `hangar-ai`'s
-folder), and a Mac or a Windows desktop drives Linux nodes too, so all three
-platforms carry both:
+arm64, as two files: `hangar-node-x86_64` and `hangar-node-aarch64`. They are
+packager **resources**, not binaries (`resources` in
+`crates/hangar-app/Cargo.toml`). The desktop uploads the one that matches a
+node's `uname -m` over SSH (`crates/hangar-app/src/nodes/model.rs`,
+`BinarySource`: `HANGAR_NODE_BINARY`, else `hangar-node-<arch>` looked for in
+three places from the running `hangar-ai`'s folder: beside it, in
+`../Resources` and in `../lib/hangar-ai`), and a Mac or a Windows desktop
+drives Linux nodes too, so all three platforms carry both:
 
 | Package | Where |
 | --- | --- |
-| `.deb`, `.rpm` | `/usr/bin/hangar-node-{x86_64,aarch64}` |
-| AppImage | `usr/bin/` in the image |
-| macOS `.app` | `Contents/MacOS/` |
-| Windows installer | the install folder, removed by the uninstaller |
+| `.deb`, `.rpm` | `/usr/lib/hangar-ai/hangar-node-{x86_64,aarch64}` |
+| AppImage | `usr/lib/hangar-ai/` in the image (the executable is in `usr/bin/`) |
+| macOS `.app` | `Contents/Resources/` |
+| Windows installer | the install folder, beside the executable, removed by the uninstaller |
 
-They are not programs the desktop's own system runs. On macOS they sit in `Contents/MacOS` with the
-other executables: cargo-packager (`package/app`) codesigns only the files that
-have a Mach-O header, so these ELF files are copied and neither signed nor
-refused (read in 0.11.8's source; a signed build has not been run here). The same two files are on
+They are not programs the desktop's own system runs. On macOS they are not in
+`Contents/MacOS`: everything there is signed as nested code, and codesign
+refuses these ELF files ("code object is not signed at all"), whereas
+`Contents/Resources` takes them as data. The same two files are on
 the release as `hangar-node-<v>-linux-x86_64` and `-linux-aarch64`, for a node
 set up by hand (`chmod +x`, then `hangar-node serve`); not in `latest.json`, not
 signed.
@@ -56,10 +58,9 @@ The release workflow's `node` job builds them, before the build jobs, which
 download them into `target/node` (`actions/download-artifact`) and whose
 packaging scripts refuse to run without them: `common.sh`'s
 `stage_node_binaries` checks that each is an ELF file of the right machine and
-copies it to where the packager reads binaries (`target/dist`, or
-`target/universal-apple-darwin/dist`); the `binaries` and `generate-rpm`
-assets of `crates/hangar-app/Cargo.toml` list them; the Windows script hands
-them to `installer.nsi`. The job:
+leaves it in `target/node`, where the packager reads resources (the
+`resources` and the `generate-rpm` assets of `crates/hangar-app/Cargo.toml`
+list them there); the Windows script hands them to `installer.nsi`. The job:
 
 - builds on `ubuntu-22.04`, so the binary wants glibc 2.35 at most (checked, and
   the job fails otherwise), like the AppImage;
@@ -212,6 +213,52 @@ release workflow: nobody reads a node's backtrace from its file.) `panic` stays
 `"unwind"`: the app catches panics with `catch_unwind` around the image and
 AVIF decoders, the 3D loader, kit tabs, dictation and the git consent
 callbacks, and `"abort"` would turn each of those into a crash.
+
+### What is in the executable
+
+`cargo bloat --profile dist -p hangar-app --crates` on the dist build above
+(78.8 MB): 47 MiB of code, of which the app's own crates are about 9 MiB
+(hangar_ai 5.7, hangar_core 1.8, hangar_model3d, hangar_kit_host,
+hangar_kit_ui), Rust's `std` 5.5, Cranelift (the compiler of kit tabs:
+codegen, its x64 assembler, regalloc2, wasmtime's glue) about 5.5, tokio 1.3,
+naga 1.1, the image codecs about 2.5, whisper.cpp 0.9, zbus and zvariant 1.5.
+The symbol table is 13 MB of the file. What is embedded with `include_bytes!`
+and rust-embed is small: Inter (0.9 MB), the kit SDK (0.2 MB), Hangar Mobile's
+`dist-mobile/` (1 MB), bat's syntaxes through two-face (0.9 MB, already
+compressed) and the shaders; no blob is worth compressing.
+
+What was cut, each step measured on a dist build of `hangar-ai` and
+`hangar-node` (not stripped; the release strips hangar-node):
+
+| Change | hangar-ai | hangar-node | Cost at run time |
+| --- | --- | --- | --- |
+| before | 78.8 MB | 10.05 MB | |
+| iced's `image-without-codecs` instead of `image`: the image crate's every codec was on (EXR, TIFF, DDS, HDR, QOI, PNM, ICO, farbfeld and rav1e, an AVIF *encoder*), the app reads PNG, JPEG, GIF, WebP, BMP and decodes AVIF itself; wasmtime without its default features (`wat` and its `wast` parser, the component model, GC, async, the pooling allocator, profiling, coredumps, debugger hooks, addr2line) | −6.5 MB | — | none; a `.tiff` or `.ico` in a kit tab or a Markdown page no longer shows, which the kit API never promised (`image.size` names the five formats) |
+| `opt-level = "s"` for Cranelift, regalloc2, wasmparser, wasmtime-environ, naga, zbus and zvariant (`[profile.dist.package.*]` in `Cargo.toml`) | −3.9 MB | | a kit tab's first compile (no cache entry yet) of a 600 KB module: 33–36 ms → 37–40 ms (one thread: +18%); the renderers' shaders: 1.27 → 1.50 ms at start |
+| the same for glTF and OBJ readers, rustls and ureq, the keychain, notifications, web push, the QR code, the Discord presence, wasmtime's cache and zstd | −1.3 MB | −0.14 MB (ureq, rustls, zbus) | a 36 MB OBJ loads in the same time; the STL reader was left at full speed (a 50 MB STL took a fifth longer at `s`), FBX and PLY with it |
+| **after** | **67.1 MB** (55.4 stripped, from 65.8) | **9.90 MB** | |
+
+What `opt-level` per package does under fat LTO: rustc marks each function
+of the crate `optsize`, which LLVM keeps through the link-time optimisation.
+Nothing the app runs every frame or for every byte of a pane is in the list:
+hangar-term, alacritty_terminal, iced, wgpu, the codecs of the preview, the
+AV1 decoder and whisper.cpp stay at `opt-level = 3`. The feed bench runs none
+of the listed crates; open4's start runs naga (the 0.25 ms above) and a D-Bus
+call or two, well inside its ±30 ms spread.
+
+Looked at and left:
+
+- **Duplicate versions** (`cargo tree -d -e normal`): all come from upstream
+  crates' own pins (iced's tiny-skia renderer on kurbo 0.10 and resvg's gif
+  0.13, cosmic-text's two skrifa, wasmtime's sha2 0.10 next to hangar-core's
+  0.11, auto-launch's dirs 4, web-push's aes 0.8 next to the keychain's 0.9),
+  none of which a version or feature in this workspace can unify.
+- **wgpu's backends**: Vulkan and GLES on Linux; GLES is the fallback of a
+  machine without Vulkan, and stays.
+- **syntect**: `default-fancy` (pure Rust regex) is what iced's highlighter
+  asks for; two-face's syntax set is the one the preview needs.
+- **hangar-node**: 5.8 MiB of code, std, hangar-core, axum, tokio, rustls,
+  regex; nothing unused.
 
 ## 3. Building each bundle by hand
 

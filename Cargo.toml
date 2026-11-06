@@ -29,10 +29,23 @@ hangar-i18n = { path = "crates/hangar-i18n" }
 hangar-update = { path = "crates/hangar-update" }
 hangar-model3d = { path = "crates/hangar-model3d" }
 
-iced = { version = "0.14", features = ["tokio", "advanced", "canvas", "image", "svg", "lazy", "markdown", "highlighter"] }
+# `image-without-codecs` rather than `image`: iced's `image` turns on the
+# image crate's default formats, every one of them (EXR, TIFF, DDS, HDR, QOI,
+# PNM, ICO, farbfeld and an AVIF *encoder*, rav1e), when the app shows PNG,
+# JPEG, GIF, WebP and BMP (and AVIF, which it decodes itself). The formats it
+# reads are the `image` entry's below, which every crate here shares; the 3D
+# view adds the texture formats it reads (hangar-model3d's Cargo.toml).
+iced = { version = "0.14", features = ["tokio", "advanced", "canvas", "image-without-codecs", "svg", "lazy", "markdown", "highlighter"] }
 alacritty_terminal = "0.26"
 portable-pty = "0.9.0"
-wasmtime = "50"
+# A native kit tab is a core module compiled by Cranelift, run with epoch
+# interruption and a ResourceLimiter, with wasmtime's on-disk code cache
+# (hangar-kit-host's runtime.rs): only what that needs, and `threads`, which
+# `Config::wasm_threads` (set to false there) is behind. Off: the text format
+# (`wat`, the `wast` parser), the component model, the GC proposal, async,
+# the pooling allocator, profiling, coredumps, the debugger hooks and the
+# addr2line/demangle of a trap's frames.
+wasmtime = { version = "50", default-features = false, features = ["runtime", "cranelift", "cache", "std", "parallel-compilation", "backtrace", "threads"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # `signal`: the app quits in order on SIGTERM, SIGINT and SIGHUP (hangar-app's
@@ -121,3 +134,77 @@ inherits = "release"
 lto = "fat"
 codegen-units = 1
 strip = "debuginfo"
+
+# Optimised for size: crates that run once in a while, not every frame or
+# every byte of a pane's output. Cranelift, regalloc2 and wasmparser compile a
+# kit tab's module (once, then wasmtime's cache answers); naga translates the
+# renderers' shaders at start; zbus and zvariant are a D-Bus call now and then
+# (notifications, the keychain, the file manager, a pane's systemd scope).
+# Measured on a dist build (docs/native/PACKAGING.md, "What is in the
+# executable"): a cold kit compile takes +1 to +7 ms (in parallel, as the app
+# compiles), the renderers' shaders +0.25 ms at start.
+[profile.dist.package.cranelift-codegen]
+opt-level = "s"
+[profile.dist.package.cranelift-assembler-x64]
+opt-level = "s"
+[profile.dist.package.cranelift-frontend]
+opt-level = "s"
+[profile.dist.package.wasmtime-internal-cranelift]
+opt-level = "s"
+[profile.dist.package.regalloc2]
+opt-level = "s"
+[profile.dist.package.wasmparser]
+opt-level = "s"
+[profile.dist.package.wasmtime-environ]
+opt-level = "s"
+[profile.dist.package.naga]
+opt-level = "s"
+[profile.dist.package.zbus]
+opt-level = "s"
+[profile.dist.package.zvariant]
+opt-level = "s"
+
+# A second set, the same way: what reads a glTF or an OBJ model (an OBJ of
+# 36 MB loads in the same time; STL, FBX and PLY readers stay at full speed, a
+# 50 MB STL took a fifth longer), TLS and HTTP for updates and dictation,
+# the keychain and notifications over D-Bus, Hangar Mobile's push and QR
+# code, the Discord presence, and wasmtime's code cache with the zstd it
+# writes it with.
+[profile.dist.package.gltf]
+opt-level = "s"
+[profile.dist.package.gltf-json]
+opt-level = "s"
+[profile.dist.package.tobj]
+opt-level = "s"
+[profile.dist.package.secret-service]
+opt-level = "s"
+[profile.dist.package.zbus_names]
+opt-level = "s"
+[profile.dist.package.notify-rust]
+opt-level = "s"
+[profile.dist.package.web-push-native]
+opt-level = "s"
+[profile.dist.package.ece-native]
+opt-level = "s"
+[profile.dist.package.p256]
+opt-level = "s"
+[profile.dist.package.elliptic-curve]
+opt-level = "s"
+[profile.dist.package.qrcode]
+opt-level = "s"
+[profile.dist.package.ureq]
+opt-level = "s"
+[profile.dist.package.ureq-proto]
+opt-level = "s"
+[profile.dist.package.rustls]
+opt-level = "s"
+[profile.dist.package.rustls-webpki]
+opt-level = "s"
+[profile.dist.package.wasmtime-internal-cache]
+opt-level = "s"
+[profile.dist.package.zstd-sys]
+opt-level = "s"
+[profile.dist.package.keyring-core]
+opt-level = "s"
+[profile.dist.package.discord-rich-presence]
+opt-level = "s"

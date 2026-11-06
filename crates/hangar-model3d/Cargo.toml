@@ -15,7 +15,7 @@ iced.workspace = true
 bytemuck = { version = "1", features = ["derive"] }
 glam = "0.25"
 # Textures. The formats are the ones a model's materials point at; the rest of
-# the crate's codecs are left out (iced turns on more of them for its own use).
+# the crate's codecs are left out, for the app as a whole too (the workspace's `iced`).
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "tga", "gif", "webp"] }
 gltf = { version = "1.4", features = [
     "KHR_materials_emissive_strength",
