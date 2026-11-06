@@ -221,12 +221,6 @@ pub enum Msg {
         pane: PaneId,
         status: PaneStatus,
     },
-    /// These panes wrote output to their terminals since the last such
-    /// message: the panes look once a frame while output flows, and say so
-    /// in one message for all of them.
-    Output {
-        panes: Vec<PaneId>,
-    },
     Bell {
         pane: PaneId,
     },
@@ -301,6 +295,37 @@ pub enum Msg {
         folder: String,
         info: RepoInfo,
     },
+}
+
+/// Pane `pane` wrote output to its terminal, from `first` to `last`, since
+/// the panes last looked: they look once a frame at the panes on screen and
+/// with the tick at those off it, and tell it here, in the same update, rather
+/// than in a message of its own (each message builds the whole window again).
+/// The hot path: a write per pane and nothing to redraw for it.
+pub fn note_printed(m: &mut Model, pane: &str, first: EpochMs, last: EpochMs) {
+    m.live.panes_logic.note_printed(pane, first, last);
+}
+
+/// Pane `pane` of workspace `ws` mounted, for a test of another package.
+#[cfg(test)]
+pub(crate) fn mount_for_test(m: &mut Model, pane: &str, ws: &str, name: &str, now: EpochMs) {
+    m.live.panes_logic.mount_pane(pane, ws, name, now);
+}
+
+/// The burst of pane `pane` the activity follows, from its first byte to its
+/// last, and when hibernation last saw it print, for a test of another
+/// package.
+#[cfg(test)]
+pub(crate) fn output_seen(m: &Model, pane: &str) -> (Option<(EpochMs, EpochMs)>, Option<EpochMs>) {
+    let live = &m.live.panes_logic;
+    (
+        live.machines
+            .get(pane)
+            .and_then(|machine| machine.watcher.burst()),
+        live.hibernation
+            .pane_rest(pane)
+            .map(|rest| rest.last_output_at),
+    )
 }
 
 /// Milliseconds since the Unix epoch, now. The one clock of this directory,
@@ -1158,14 +1183,6 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
             }
             Task::none()
         }
-        Msg::Output { panes } => {
-            // The hot path: a write per pane a frame and nothing to redraw
-            // for it.
-            for pane in &panes {
-                m.live.panes_logic.note_output(pane, now);
-            }
-            Task::none()
-        }
         Msg::Bell { pane } => with_pane(m, &pane, now, |live, info, amb| live.bell(info, amb)),
         Msg::Notification { pane, message } => with_pane(m, &pane, now, |live, info, amb| {
             live.terminal_notification(info, &message, amb)
@@ -1612,7 +1629,9 @@ pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
         .machines
         .values()
         .any(|machine| machine.watcher.is_ticking() || machine.trust_look_at.is_some());
-    if watching {
+    // The tick is also when the panes off screen are looked at, while one of
+    // them prints (`panes::look_off_screen`, called before the tick).
+    if watching || m.live.panes.looking_off_screen() {
         subscriptions.push(
             iced::time::every(Duration::from_millis(activity::TICK_MS))
                 .map(|_| Message::PanesLogic(Msg::Tick)),

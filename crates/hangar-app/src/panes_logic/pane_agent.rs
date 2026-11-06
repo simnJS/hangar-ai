@@ -309,19 +309,29 @@ impl Live {
 
     // ----- the guesses of a pane without the mod
 
-    /// A chunk of output was printed (written to the terminal): one more
-    /// step of a burst, and the trust question to look for once it settles.
+    /// A chunk of output was printed (written to the terminal) at `now`.
+    #[cfg(test)]
     pub(super) fn note_output(&mut self, pane: &str, now: EpochMs) {
-        self.hibernation.note_pane_output(pane, now);
+        self.note_printed(pane, now, now);
+    }
+
+    /// The pane printed, from `first` to `last`, since the window last
+    /// looked: more steps of a burst, and the trust question to look for once
+    /// it settles. The moments are the reader thread's, not the look's: a
+    /// pane off screen is looked at four times a second, and its burst is
+    /// measured as one looked at every frame would be.
+    pub(super) fn note_printed(&mut self, pane: &str, first: EpochMs, last: EpochMs) {
+        self.hibernation.note_pane_output(pane, last);
         if let Some(watch) = self.watches.get_mut(pane) {
             watch.note_output();
         }
         let Some(machine) = self.machines.get_mut(pane) else {
             return;
         };
-        machine.watcher.push(now);
+        machine.watcher.push(first);
+        machine.watcher.push(last);
         if !machine.bridged {
-            machine.trust_look_at = Some(now + TRUST_LOOK_MS);
+            machine.trust_look_at = Some(last + TRUST_LOOK_MS);
         }
     }
 

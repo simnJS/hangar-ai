@@ -1871,7 +1871,8 @@ mod tests {
             }
             outputs
         };
-        let sorted = |mut panes: Vec<PaneId>| {
+        let sorted = |panes: Vec<(PaneId, crate::panes::pty_link::Printed)>| {
+            let mut panes: Vec<PaneId> = panes.into_iter().map(|(pane, _)| pane).collect();
             panes.sort();
             panes
         };
@@ -1882,12 +1883,12 @@ mod tests {
         assert_eq!(wakes_sent(), 1, "one wake-up for both panes, three chunks");
         // The wake-up starts the ticking; the panes are looked at.
         st.ticking = true;
-        assert_eq!(sorted(crate::panes::take_outputs(&st)), ["a", "b"]);
+        assert_eq!(sorted(crate::panes::take_outputs(&st, None)), ["a", "b"]);
 
         // While it ticks, output sends nothing: each frame looks.
         print(&mut sink_b);
         assert_eq!(wakes_sent(), 0);
-        assert_eq!(crate::panes::frame(&mut st), ["b"]);
+        assert_eq!(sorted(crate::panes::frame(&mut st)), ["b"]);
         assert!(st.ticking);
         // A frame that finds every pane quiet ends it.
         assert!(crate::panes::frame(&mut st).is_empty());

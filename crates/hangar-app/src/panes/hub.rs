@@ -90,13 +90,15 @@ impl TerminalAccess for Hub {
 }
 
 /// The channel every pane's sink sends on, its receiving half, which the
-/// subscription takes once, and the flag that keeps the panes' wake-ups for
-/// output to one at a time ([`Waker`]).
+/// subscription takes once, and the flags that keep the panes' wake-ups for
+/// output to one at a time, one for the panes on screen and one for those off
+/// it ([`Waker`]).
 #[derive(Debug, Clone)]
 pub struct HubChannel {
     sender: HubSender,
     receiver: Arc<Mutex<Option<mpsc::UnboundedReceiver<HubEvent>>>>,
     awake: Arc<AtomicBool>,
+    off_screen: Arc<AtomicBool>,
 }
 
 impl Default for HubChannel {
@@ -106,6 +108,7 @@ impl Default for HubChannel {
             sender,
             receiver: Arc::new(Mutex::new(Some(receiver))),
             awake: Arc::new(AtomicBool::new(false)),
+            off_screen: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -123,6 +126,7 @@ impl HubChannel {
         Waker {
             sender: self.sender.clone(),
             awake: self.awake.clone(),
+            off_screen: self.off_screen.clone(),
         }
     }
 
@@ -132,7 +136,20 @@ impl HubChannel {
         self.receiver.lock().ok().and_then(|mut slot| slot.take())
     }
 
-    /// Every pane was quiet for a frame: the next chunk sends a wake-up.
+    /// Every pane off screen was quiet for a look: the next chunk of one
+    /// sends a wake-up.
+    pub fn rest_off_screen(&self) {
+        self.off_screen.store(false, Ordering::Release);
+    }
+
+    /// A pane off screen printed between the last look and the rest: the
+    /// looks go on, and no wake-up is needed.
+    pub fn stay_off_screen(&self) {
+        self.off_screen.store(true, Ordering::Release);
+    }
+
+    /// Every pane on screen was quiet for a frame: the next chunk of one
+    /// sends a wake-up.
     pub fn rest(&self) {
         self.awake.store(false, Ordering::Release);
     }

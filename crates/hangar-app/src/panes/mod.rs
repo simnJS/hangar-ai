@@ -69,7 +69,7 @@ use crate::state::{Model, PaneId, Patch, StoreAction, Workspace, WsId};
 
 use controller::{PaneRt, SpawnReport};
 use hub::{Hub, HubChannel};
-use pty_link::{HubEvent, HubKind};
+use pty_link::{HubEvent, HubKind, Printed};
 
 pub use search::SearchMsg;
 
@@ -96,9 +96,12 @@ pub struct State {
     /// The signature of the model the last sync brought the panes in line
     /// with.
     synced: u64,
-    /// Output is flowing: the panes are looked at every frame
+    /// Output is flowing on screen: the panes are looked at every frame
     /// ([`Msg::Frame`]) rather than woken by each one.
     ticking: bool,
+    /// Output is flowing off screen: the panes off screen are looked at with
+    /// the pane logic's tick ([`look_off_screen`]), never every frame.
+    looking: bool,
     /// Each window's scale factor as the system says it (the display's, not
     /// the interface zoom): what a terminal needs to put its rows on whole
     /// physical pixels. A window is asked once, when it appears, and
@@ -129,6 +132,9 @@ pub struct Live {
     /// Each grid's size as it last measured itself: where a pane opened
     /// beside another splits it, along its longer side (`split_dir`).
     grid_sizes: HashMap<WsId, Size>,
+    /// A pane off screen prints: the pane logic's tick runs, and looks at
+    /// the panes off screen first (`look_off_screen`).
+    looking_off_screen: bool,
 }
 
 /// One mounted pane, as the rest of the window sees it.
@@ -151,6 +157,12 @@ impl Live {
 
     pub fn reports(&self) -> impl Iterator<Item = (&PaneId, &PaneReport)> {
         self.reports.iter()
+    }
+
+    /// Whether a pane off screen prints, which the pane logic's tick looks
+    /// at.
+    pub fn looking_off_screen(&self) -> bool {
+        self.looking_off_screen
     }
 
     /// The direction to split pane `near` of workspace `ws` in: along its
@@ -178,7 +190,8 @@ pub enum Msg {
     Term(PaneId, Action),
     /// What the panes' reader threads said since the last batch.
     Hub(Vec<HubEvent>),
-    /// A frame while output flows: which panes printed since the last.
+    /// A frame while output flows on screen: which panes on screen printed
+    /// since the last.
     Frame,
     /// The model changed under the panes: bring them in line.
     Sync,
@@ -261,7 +274,7 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
     // Output is the hot path, a frame's worth while agents stream: nothing
     // other packages read changes with it.
     let quiet = matches!(&msg, Msg::Frame)
-        || matches!(&msg, Msg::Hub(events) if events.iter().all(|e| e.kind == HubKind::Output));
+        || matches!(&msg, Msg::Hub(events) if events.iter().all(|e| is_output(&e.kind)));
     let task = handle(st, m, sv, msg);
     if quiet {
         return task;
@@ -283,7 +296,11 @@ fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Messag
         // `update` takes these itself; here only for the match to be whole.
         Msg::Term(pane, action) => term_action(st, m, sv, pane, action).0,
         Msg::Hub(events) => hub_events(st, m, sv, events),
-        Msg::Frame => printed(frame(st)),
+        Msg::Frame => {
+            let panes = frame(st);
+            note(m, &panes);
+            Task::none()
+        }
         Msg::Sync => sync(st, m, sv),
         Msg::SpawnDue(pane) => match st.panes.get_mut(&pane) {
             Some(rt) => controller::start(rt, m, sv, &st.channel, st.shells_known),
@@ -653,38 +670,43 @@ fn flush_drops(st: &mut State, m: &Model) -> Task<Message> {
     Task::batch(tasks)
 }
 
-/// The panes that printed since the last look, which this one is.
-fn take_outputs(st: &State) -> Vec<PaneId> {
+fn is_output(kind: &HubKind) -> bool {
+    matches!(kind, HubKind::Output | HubKind::OffScreen)
+}
+
+/// The panes that printed since the last look, which this one is, and when:
+/// those on screen (`Some(true)`), those off it (`Some(false)`) or all.
+fn take_outputs(st: &State, shown: Option<bool>) -> Vec<(PaneId, Printed)> {
     st.panes
         .iter()
-        .filter(|(_, rt)| rt.link.take_output())
-        .map(|(pane, _)| pane.clone())
+        .filter(|(_, rt)| shown.is_none_or(|shown| rt.link.is_shown() == shown))
+        .filter_map(|(pane, rt)| Some((pane.clone(), rt.link.take_output()?)))
         .collect()
 }
 
-/// The pane logic hears which panes printed, in one message.
-fn printed(panes: Vec<PaneId>) -> Task<Message> {
-    if panes.is_empty() {
-        Task::none()
-    } else {
-        logic(Logic::Output { panes })
+/// The pane logic hears which panes printed, and when, in this update.
+fn note(m: &mut Model, panes: &[(PaneId, Printed)]) {
+    for (pane, printed) in panes {
+        crate::panes_logic::note_printed(m, pane, printed.first, printed.last);
     }
 }
 
-/// A frame while output flows (`ticking`): the panes that printed since the
-/// last are told to the pane logic, and the redraw that follows this message
-/// draws what they printed. A frame that finds every pane quiet ends the
-/// ticking, and the next chunk wakes the window again. The flag the sinks
-/// share is cleared before the last look, so a chunk printed meanwhile is
-/// either seen by it or sends a wake-up (`pty_link::Waker`).
-fn frame(st: &mut State) -> Vec<PaneId> {
+/// A frame while output flows on screen (`ticking`): the panes on screen
+/// that printed since the last are told to the pane logic, and the redraw
+/// that follows this message draws what they printed. A frame that finds
+/// every pane on screen quiet ends the ticking, and the next chunk of one
+/// wakes the window again. The flag the sinks share is cleared before the
+/// last look, so a chunk printed meanwhile is either seen by it or sends a
+/// wake-up (`pty_link::Waker`). The panes off screen are not this look's:
+/// what they print asks for no frame (`look_off_screen`).
+fn frame(st: &mut State) -> Vec<(PaneId, Printed)> {
     if !st.ticking {
         return Vec::new();
     }
-    let mut panes = take_outputs(st);
+    let mut panes = take_outputs(st, Some(true));
     if panes.is_empty() {
         st.channel.rest();
-        panes = take_outputs(st);
+        panes = take_outputs(st, Some(true));
         if panes.is_empty() {
             st.ticking = false;
         } else {
@@ -692,6 +714,47 @@ fn frame(st: &mut State) -> Vec<PaneId> {
         }
     }
     panes
+}
+
+/// The look at the panes off screen while one of them prints (`looking`),
+/// made with the pane logic's tick and before it (`App::handle`), four times
+/// a second: what they printed is told to the pane logic with the moments it
+/// was printed at, so the tick reads the bursts it would have read from a
+/// look every frame, and nothing is drawn for it. A look that finds them all
+/// quiet ends the looks, as a frame does for the panes on screen.
+pub fn look_off_screen(st: &mut State, m: &mut Model) {
+    if !st.looking {
+        return;
+    }
+    let mut panes = take_outputs(st, Some(false));
+    if panes.is_empty() {
+        st.channel.rest_off_screen();
+        panes = take_outputs(st, Some(false));
+        if panes.is_empty() {
+            st.looking = false;
+        } else {
+            st.channel.stay_off_screen();
+        }
+    }
+    note(m, &panes);
+    m.live.panes.looking_off_screen = st.looking;
+}
+
+/// Which panes the window draws, told to their links, which wake the window
+/// for their output every frame or with the tick from then on. A pane that
+/// changed side is looked at now: a chunk it printed before may have woken
+/// the side it left, whose looks no longer take it.
+fn place_panes(st: &State, m: &mut Model) {
+    let mut moved = Vec::new();
+    for (id, rt) in &st.panes {
+        let shown = m.workspace(&rt.ws).is_some_and(|ws| visible(m, ws, id));
+        if rt.link.set_shown(shown)
+            && let Some(printed) = rt.link.take_output()
+        {
+            moved.push((id.clone(), printed));
+        }
+    }
+    note(m, &moved);
 }
 
 /// What the reader threads said: output (one wake-up for every pane, which
@@ -704,11 +767,7 @@ fn hub_events(
 ) -> Task<Message> {
     let mut tasks = Vec::new();
     for event in events {
-        // Whichever pane sent it, even one closed since: the wake-up is
-        // every pane's, and only a frame that finds them quiet lets the
-        // next one through.
-        if event.kind == HubKind::Output {
-            st.ticking = true;
+        if wake(st, m, &event.kind) {
             continue;
         }
         let Some(rt) = st.panes.get_mut(&event.pane) else {
@@ -716,7 +775,7 @@ fn hub_events(
         };
         let pane = event.pane;
         match event.kind {
-            HubKind::Output => {}
+            HubKind::Output | HubKind::OffScreen => {}
             HubKind::Exit => controller::exited(rt, m, sv),
             HubKind::Bell => tasks.push(logic(Logic::Bell { pane })),
             // OSC 9 and OSC 777, already read by hangar-term (ConEmu's
@@ -732,12 +791,33 @@ fn hub_events(
             }
         }
     }
-    // What printed is told at once rather than at the next frame: the first
-    // chunk after a quiet spell is what an agent starting a turn looks like.
-    if st.ticking {
-        tasks.push(printed(take_outputs(st)));
-    }
+    woken(st, m);
     Task::batch(tasks)
+}
+
+/// A wake-up for output, on screen (the frames start) or off it (the looks
+/// with the tick start); `false` for another event. Whichever pane sent it,
+/// even one closed since: the wake-up is every pane's on its side of the
+/// screen, and only a look that finds them quiet lets the next one through.
+fn wake(st: &mut State, m: &mut Model, kind: &HubKind) -> bool {
+    match kind {
+        HubKind::Output => st.ticking = true,
+        HubKind::OffScreen => {
+            st.looking = true;
+            m.live.panes.looking_off_screen = true;
+        }
+        _ => return false,
+    }
+    true
+}
+
+/// What printed is told at once rather than at the next look: the first
+/// chunk after a quiet spell is what an agent starting a turn looks like.
+fn woken(st: &State, m: &mut Model) {
+    if st.ticking || st.looking {
+        let panes = take_outputs(st, None);
+        note(m, &panes);
+    }
 }
 
 /// The `terminal.*` commands on a pane's terminal (App.tsx:1451, through
@@ -784,9 +864,11 @@ pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
         st.channel.subscription(),
         iced::event::listen_with(system_rescaled),
     ];
-    // While output flows, every frame looks at the panes; a window the
-    // system draws no frames for (minimised, hidden) is looked at four times
-    // a second, so the pane logic still hears what its agents print.
+    // While output flows on screen, every frame looks at the panes; a window
+    // the system draws no frames for (minimised, hidden) is looked at four
+    // times a second, so the pane logic still hears what its agents print.
+    // Output off screen asks for no frame: the pane logic's tick looks at it
+    // (`look_off_screen`).
     if st.ticking {
         subscriptions.push(iced::window::frames().map(|_| Message::Panes(Msg::Frame)));
         subscriptions.push(iced::time::every(HIDDEN_FRAME).map(|_| Message::Panes(Msg::Frame)));
@@ -1393,6 +1475,9 @@ fn sync(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
             st.picker = None;
         }
     }
+    // What is on screen is part of the signature: every change of it comes
+    // through here.
+    place_panes(st, m);
 
     st.synced = signature(st, m);
     Task::batch(tasks)
@@ -1447,6 +1532,9 @@ fn pane_width(
         .get(pane)
         .map_or(size.width, |rect| rect.width as f32 * size.width)
 }
+
+#[cfg(test)]
+mod output_tests;
 
 #[cfg(test)]
 mod tests {

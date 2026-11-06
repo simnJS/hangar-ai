@@ -17,6 +17,16 @@
 //! view, then the layout), so sixteen panes printing a build log cost that
 //! once a frame, not once for every chunk that lands between two frames.
 //!
+//! A pane off screen (another workspace, the chat view, a pane zoomed over
+//! it) has nothing to draw: its output wakes the window on a flag of its own
+//! ([`Waker::off_screen`]), and from then on the panes off screen are looked
+//! at with the pane logic's tick, four times a second, and never once a
+//! frame. What they printed is in their terminal all the same, and the look
+//! hands the pane logic when they first and last printed
+//! ([`Printed`]), measured here on the reader thread, so the activity it
+//! reads from them is the one a look every frame would have read. Which
+//! side a pane is on is the window's to say ([`PaneLink::set_shown`]).
+//!
 //! The terminal's answers to the program's queries (cursor position, device
 //! attributes, colours) come out of the same feed and go straight to the
 //! pane's writer, in order with the typing; the other things the terminal
@@ -82,8 +92,11 @@ pub struct HubEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HubKind {
-    /// The pane printed something since the window last looked.
+    /// A pane on screen printed something since the window last looked.
     Output,
+    /// A pane off screen did: the window looks at those with the pane
+    /// logic's tick, not every frame.
+    OffScreen,
     /// The shell ended by itself (never after `pty_kill`).
     Exit,
     Bell,
@@ -99,14 +112,26 @@ pub enum HubKind {
 pub type HubSender = tokio_mpsc::UnboundedSender<HubEvent>;
 
 /// What a sink wakes the window with: the channel, and the flag every pane
-/// shares that says the window already knows output is coming, because a
-/// wake-up is on its way or it is looking at the panes every frame. Set by
-/// the sink that sends the wake-up, cleared by the window once a frame finds
-/// every pane quiet (`HubChannel::rest`).
+/// on screen shares that says the window already knows output is coming,
+/// because a wake-up is on its way or it is looking at the panes every frame.
+/// Set by the sink that sends the wake-up, cleared by the window once a frame
+/// finds every pane on screen quiet (`HubChannel::rest`). `off_screen` is the
+/// same for the panes off screen, which the window looks at with the pane
+/// logic's tick (`HubChannel::rest_off_screen`).
 #[derive(Debug, Clone)]
 pub struct Waker {
     pub sender: HubSender,
     pub awake: Arc<AtomicBool>,
+    pub off_screen: Arc<AtomicBool>,
+}
+
+/// When a pane printed since the window last looked: its first chunk and its
+/// last, in milliseconds since the Unix epoch, read on the thread the output
+/// arrived on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Printed {
+    pub first: u64,
+    pub last: u64,
 }
 
 /// What the writer thread does, in order.
@@ -121,13 +146,15 @@ enum Sink {
     Remote(tokio_mpsc::UnboundedSender<Outgoing>),
 }
 
-/// One pane's terminal, its writer, and the flag that says it printed since
-/// the window last looked.
+/// One pane's terminal, its writer, when it printed since the window last
+/// looked, and whether it is on screen.
 pub struct PaneLink {
     pub id: PaneId,
     terminal: Arc<Mutex<Terminal>>,
     jobs: mpsc::Sender<Job>,
-    woken: Arc<AtomicBool>,
+    woken: Arc<Mutex<Option<Printed>>>,
+    /// The window draws the pane: its output is looked at every frame.
+    shown: Arc<AtomicBool>,
     launch: Arc<Mutex<LaunchWatch>>,
     /// The remote side, for a pane of a remote workspace.
     remote: Option<RemoteSide>,
@@ -205,7 +232,10 @@ impl PaneLink {
             id,
             terminal: Arc::new(Mutex::new(terminal)),
             jobs,
-            woken: Arc::new(AtomicBool::new(false)),
+            woken: Arc::default(),
+            // On screen until the window says otherwise: looked at every
+            // frame, as before it knew.
+            shown: Arc::new(AtomicBool::new(true)),
             launch: Arc::default(),
             remote,
         })
@@ -321,9 +351,25 @@ impl PaneLink {
         let _ = self.jobs.send(Job::Resize(columns, rows));
     }
 
-    /// Whether the pane printed since the last look, which this look is.
-    pub fn take_output(&self) -> bool {
-        self.woken.swap(false, Ordering::AcqRel)
+    /// When the pane printed since the last look, which this look is.
+    pub fn take_output(&self) -> Option<Printed> {
+        self.woken
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .take()
+    }
+
+    /// Whether the window draws the pane (`Waker`).
+    pub fn is_shown(&self) -> bool {
+        self.shown.load(Ordering::Acquire)
+    }
+
+    /// The window draws the pane, or stopped drawing it. Whether that
+    /// changed: the window then looks at what it printed (`take_output`),
+    /// which a chunk printed before the change may have woken the other
+    /// side for.
+    pub fn set_shown(&self, shown: bool) -> bool {
+        self.shown.swap(shown, Ordering::AcqRel) != shown
     }
 
     /// The sink `pty_spawn` is handed: it feeds the terminal on the reader
@@ -343,6 +389,7 @@ impl PaneLink {
             terminal: self.terminal.clone(),
             jobs: self.jobs.clone(),
             woken: self.woken.clone(),
+            shown: self.shown.clone(),
             launch: self.launch.clone(),
             id: self.id.clone(),
             waker,
@@ -355,7 +402,8 @@ impl PaneLink {
 struct Feeder {
     terminal: Arc<Mutex<Terminal>>,
     jobs: mpsc::Sender<Job>,
-    woken: Arc<AtomicBool>,
+    woken: Arc<Mutex<Option<Printed>>>,
+    shown: Arc<AtomicBool>,
     launch: Arc<Mutex<LaunchWatch>>,
     id: PaneId,
     waker: Waker,
@@ -366,6 +414,7 @@ impl Feeder {
     /// remote shell's history), drawn without answering its queries nor
     /// ringing its bells again.
     fn output(&mut self, data: &str, replay: bool) {
+        let at = crate::panes_logic::wall_clock_ms();
         {
             let mut watch = self
                 .launch
@@ -408,16 +457,34 @@ impl Feeder {
             });
         }
         // After the feed, so a window that looks draws at least this chunk.
-        // The pane's own flag first: the window clears the shared one before
-        // it looks at the panes' (`Msg::Frame`), so a chunk it did not see
-        // either finds the shared one clear and wakes it, or is seen by its
-        // last look.
-        if !self.woken.swap(true, Ordering::AcqRel)
-            && !self.waker.awake.swap(true, Ordering::AcqRel)
-        {
+        // The pane's own record first: the window clears the shared flag
+        // before it looks at the panes' (`Msg::Frame`), so a chunk it did not
+        // see either finds the shared one clear and wakes it, or is seen by
+        // its last look. Which flag is read after the record, so a pane the
+        // window moves on or off screen meanwhile is either looked at by that
+        // move (`PaneLink::set_shown`) or wakes the side it is now on.
+        let fresh = {
+            let mut woken = self
+                .woken
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            let first = woken.map_or(at, |printed| printed.first);
+            let fresh = woken.is_none();
+            *woken = Some(Printed { first, last: at });
+            fresh
+        };
+        if !fresh {
+            return;
+        }
+        let (flag, kind) = if self.shown.load(Ordering::Acquire) {
+            (&self.waker.awake, HubKind::Output)
+        } else {
+            (&self.waker.off_screen, HubKind::OffScreen)
+        };
+        if !flag.swap(true, Ordering::AcqRel) {
             let _ = hub.send(HubEvent {
                 pane: self.id.clone(),
-                kind: HubKind::Output,
+                kind,
             });
         }
     }
@@ -518,6 +585,7 @@ mod tests {
         let waker = Waker {
             sender: hub,
             awake: awake.clone(),
+            off_screen: Arc::default(),
         };
         let shell = ShellInfo {
             id: "sh".into(),
@@ -569,12 +637,12 @@ mod tests {
             }
         }
         assert_eq!(outputs, 1);
-        assert!(link.take_output(), "it printed");
-        assert!(!link.take_output(), "and was looked at");
+        assert!(link.take_output().is_some(), "it printed");
+        assert!(link.take_output().is_none(), "and was looked at");
         // Still awake: more output is the window's to find, with no message.
         link.write(b"echo awake\r".to_vec());
         let deadline = Instant::now() + Duration::from_secs(10);
-        while Instant::now() < deadline && !link.take_output() {
+        while Instant::now() < deadline && link.take_output().is_none() {
             std::thread::sleep(Duration::from_millis(10));
         }
         std::thread::sleep(Duration::from_millis(100));
@@ -719,6 +787,7 @@ mod remote_tests {
         let waker = Waker {
             sender: hub,
             awake: Arc::new(AtomicBool::new(false)),
+            off_screen: Arc::default(),
         };
         let fast = Backoff {
             first: Duration::from_millis(10),
@@ -740,7 +809,7 @@ mod remote_tests {
                 .any(|line| line.contains("hello-remote"))
         })
         .await;
-        assert!(link.take_output(), "the pane printed");
+        assert!(link.take_output().is_some(), "the pane printed");
         let woken = wakes.recv().await.unwrap();
         assert_eq!((woken.pane, woken.kind), (id.clone(), HubKind::Output));
 

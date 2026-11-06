@@ -56,6 +56,13 @@ impl ActivityWatcher {
         self.next_tick.is_some()
     }
 
+    /// The burst followed, from its first byte to its last.
+    #[cfg(test)]
+    pub fn burst(&self) -> Option<(EpochMs, EpochMs)> {
+        self.next_tick
+            .map(|_| (self.burst_started_at, self.last_output_at))
+    }
+
     /// Call for every chunk of output; cost is constant per chunk. The first
     /// one of a burst starts it.
     pub fn push(&mut self, now: EpochMs) {
