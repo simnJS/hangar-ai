@@ -180,7 +180,13 @@ impl Panels {
     pub fn of(m: &Model, w: window::Id) -> Panels {
         let settings = m.settings();
         let scale = settings.scale_factor();
-        let terminals = m.view_in(w) == View::Terminals;
+        // The chat view has its own tasks column: the board dock would show
+        // the same tasks twice. The person's setting stays, and the dock is
+        // back with the grid.
+        let chat = m
+            .window_workspace(w)
+            .is_some_and(|ws| crate::chat_view::shown(m, ws));
+        let terminals = m.view_in(w) == View::Terminals && !chat;
         let drawer = m.drawer_in(w);
         // Until the row has been measured, everything counts as fitting.
         let room =

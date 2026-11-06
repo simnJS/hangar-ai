@@ -267,7 +267,11 @@ fn beat(cwd: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
 /// only there over the terminals.
 pub fn focus_entry(_st: &State, m: &Model, _region: Region) -> Option<Task<Message>> {
     let window = m.focused_window()?;
-    (m.view_in(window) == View::Terminals).then(|| iced::widget::operation::focus(input_id(window)))
+    let chat = m
+        .window_workspace(window)
+        .is_some_and(|ws| crate::chat_view::shown(m, ws));
+    (m.view_in(window) == View::Terminals && !chat)
+        .then(|| iced::widget::operation::focus(input_id(window)))
 }
 
 /// A dictation lands in the broadcast field when that is where the keyboard
@@ -317,7 +321,10 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
     let tr = ctx.i18n;
     let pane_count = ws.panes.len();
 
-    let lead: Element<'a, Message> = if ctx.view() == View::Terminals {
+    // The chat view has its own input: the broadcast field would type into
+    // terminals that are not on screen.
+    let chat = crate::chat_view::shown(ctx.model, ws);
+    let lead: Element<'a, Message> = if ctx.view() == View::Terminals && !chat {
         broadcast(st, ctx, ws)
     } else {
         info(ctx, ws)

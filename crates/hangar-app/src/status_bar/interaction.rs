@@ -310,3 +310,46 @@ fn a_main_window_whose_workspace_is_in_a_window_of_its_own_has_no_bar() {
     assert!(ui.find("3 panes").is_err());
     assert!(ui.find("1 pane").is_err());
 }
+
+#[test]
+fn the_chat_view_hides_the_broadcast_field_and_the_dock_and_the_grid_gets_them_back() {
+    use crate::settings::experiments;
+    use crate::state::store::{Patch, StoreAction};
+    use crate::state::types::Settings;
+
+    let mut model = model(View::Terminals);
+    model.apply(StoreAction::UpdateSettings(Patch::new(
+        |s: &mut Settings| {
+            s.experiments = vec![experiments::CHAT_VIEW.into()];
+            s.board_dock_open = true;
+        },
+    )));
+    let main = model.main_window().unwrap();
+    let pkg = Packages::default();
+    let st = State::default();
+    let screen = |model: &Model| {
+        let mut ui = simulate(view(&st, ctx(model, &pkg)));
+        (
+            ui.find("Broadcast").is_ok(),
+            crate::shell::side_panels::Panels::of(model, main)
+                .dock
+                .shown,
+        )
+    };
+    assert_eq!(screen(&model), (true, true), "the grid");
+
+    model.apply(StoreAction::SetChatView {
+        ws: "w".into(),
+        on: true,
+    });
+    assert_eq!(screen(&model), (false, false), "the chat view");
+    assert!(model.settings().board_dock_open, "the preference is kept");
+    assert!(focus_entry(&st, &model, Region::Status).is_none());
+
+    model.apply(StoreAction::SetChatView {
+        ws: "w".into(),
+        on: false,
+    });
+    assert_eq!(screen(&model), (true, true), "back to the grid");
+    assert!(focus_entry(&st, &model, Region::Status).is_some());
+}
