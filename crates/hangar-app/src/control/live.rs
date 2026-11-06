@@ -88,6 +88,23 @@ impl LivePort {
     fn host(&self) -> Host {
         self.services.core().host().clone()
     }
+
+    /// The node pane `pane` runs on, mounted or not yet: a pane of a
+    /// remote workspace, or a worker a local one sent to a node.
+    fn node_of(&self, pane: &str) -> Option<String> {
+        crate::nodes::engine::node_of_pane(&self.services.snapshot().state, pane)
+    }
+}
+
+/// `text` queued for pane `pane` on node `node`, its session's queue there.
+async fn enqueue_on(
+    node: String,
+    pane: String,
+    text: String,
+    from: Option<String>,
+) -> Result<(), String> {
+    let client = crate::nodes::remote::client_of(&node)?;
+    crate::nodes::engine::enqueue(&client, &pane, &text, from.as_deref()).await
 }
 
 /// `f` on tokio's blocking pool: the core commands that touch the disk or a
@@ -143,6 +160,10 @@ impl AppPort for LivePort {
         if let Some(alive) = crate::nodes::remote::alive(pane) {
             return Box::pin(async move { alive });
         }
+        // On a node, and not mounted here: not known to be alive.
+        if self.node_of(pane).is_some() {
+            return Box::pin(async { false });
+        }
         let pty = self.services.core().pty().clone();
         let pane = pane.clone();
         Box::pin(async move {
@@ -154,10 +175,15 @@ impl AppPort for LivePort {
 
     fn kill(&self, pane: &PaneId) -> BoxFuture<Result<(), String>> {
         let pty = self.services.core().pty().clone();
+        let node = self.node_of(pane);
         let pane = pane.clone();
         Box::pin(async move {
             if let Some(killed) = crate::nodes::remote::kill_pane(&pane).await {
                 return killed;
+            }
+            if let Some(node) = node {
+                let client = crate::nodes::remote::client_of(&node)?;
+                return crate::nodes::remote::kill(&client, &pane).await;
             }
             blocking(move || hangar_core::pty::pty_kill(&pty, pane, Some(true))).await?
         })
@@ -170,8 +196,13 @@ impl AppPort for LivePort {
         from: Option<&str>,
     ) -> BoxFuture<Result<(), String>> {
         let host = self.host();
+        let node = self.node_of(pane);
         let (pane, text, from) = (pane.clone(), text.to_string(), from.map(str::to_string));
         Box::pin(async move {
+            // A pane on a node: its session's queue is there.
+            if let Some(node) = node {
+                return enqueue_on(node, pane, text, from).await;
+            }
             blocking(move || {
                 hangar_core::bridge::bridge_enqueue(&host, pane, text, from);
             })
@@ -258,7 +289,10 @@ impl AppPort for LivePort {
     }
 
     fn delivery(&self) -> Option<Arc<dyn DeliveryDeps>> {
-        Some(Arc::new(LiveDelivery { host: self.host() }))
+        Some(Arc::new(LiveDelivery {
+            host: self.host(),
+            state: self.services.snapshot().state.clone(),
+        }))
     }
 
     fn orchestration(&self) -> Option<Arc<dyn OrchestrationHooks>> {
@@ -302,6 +336,9 @@ impl PaneTerminal for LiveTerminal {
 /// core's delivery, board and accounts, and the bridge queue.
 struct LiveDelivery {
     host: Host,
+    /// The model when the delivery started: the nodes of the settings, and
+    /// which panes run on one.
+    state: Arc<crate::state::types::AppState>,
 }
 
 /// The shells detected on this machine, once: what the shell detected at
@@ -406,8 +443,14 @@ impl DeliveryDeps for LiveDelivery {
     }
 
     fn tell(&self, pane: &PaneId, text: &str) -> BoxFuture<Result<(), String>> {
+        let node = crate::nodes::engine::node_of_pane(&self.state, pane);
         let (host, pane, text) = (self.host.clone(), pane.clone(), text.to_string());
         Box::pin(async move {
+            // A worker on a node hears from Hangar there.
+            if let Some(node) = node {
+                let from = Some(super::delivery_text::HANGAR.to_string());
+                return enqueue_on(node, pane, text, from).await;
+            }
             blocking(move || {
                 hangar_core::bridge::bridge_enqueue(
                     &host,
@@ -417,6 +460,50 @@ impl DeliveryDeps for LiveDelivery {
                 );
             })
             .await
+        })
+    }
+
+    fn bring_back(
+        &self,
+        workspace: String,
+        node: String,
+        worktree: String,
+        landing: bool,
+    ) -> BoxFuture<Result<String, String>> {
+        let config = self
+            .state
+            .settings
+            .nodes
+            .iter()
+            .find(|entry| entry.id == node)
+            .cloned();
+        Box::pin(async move {
+            let config = config.ok_or_else(|| {
+                format!("Node {node} is no longer in the settings, so your branch cannot be brought back from it. Tell the orchestrator.")
+            })?;
+            let client = crate::nodes::remote::client_of(&node)?;
+            let back = crate::nodes::away::bring_back(
+                &crate::nodes::runner::System,
+                &config,
+                &client,
+                &workspace,
+                &worktree,
+                landing,
+            )
+            .await?;
+            Ok(back.worktree)
+        })
+    }
+
+    fn clean_node(
+        &self,
+        node: String,
+        worktree: String,
+        branch: String,
+    ) -> BoxFuture<Result<Cleanup, String>> {
+        Box::pin(async move {
+            let client = crate::nodes::remote::client_of(&node)?;
+            Ok(crate::nodes::away::clean_node(&client, &worktree, &branch).await)
         })
     }
 }

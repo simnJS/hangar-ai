@@ -237,7 +237,12 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
         }
         Msg::Node(request) => {
             let ready = m.live.hydrated;
-            let port: Port = Arc::new(remote::RemotePort::new(st.port(sv), request.node.clone()));
+            // A worker a local workspace sent to this node is that
+            // workspace's; anything else of the node is the node's own.
+            let port: Port = match remote::away_workspace(m.state(), &request.node, &request.args) {
+                Some(ws) => Arc::new(remote::AwayPort::new(st.port(sv), ws)),
+                None => Arc::new(remote::RemotePort::new(st.port(sv), request.node.clone())),
+            };
             Task::future(async move {
                 let answer = match remote::refused(&request.op) {
                     _ if !ready => Err(STARTING.to_string()),

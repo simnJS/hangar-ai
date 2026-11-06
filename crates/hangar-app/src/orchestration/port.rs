@@ -28,6 +28,9 @@ pub struct WorkerInit {
     /// A worker in the workspace's own folder (no git): absent otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shared_folder: Option<bool>,
+    /// The node a worker sent to one runs on: absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node: Option<String>,
 }
 
 /// A pane an engine asks the model to add (`addPane(ws, {agent, cwd, name,

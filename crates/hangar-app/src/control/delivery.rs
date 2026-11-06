@@ -17,6 +17,12 @@
 //!
 //! A worker in a workspace that is not a git repository has no branch: what
 //! it hands in is done as it is (`done_in_folder`).
+//!
+//! A worker a local workspace sent to a node (nodes/away.rs) delivers here
+//! all the same: its branch is fetched back from the node and checked out
+//! where a local worker's worktree would be (`DeliveryDeps::bring_back`),
+//! and the delivery runs from that checkout, unchanged; once it lands, its
+//! worktree and branch on the node go too.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -392,6 +398,26 @@ fn worktree_of(ws: &Workspace, pane: &Pane) -> String {
     resolve_path(&ws.cwd, folder)
 }
 
+/// The checkout a worker's delivery runs from: its worktree here, or, for
+/// a worker on a node, its branch brought back from there.
+async fn delivered_from(
+    ws: &Workspace,
+    pane: &Pane,
+    delivery: &dyn DeliveryDeps,
+    landing: bool,
+) -> Result<String, String> {
+    match crate::nodes::away::pane_node(pane) {
+        Some(node) => {
+            // A path on the node, as it is: not this machine's to resolve.
+            let there = pane.cwd.clone().unwrap_or_default();
+            delivery
+                .bring_back(ws.cwd.clone(), node, there, landing)
+                .await
+        }
+        None => Ok(worktree_of(ws, pane)),
+    }
+}
+
 /// The Claude account the review spends: the one a pane of this workspace
 /// would start on (`launchAccount`), by P8's rule
 /// (`accounts::launch_account_with`): pane over workspace over
@@ -532,10 +558,11 @@ async fn submitted(
     }
 
     let settings = orchestration_of(ws);
+    let worktree = delivered_from(ws, pane, delivery.as_ref(), false).await?;
     let plan = delivery
         .preflight(
             ws.cwd.clone(),
-            worktree_of(ws, pane),
+            worktree.clone(),
             settings.branch.clone(),
             false,
             Some(task_id.to_string()),
@@ -599,6 +626,7 @@ async fn submitted(
                 &pane,
                 &task,
                 &plan,
+                &worktree,
                 summary,
                 &port,
                 delivery.as_ref(),
@@ -804,6 +832,7 @@ async fn deliver(
     pane: &Pane,
     task: &Task,
     plan: &Plan,
+    worktree: &str,
     summary: Option<String>,
     port: &Port,
     delivery: &dyn DeliveryDeps,
@@ -816,7 +845,7 @@ async fn deliver(
     let shells = delivery.shells();
     let request = Delivery {
         workspace: ws.cwd.clone(),
-        worktree: worktree_of(ws, pane),
+        worktree: worktree.to_string(),
         branch: plan.branch.clone(),
         target: plan.target.clone(),
         task: TaskBrief {
@@ -978,14 +1007,23 @@ async fn settle(
                 branch_deleted: false,
                 kept: vec![error],
             });
+        let mut kept = cleanup.kept;
+        // A worker on a node: its worktree and branch there go too.
+        if let Some(node) = crate::nodes::away::pane_node(pane) {
+            let there = pane.cwd.clone().unwrap_or_default();
+            match delivery.clean_node(node, there, branch.to_string()).await {
+                Ok(cleanup) => kept.extend(cleanup.kept),
+                Err(error) => kept.push(error),
+            }
+        }
         let place = match &outcome.landed_in {
             Some(checkout) => format!(", fast-forwarded in {checkout}"),
             None => " (only its ref moved)".into(),
         };
         let mut lines = vec![format!("Landed on {target} ({}){place}.", short(merge))];
         lines.extend(details);
-        if !cleanup.kept.is_empty() {
-            lines.push(format!("Kept: {}.", cleanup.kept.join("; ")));
+        if !kept.is_empty() {
+            lines.push(format!("Kept: {}.", kept.join("; ")));
         }
         delivery
             .board_comment(cwd, &task.id, HANGAR, &lines.join("\n"))
@@ -1226,17 +1264,21 @@ async fn landing(
             task.title
         ));
     }
+    let worktree = delivered_from(ws, pane, delivery, true).await?;
     let plan = delivery
         .preflight(
             ws.cwd.clone(),
-            worktree_of(ws, pane),
+            worktree.clone(),
             orchestration_of(ws).branch,
             true,
             None,
         )
         .await?;
     *started = true;
-    let outcome = deliver(ws, pane, &task, &plan, None, port, delivery, true).await;
+    let outcome = deliver(
+        ws, pane, &task, &plan, &worktree, None, port, delivery, true,
+    )
+    .await;
     Ok((pane.clone(), plan, outcome))
 }
 

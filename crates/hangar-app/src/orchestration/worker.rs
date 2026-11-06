@@ -11,6 +11,12 @@
 //! once and how many a task gets are not: Hangar sets no limit on either,
 //! the orchestrator decides.
 //!
+//! A worker can be sent to a node (`node`, nodes/away.rs): the branch it
+//! starts from is pushed to a repository there, its worktree is made there
+//! and its pane runs there. The engine reaches the node's repository with
+//! the same git calls as a local one, by its path, which the port routes;
+//! the board, the claim and the delivery stay here.
+//!
 //! A workspace that is not a git repository has no worktree to give: its
 //! workers start in its own folder, side by side (`Pane::shared_folder`), and
 //! board.rs holds every task that runs beside another to the files it owns.
@@ -196,6 +202,25 @@ pub trait WorkerPort: Sync {
         base: &str,
         head: &str,
     ) -> impl Future<Output = Result<u32, String>> + Send;
+    /// The nodes connected now, a worker can be sent to: id and label.
+    fn nodes(&self) -> Vec<(String, String)> {
+        Vec::new()
+    }
+    /// Node `node`'s repository for this machine's repository at
+    /// `main_root`, with `branch` as it is here pushed into it
+    /// (`nodes::away::send_branch`): its path on the node. The git calls
+    /// above given that path, or a worktree of it, act on the node.
+    fn send_branch(
+        &self,
+        node: &str,
+        main_root: &str,
+        branch: &str,
+    ) -> impl Future<Output = Result<String, String>> + Send {
+        let _ = (node, main_root, branch);
+        std::future::ready(Err(
+            "Workers cannot be sent to a node from this Hangar.".to_string()
+        ))
+    }
 }
 
 /* ── Names, paths and ports ────────────────────────────────────── */
@@ -472,6 +497,8 @@ pub struct BriefFacts<'a> {
     /// A git repository, but the worker was started without a worktree: it
     /// works in the shared checkout, on its current branch.
     pub shared_checkout: bool,
+    /// The label of the node it runs on, when it was sent to one.
+    pub node: Option<&'a str>,
 }
 
 /// The worker's first message, and all it knows: it starts with a fresh
@@ -494,6 +521,10 @@ pub fn worker_brief(facts: &BriefFacts<'_>) -> String {
         _ => None,
     };
     let place = match git {
+        Some((branch, target, worktree)) if facts.node.is_some() => format!(
+            "- You run on the node \"{}\", a machine Hangar reaches over SSH, not on the person's computer. Your folder is a git worktree of its own there: {worktree}, on branch {branch}, made from {target} as it is on the person's computer. Work and commit there only. Never push, and never merge into {target} yourself.",
+            facts.node.unwrap_or_default()
+        ),
         Some((branch, target, worktree)) => format!(
             "- Your folder is a git worktree of its own: {worktree}, on branch {branch}, made from {target}. Work and commit there only. Never push, and never merge into {target} yourself."
         ),
@@ -507,6 +538,9 @@ pub fn worker_brief(facts: &BriefFacts<'_>) -> String {
         ),
     };
     let done = match git {
+        Some((branch, _, _)) if facts.node.is_some() => format!(
+            "Commit everything on {branch}, leave the comment above, then call delivery_submit {{summary}} with a one-line summary. Hangar fetches your branch back to the person's computer, checks it there, has it reviewed and lands it; if anything fails, a message tells you what to fix."
+        ),
         Some((branch, _, _)) => format!(
             "Commit everything on {branch}, leave the comment above, then call delivery_submit {{summary}} with a one-line summary. Hangar checks your branch, has it reviewed and lands it; if anything fails, a message tells you what to fix."
         ),
@@ -514,6 +548,9 @@ pub fn worker_brief(facts: &BriefFacts<'_>) -> String {
         None => "Leave the comment above, then call delivery_submit {summary} with a one-line summary. Nothing is merged or reviewed here: Hangar marks your task done, tells the orchestrator and closes your pane.".to_string(),
     };
     let check = match (facts.check_command.filter(|c| !c.is_empty()), git.is_some()) {
+        (Some(command), true) if facts.node.is_some() => {
+            format!("- `{command}` passes in your worktree. It runs again on the person's computer, with a review of your diff, when you deliver.")
+        }
         (Some(command), true) => {
             format!("- `{command}` passes in your worktree. It runs again, with a review of your diff, when you deliver.")
         }
@@ -693,6 +730,53 @@ fn name_arg(
     Ok(wanted)
 }
 
+/// The connected node `wanted` names (its id or label), as id and label;
+/// refused, with the ones it could be, otherwise.
+fn node_arg(
+    ws: &Workspace,
+    wanted: &Value,
+    worktree: Option<bool>,
+    port: &impl WorkerPort,
+) -> Result<(String, String), String> {
+    let connected = port.nodes();
+    let listed = if connected.is_empty() {
+        "none is connected now (Settings › Nodes)".to_string()
+    } else {
+        let names: Vec<String> = connected
+            .iter()
+            .map(|(id, label)| format!("\"{label}\" ({id})"))
+            .collect();
+        format!("connected now: {}", names.join(", "))
+    };
+    let Some(wanted) = text(Some(wanted)) else {
+        return Err(format!(
+            "node is the id or name of a connected node; {listed}. Leave it out to start the worker here."
+        ));
+    };
+    if ws.node.is_some() {
+        return Err(format!(
+            "\"{}\" lives on a node already, and its workers run there: leave node out.",
+            ws.name
+        ));
+    }
+    if worktree == Some(false) {
+        return Err(
+            "A worker on a node works in a worktree there: leave worktree out, or node.".into(),
+        );
+    }
+    let lower = wanted.to_lowercase();
+    connected
+        .iter()
+        .find(|(id, _)| *id == wanted)
+        .or_else(|| {
+            connected
+                .iter()
+                .find(|(_, label)| label.to_lowercase() == lower)
+        })
+        .cloned()
+        .ok_or_else(|| format!("No connected node \"{wanted}\"; {listed}."))
+}
+
 /* ── worker_spawn ──────────────────────────────────────────────── */
 
 /// What `worker_spawn` is asked (`{task, name?, model?}`).
@@ -703,6 +787,8 @@ pub struct SpawnRequest {
     pub model: Option<Value>,
     /// `false`: no worktree, the worker starts in the workspace's own folder.
     pub worktree: Option<Value>,
+    /// The id or label of a connected node to run it on.
+    pub node: Option<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -731,6 +817,9 @@ pub struct SpawnedWorker {
     pub base: Option<String>,
     pub worktree: Option<String>,
     pub ports: Ports,
+    /// The id of the node it runs on, when it was sent to one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node: Option<String>,
     pub brief: String,
     pub note: String,
 }
@@ -739,7 +828,13 @@ pub struct SpawnedWorker {
 #[derive(Debug, Clone)]
 enum Undo {
     Release,
-    RemoveWorktree { path: String, branch: String },
+    /// `repo`: where the worktree was added from — the workspace's folder,
+    /// or the node's repository.
+    RemoveWorktree {
+        repo: String,
+        path: String,
+        branch: String,
+    },
     ClosePane(PaneId),
 }
 
@@ -763,6 +858,8 @@ struct Start<'a> {
     by: Option<&'a Pane>,
     /// `Some(false)`: start in the workspace's own folder, with no worktree.
     worktree: Option<bool>,
+    /// The node it is sent to: its id and label.
+    node: Option<(String, String)>,
 }
 
 /// Starts a worker on a task: claim, worktree, pane, brief — all of them, or
@@ -789,6 +886,10 @@ pub async fn spawn_worker(
         return Err(
             "Give the id of the task to hand over (task), as board_list_tasks shows it.".into(),
         );
+    };
+    let node = match request.node.as_ref() {
+        None | Some(Value::Null) => None,
+        Some(wanted) => Some(node_arg(ws, wanted, worktree, port)?),
     };
     if !state.settings.claude_bridge {
         return Err(
@@ -836,6 +937,7 @@ pub async fn spawn_worker(
         port_base,
         by,
         worktree,
+        node,
     };
     let mut undo: Vec<Undo> = Vec::new();
     let outcome = start_steps(&start, port, &mut undo).await;
@@ -889,9 +991,9 @@ async fn run_undo(start: &Start<'_>, step: &Undo, port: &impl WorkerPort) -> Res
             .release(&ws.cwd, &start.task_id, &start.name, true)
             .await
             .map(drop),
-        Undo::RemoveWorktree { path, branch } => {
-            remove_worktree(ws, path, port).await?;
-            port.branch_delete(&ws.cwd, branch, true).await.map(drop)
+        Undo::RemoveWorktree { repo, path, branch } => {
+            remove_worktree(repo, path, port).await?;
+            port.branch_delete(repo, branch, true).await.map(drop)
         }
         Undo::ClosePane(id) => {
             let _ = port.kill_pane(id).await;
@@ -926,6 +1028,12 @@ async fn start_steps(
     let target = git
         .as_ref()
         .and_then(|_| settings.branch.clone().or_else(|| repo.branch.clone()));
+    if start.node.is_some() && git.is_none() {
+        return Err(format!(
+            "\"{}\" is not a git repository, so its worker cannot be sent to a node: what it does there comes back through git. Leave node out to start it here.",
+            ws.name
+        ));
+    }
     if git.is_some() && target.is_none() {
         return Err(format!(
             "{} is on a detached HEAD, so there is no branch to start workers from. Ask the person to check one out, or to set the branch in the workspace's orchestration settings.",
@@ -942,16 +1050,29 @@ async fn start_steps(
     let mut hook_failure: Option<HookFailure> = None;
     let mut folder = ws.cwd.clone();
     if let (Some((root, main_root)), Some(target)) = (&git, &target) {
-        let (branch, path) = add_worktree(ws, main_root, &task, target, port).await?;
+        // On a node, the worktree is one of the node's repository, which
+        // gets the branch it starts from first.
+        let (repo, base_root) = match &start.node {
+            Some((node, _)) => {
+                let repo = port.send_branch(node, main_root, target).await?;
+                (repo.clone(), repo)
+            }
+            None => (ws.cwd.clone(), main_root.clone()),
+        };
+        let (branch, path) = add_worktree(&repo, &base_root, &task, target, port).await?;
         // A workspace on a subfolder of its repository: the same subfolder there.
         folder = join_path(&path, &inside(root, &ws.cwd).unwrap_or_default());
         undo.push(Undo::RemoveWorktree {
+            repo: repo.clone(),
             path: path.clone(),
             branch: branch.clone(),
         });
         // A convenience, as in the worktree panel: a failed copy never undoes
-        // the start.
-        let _ = port.copy_ignored(root, &path, &COPY_PATTERNS).await;
+        // the start. The files are this machine's: a worker on a node goes
+        // without.
+        if start.node.is_none() {
+            let _ = port.copy_ignored(root, &path, &COPY_PATTERNS).await;
+        }
         // The person's own command, if they set one. Its failure never undoes
         // the start: the worker is told in its brief, and so is the
         // orchestrator.
@@ -966,7 +1087,7 @@ async fn start_steps(
             .filter(|command| !command.is_empty())
             .map(str::to_string);
         if let Some(command) = command {
-            let report = match port.worktree_hook(&ws.cwd, &path, &command).await {
+            let report = match port.worktree_hook(&repo, &path, &command).await {
                 Ok(report) => report,
                 Err(error) => Some(HookReport {
                     ok: false,
@@ -1006,6 +1127,7 @@ async fn start_steps(
             model: start.model.clone(),
             port_base: start.port_base,
             shared_folder: (git.is_none() || shared_checkout).then_some(true),
+            node: start.node.as_ref().map(|(node, _)| node.clone()),
         }),
     };
     let Some(id) = port.add_pane(&ws.id, pane).await else {
@@ -1047,7 +1169,7 @@ async fn start_steps(
         build_cache: hangar_core::build_cache::env_for(
             std::path::Path::new(&ws.cwd),
             &ws.id,
-            settings.shared_build_cache && ws.node.is_none(),
+            settings.shared_build_cache && ws.node.is_none() && start.node.is_none(),
         )
         .into_iter()
         .map(|(name, _)| name)
@@ -1056,6 +1178,7 @@ async fn start_steps(
         attempt,
         hook_failure: hook_failure.as_ref(),
         shared_checkout,
+        node: start.node.as_ref().map(|(_, label)| label.as_str()),
     });
     port.enqueue(&id, &brief, by.unwrap_or("hangar")).await?;
 
@@ -1083,6 +1206,12 @@ async fn start_steps(
             ws.name
         ));
     }
+    if let Some((_, label)) = &start.node {
+        note.push_str(&format!(
+            "It runs on the node \"{label}\", in a worktree of a copy of the repository there made from {}. When it delivers, Hangar fetches its branch back here, where it is checked, reviewed and landed as usual. ",
+            target.as_deref().unwrap_or_default()
+        ));
+    }
     if let Some(failure) = &hook_failure {
         note.push_str(&format!(
             "The workspace's postCreate command ({}) {}; the worker was told in its brief. ",
@@ -1108,6 +1237,7 @@ async fn start_steps(
             base: start.port_base,
             count: PORT_COUNT,
         },
+        node: start.node.as_ref().map(|(node, _)| node.clone()),
         brief: "queued: submitted as soon as its Claude Code session is ready".into(),
         note,
     })
@@ -1127,9 +1257,11 @@ async fn free_folder(port: &impl WorkerPort, base: &str) -> Option<String> {
     None
 }
 
-/// A new branch from `target` and its worktree, beside the main checkout.
+/// A new branch from `target` and its worktree, beside the main checkout
+/// `main_root`, added from `repo` (the workspace's folder, or the node's
+/// repository).
 async fn add_worktree(
-    ws: &Workspace,
+    repo: &str,
     main_root: &str,
     task: &Task,
     target: &str,
@@ -1147,7 +1279,7 @@ async fn add_worktree(
             continue;
         };
         match port
-            .worktree_add(&ws.cwd, &path, &branch, true, Some(target))
+            .worktree_add(repo, &path, &branch, true, Some(target))
             .await
         {
             Ok(()) => return Ok((branch, path)),
@@ -1182,11 +1314,12 @@ async fn add_worktree(
     ))
 }
 
-/// Forced: only called once nothing in it is worth keeping.
-async fn remove_worktree(ws: &Workspace, path: &str, port: &impl WorkerPort) -> Result<(), String> {
+/// Forced: only called once nothing in it is worth keeping. `repo`: the
+/// workspace's folder, or the node's repository.
+async fn remove_worktree(repo: &str, path: &str, port: &impl WorkerPort) -> Result<(), String> {
     let mut last: Option<String> = None;
     for attempt in 1..=REMOVE_TRIES {
-        match port.worktree_remove(&ws.cwd, path, true).await {
+        match port.worktree_remove(repo, path, true).await {
             Ok(result) if result.removed => return Ok(()),
             Ok(result) => last = result.message,
             Err(error) => last = Some(error),
@@ -1225,6 +1358,21 @@ pub async fn list_workers(ws: &Workspace, port: &impl WorkerPort) -> Value {
             iced::futures::join!(port.board_load(&ws.cwd), port.worktree_list(&ws.cwd));
         (tasks.unwrap_or_default(), trees.unwrap_or_default())
     };
+    // The workers on a node: the worktrees of the node's repository.
+    let mut away: HashMap<String, Vec<Worktree>> = HashMap::new();
+    for pane in &panes {
+        let Some((repo, _)) = crate::nodes::away::pane_node(pane)
+            .and(pane.cwd.as_deref())
+            .and_then(crate::nodes::away::repo_of)
+        else {
+            continue;
+        };
+        if let std::collections::hash_map::Entry::Vacant(slot) = away.entry(repo) {
+            let listed = port.worktree_list(slot.key()).await.unwrap_or_default();
+            slot.insert(listed);
+        }
+    }
+    let nodes = port.nodes();
     let open = port.is_open(&ws.id);
     let mut workers = Vec::new();
     for pane in panes {
@@ -1233,8 +1381,15 @@ pub async fn list_workers(ws: &Workspace, port: &impl WorkerPort) -> Value {
             .as_deref()
             .and_then(|id| tasks.iter().find(|task| task.id == id));
         let shared = pane.shared_folder == Some(true);
+        let node = crate::nodes::away::pane_node(pane);
+        let listed = node
+            .as_ref()
+            .and(pane.cwd.as_deref())
+            .and_then(crate::nodes::away::repo_of)
+            .and_then(|(repo, _)| away.get(&repo))
+            .unwrap_or(&trees);
         let tree = match (&pane.cwd, shared) {
-            (Some(cwd), false) => worktree_of(&trees, cwd),
+            (Some(cwd), false) => worktree_of(listed, cwd),
             _ => None,
         };
         let task_value = match (task, &pane.task_id) {
@@ -1268,12 +1423,29 @@ pub async fn list_workers(ws: &Workspace, port: &impl WorkerPort) -> Value {
         if shared {
             entry["folder"] = json!(pane.cwd.clone().unwrap_or_else(|| ws.cwd.clone()));
         }
+        if let Some(node) = node {
+            let label = nodes
+                .iter()
+                .find(|(id, _)| *id == node)
+                .map(|(_, label)| label.clone());
+            entry["node"] = json!({ "id": node, "label": label, "connected": label.is_some() });
+        }
         workers.push(entry);
     }
-    json!({
+    let mut listing = json!({
         "workspace": ws.name,
         "workers": workers,
-    })
+    });
+    // Where a worker can be sent (worker_spawn node), when anywhere.
+    if !nodes.is_empty() {
+        listing["nodes"] = json!(
+            nodes
+                .iter()
+                .map(|(id, label)| json!({ "id": id, "label": label }))
+                .collect::<Vec<_>>()
+        );
+    }
+    listing
 }
 
 /* ── worker_stop ───────────────────────────────────────────────── */
@@ -1295,6 +1467,9 @@ pub struct StoppedWorktree {
     /// Why it was kept.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kept: Option<String>,
+    /// The node it is on, for a worker sent to one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node: Option<String>,
 }
 
 /// What `worker_stop` answers (`StoppedWorker`).
@@ -1309,6 +1484,7 @@ pub struct StoppedWorker {
 /// worth keeping.
 async fn work_kept(
     ws: &Workspace,
+    repo: &str,
     path: &str,
     tree: &Worktree,
     port: &impl WorkerPort,
@@ -1343,7 +1519,7 @@ async fn work_kept(
     let (Some(head), Some(target)) = (head, target) else {
         return Some("there is no branch to compare it with, so nothing was deleted".into());
     };
-    let Ok(ahead) = port.commits_ahead(&ws.cwd, &target, &head).await else {
+    let Ok(ahead) = port.commits_ahead(repo, &target, &head).await else {
         return Some(format!(
             "it could not be compared with {target}, so nothing was deleted"
         ));
@@ -1368,9 +1544,16 @@ pub async fn stop_worker(
     by: Option<&str>,
 ) -> StoppedWorker {
     let shared = pane.shared_folder == Some(true);
+    // A worker on a node: its worktree is one of the node's repository.
+    let node = crate::nodes::away::pane_node(pane);
+    let repo = node
+        .as_ref()
+        .and(pane.cwd.as_deref())
+        .and_then(crate::nodes::away::repo_of)
+        .map_or_else(|| ws.cwd.clone(), |(repo, _)| repo);
     // Read while the worktree still exists: it names the branch.
     let trees = match (&pane.cwd, shared) {
-        (Some(_), false) => port.worktree_list(&ws.cwd).await.unwrap_or_default(),
+        (Some(_), false) => port.worktree_list(&repo).await.unwrap_or_default(),
         _ => Vec::new(),
     };
     let tree = match (&pane.cwd, shared) {
@@ -1399,6 +1582,7 @@ pub async fn stop_worker(
         removed: false,
         branch_deleted: false,
         kept: None,
+        node: node.clone(),
     };
     match (&path, tree) {
         _ if shared => {
@@ -1421,14 +1605,14 @@ pub async fn stop_worker(
         }
         (Some(path), Some(tree)) => {
             port.sleep(SETTLE_MS).await;
-            match work_kept(ws, path, tree, port).await {
+            match work_kept(ws, &repo, path, tree, port).await {
                 Some(reason) => {
                     worktree.kept = Some(format!(
                         "{reason}. Merge or salvage it from there; the person can remove it from the worktree panel."
                     ));
                 }
                 None => {
-                    match remove_worktree(ws, path, port).await {
+                    match remove_worktree(&repo, path, port).await {
                         Ok(()) => worktree.removed = true,
                         // Already one plain line naming what holds it: say it as it is.
                         Err(error) => {
@@ -1442,7 +1626,7 @@ pub async fn stop_worker(
                         && let Some(branch) = &tree.branch
                     {
                         worktree.branch_deleted = port
-                            .branch_delete(&ws.cwd, branch, true)
+                            .branch_delete(&repo, branch, true)
                             .await
                             .map(|result| result.deleted)
                             .unwrap_or(false);
@@ -1532,6 +1716,7 @@ pub async fn worker_control(
                 name: args.get("name").cloned(),
                 model: args.get("model").cloned(),
                 worktree: args.get("worktree").cloned(),
+                node: args.get("node").cloned(),
             };
             let spawned = spawn_worker(ws, &request, port, Some(me)).await?;
             serde_json::to_value(spawned).map_err(|err| err.to_string())

@@ -94,6 +94,9 @@ struct World {
     events: Mutex<Vec<(String, OrchestratorEvent)>>,
     journal: Mutex<HashMap<String, Vec<JournalEntry>>>,
     starting: Mutex<Starting>,
+    /// The nodes connected, and what the start sent to them.
+    nodes: Mutex<Vec<(String, String)>>,
+    sent: Mutex<Option<String>>,
     /// Lets a concurrent start run while this one waits on git, as the TS's
     /// awaits did.
     yields: bool,
@@ -154,6 +157,8 @@ fn world(options: Options) -> World {
         events: Mutex::new(Vec::new()),
         journal: Mutex::new(HashMap::new()),
         starting: Mutex::new(Starting::default()),
+        nodes: Mutex::new(Vec::new()),
+        sent: Mutex::new(None),
         yields: false,
     }
 }
@@ -317,6 +322,9 @@ impl WorkerPort for World {
             added.model = Some(init.model.clone());
             added.port_base = Some(init.port_base);
             added.shared_folder = init.shared_folder;
+            if let Some(node) = &init.node {
+                crate::nodes::away::set_pane_node(&mut added, node);
+            }
         }
         self.map_shop(|ws| ws.panes.push(added));
         Some(id)
@@ -598,11 +606,36 @@ impl WorkerPort for World {
         })
     }
 
-    async fn commits_ahead(&self, _path: &str, base: &str, head: &str) -> Result<u32, String> {
-        self.push(format!("ahead:{base}..{head}"));
+    async fn commits_ahead(&self, path: &str, base: &str, head: &str) -> Result<u32, String> {
+        if path == NODE_REPO {
+            self.push(format!("ahead@node:{base}..{head}"));
+        } else {
+            self.push(format!("ahead:{base}..{head}"));
+        }
         Ok(self.ahead.lock().unwrap().get(head).copied().unwrap_or(0))
     }
+
+    fn nodes(&self) -> Vec<(String, String)> {
+        self.nodes.lock().unwrap().clone()
+    }
+
+    async fn send_branch(
+        &self,
+        node: &str,
+        main_root: &str,
+        branch: &str,
+    ) -> Result<String, String> {
+        self.push(format!("send:{node}:{main_root}:{branch}"));
+        if let Some(error) = self.sent.lock().unwrap().clone() {
+            return Err(error);
+        }
+        self.folders.lock().unwrap().insert(NODE_REPO.into());
+        Ok(NODE_REPO.into())
+    }
 }
+
+/// The node's repository for the shop, as `send_branch` answers it.
+const NODE_REPO: &str = "/home/h/hangar-repos/shop-1a2b3c4d";
 
 fn tasks_one_two() -> Vec<Task> {
     vec![job("t1", "One", &["a/**"]), job("t2", "Two", &["b/**"])]
@@ -1556,6 +1589,226 @@ async fn undoes_a_start_that_fails_without_leaving_anything_in_the_folder_to_rem
     assert_eq!(undone, ["kill:p10", "close:p10", "release:t1:Mia:true"]);
 }
 
+/* ── Workers sent to a node ────────────────────────────────────── */
+
+fn with_node(options: Options) -> World {
+    let app = world(options);
+    *app.nodes.lock().unwrap() = vec![("n1".into(), "GPU box".into())];
+    app
+}
+
+#[tokio::test]
+async fn sends_a_worker_to_a_node_its_base_pushed_its_worktree_there_and_its_brief_saying_so() {
+    let app = with_node(Options {
+        tasks: vec![job("t1", "One", &["a/**"])],
+        orchestration: Some(OrchestrationSettings {
+            check_command: Some("cargo test".into()),
+            ..Default::default()
+        }),
+        post_create: Some("make deps".into()),
+        ..Options::default()
+    });
+    let spawned = app
+        .call("worker_spawn", json!({"task": "t1", "node": "gpu box"}))
+        .await
+        .unwrap();
+    let branch = "hangar/one-t1";
+    let path = format!("{NODE_REPO}-worktrees/hangar-one-t1");
+    assert_eq!(spawned["node"], "n1");
+    assert_eq!(spawned["worktree"], path.as_str());
+    assert_eq!(spawned["folder"], path.as_str());
+    assert_eq!(spawned["branch"], branch);
+    assert!(
+        spawned["note"]
+            .as_str()
+            .unwrap()
+            .contains("runs on the node \"GPU box\"")
+    );
+    let mia = app.pane_named("Mia").unwrap();
+    assert_eq!(mia.cwd.as_deref(), Some(path.as_str()));
+    assert_eq!(
+        crate::nodes::away::pane_node(&mia).as_deref(),
+        Some("n1"),
+        "the pane runs on the node"
+    );
+    let made: Vec<String> = app
+        .log()
+        .into_iter()
+        .filter(|line| {
+            ["claim:", "send:", "worktree:", "copy:", "hook:", "update:"]
+                .iter()
+                .any(|p| line.starts_with(p))
+        })
+        .collect();
+    assert_eq!(
+        made,
+        [
+            "claim:t1:Mia".to_string(),
+            format!("send:n1:{REPO}:main"),
+            format!("worktree:{path}:{branch}:main:true"),
+            // No copy: this machine's ignored files stay here.
+            format!("hook:{path}:make deps"),
+            format!(
+                r#"update:{}:{{"role":"worker","taskId":"t1","model":"sonnet","portBase":{},"node":"n1"}}"#,
+                mia.id,
+                PORT_POOL_START + 20
+            ),
+        ]
+    );
+    let brief = app.brief("Mia");
+    for needed in [
+        "You run on the node \"GPU box\"".to_string(),
+        format!("a git worktree of its own there: {path}, on branch {branch}, made from main"),
+        "`cargo test` passes in your worktree. It runs again on the person's computer".to_string(),
+        "Hangar fetches your branch back to the person's computer".to_string(),
+    ] {
+        assert!(brief.contains(&needed), "{needed}\n---\n{brief}");
+    }
+    assert!(!brief.contains("build cache"));
+}
+
+#[tokio::test]
+async fn refuses_a_node_that_is_not_connected_or_cannot_take_the_worker() {
+    let app = with_node(Options {
+        tasks: vec![job("t1", "One", &["a/**"])],
+        ..Options::default()
+    });
+    let refused = err(app
+        .call("worker_spawn", json!({"task": "t1", "node": "nope"}))
+        .await);
+    assert!(refused.contains("No connected node \"nope\""), "{refused}");
+    assert!(refused.contains("\"GPU box\" (n1)"), "{refused}");
+    let refused = err(app
+        .call(
+            "worker_spawn",
+            json!({"task": "t1", "node": "n1", "worktree": false}),
+        )
+        .await);
+    assert!(refused.contains("works in a worktree there"), "{refused}");
+    assert!(
+        app.log().is_empty(),
+        "refused before anything: {:?}",
+        app.log()
+    );
+
+    app.fail().repo = Some(RepoFail::None);
+    let refused = err(app
+        .call("worker_spawn", json!({"task": "t1", "node": "n1"}))
+        .await);
+    assert!(refused.contains("not a git repository"), "{refused}");
+    assert_eq!(app.task("t1").column, "todo");
+
+    let none = world(Options {
+        tasks: vec![job("t1", "One", &["a/**"])],
+        ..Options::default()
+    });
+    let refused = err(none
+        .call("worker_spawn", json!({"task": "t1", "node": "n1"}))
+        .await);
+    assert!(refused.contains("none is connected now"), "{refused}");
+
+    let remote = with_node(Options {
+        tasks: vec![job("t1", "One", &["a/**"])],
+        ..Options::default()
+    });
+    remote.map_shop(|ws| ws.node = Some("n1".into()));
+    let refused = err(remote
+        .call("worker_spawn", json!({"task": "t1", "node": "n1"}))
+        .await);
+    assert!(refused.contains("lives on a node already"), "{refused}");
+}
+
+#[tokio::test]
+async fn a_start_on_a_node_that_fails_undoes_its_worktree_there() {
+    let app = with_node(Options {
+        tasks: vec![job("t1", "One", &["a/**"])],
+        ..Options::default()
+    });
+    app.fail().add_pane = true;
+    let message = err(app
+        .call("worker_spawn", json!({"task": "t1", "node": "n1"}))
+        .await);
+    assert!(message.contains("Nothing was left behind"), "{message}");
+    let undone: Vec<String> = app
+        .log()
+        .into_iter()
+        .filter(|line| {
+            ["unworktree:", "unbranch:", "release:"]
+                .iter()
+                .any(|p| line.starts_with(p))
+        })
+        .collect();
+    assert_eq!(
+        undone,
+        [
+            format!("unworktree:{NODE_REPO}-worktrees/hangar-one-t1:true"),
+            "unbranch:hangar/one-t1:true".to_string(),
+            "release:t1:Mia:true".to_string(),
+        ]
+    );
+
+    // The push refused: nothing to undo on the node.
+    let app = with_node(Options {
+        tasks: vec![job("t1", "One", &["a/**"])],
+        ..Options::default()
+    });
+    *app.sent.lock().unwrap() = Some("Could not send main to node \"GPU box\"".into());
+    let message = err(app
+        .call("worker_spawn", json!({"task": "t1", "node": "n1"}))
+        .await);
+    assert!(message.contains("Could not send main"), "{message}");
+    assert!(!app.log().iter().any(|line| line.starts_with("worktree:")));
+    assert_eq!(app.task("t1").column, "todo");
+}
+
+#[tokio::test]
+async fn stopping_a_worker_on_a_node_removes_its_worktree_there_and_lists_it_with_its_node() {
+    let app = with_node(Options {
+        tasks: vec![job("t1", "One", &["a/**"])],
+        ..Options::default()
+    });
+    app.call("worker_spawn", json!({"task": "t1", "node": "n1"}))
+        .await
+        .unwrap();
+    let path = format!("{NODE_REPO}-worktrees/hangar-one-t1");
+
+    let listed = app.call("worker_list", json!({})).await.unwrap();
+    assert_eq!(listed["nodes"], json!([{"id": "n1", "label": "GPU box"}]));
+    let mia = &listed["workers"][0];
+    assert_eq!(
+        mia["node"],
+        json!({"id": "n1", "label": "GPU box", "connected": true})
+    );
+    assert_eq!(mia["branch"], "hangar/one-t1");
+    assert_eq!(mia["worktree"], path.as_str());
+
+    app.clear_log();
+    let stopped = app
+        .call("worker_stop", json!({"worker": "Mia"}))
+        .await
+        .unwrap();
+    assert_eq!(stopped["worktree"]["removed"], true, "{stopped}");
+    assert_eq!(stopped["worktree"]["branchDeleted"], true, "{stopped}");
+    assert_eq!(stopped["worktree"]["node"], "n1");
+    let git: Vec<String> = app
+        .log()
+        .into_iter()
+        .filter(|line| {
+            ["ahead", "unworktree:", "unbranch:"]
+                .iter()
+                .any(|p| line.starts_with(p))
+        })
+        .collect();
+    assert_eq!(
+        git,
+        [
+            "ahead@node:main..hangar/one-t1".to_string(),
+            format!("unworktree:{path}:true"),
+            "unbranch:hangar/one-t1:true".to_string(),
+        ]
+    );
+}
+
 /* ── worker_list ───────────────────────────────────────────────── */
 
 #[tokio::test]
@@ -1874,6 +2127,7 @@ fn facts<'a>(owns: &'a [String]) -> BriefFacts<'a> {
         attempt: 1,
         hook_failure: None,
         shared_checkout: false,
+        node: None,
     }
 }
 

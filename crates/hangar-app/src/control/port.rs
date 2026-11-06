@@ -577,6 +577,36 @@ pub trait DeliveryDeps: Send + Sync {
     /// Queues `text` for a pane as a message from Hangar, never as the
     /// person's.
     fn tell(&self, pane: &PaneId, text: &str) -> BoxFuture<Result<(), String>>;
+    /// The branch of a worker on node `node`, whose worktree there is
+    /// `worktree`, fetched into the repository of `workspace` here and
+    /// checked out where a local worker's would be (nodes/away.rs): that
+    /// checkout's path, which the delivery then runs from. `landing` skips
+    /// the check for uncommitted changes, as the preflight does.
+    fn bring_back(
+        &self,
+        workspace: String,
+        node: String,
+        worktree: String,
+        landing: bool,
+    ) -> BoxFuture<Result<String, String>> {
+        let _ = (workspace, node, worktree, landing);
+        Box::pin(std::future::ready(Err(
+            "This Hangar does not deliver workers that run on a node.".to_string(),
+        )))
+    }
+    /// After a landing: the worktree and branch of a worker on node `node`
+    /// go from there.
+    fn clean_node(
+        &self,
+        node: String,
+        worktree: String,
+        branch: String,
+    ) -> BoxFuture<Result<Cleanup, String>> {
+        let _ = (node, worktree, branch);
+        Box::pin(std::future::ready(Err(
+            "This Hangar does not clean up after workers on a node.".to_string(),
+        )))
+    }
 }
 
 /// The orchestration engine's part of the bus (P19).

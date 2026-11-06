@@ -45,6 +45,8 @@ struct FakeDelivery {
     running: Mutex<Vec<Running>>,
     /// How many times the accounts were listed.
     listed_accounts: Mutex<usize>,
+    /// What bringing a branch back from a node says instead of its checkout.
+    bring_back_error: Mutex<Option<String>>,
 }
 
 fn ready<T: Send + 'static>(value: T) -> BoxFuture<T> {
@@ -204,7 +206,42 @@ impl DeliveryDeps for FakeDelivery {
         self.push(format!("tell:{pane}:{text}"));
         ready(Ok(()))
     }
+
+    fn bring_back(
+        &self,
+        workspace: String,
+        node: String,
+        worktree: String,
+        landing: bool,
+    ) -> BoxFuture<Result<String, String>> {
+        self.push(format!(
+            "bring_back:{workspace}:{node}:{worktree}:{landing}"
+        ));
+        match lock(&self.bring_back_error).clone() {
+            Some(error) => ready(Err(error)),
+            None => ready(Ok(BROUGHT.into())),
+        }
+    }
+
+    fn clean_node(
+        &self,
+        node: String,
+        worktree: String,
+        branch: String,
+    ) -> BoxFuture<Result<Cleanup, String>> {
+        self.push(format!("clean_node:{node}:{worktree}:{branch}"));
+        ready(Ok(Cleanup {
+            worktree_removed: true,
+            branch_deleted: false,
+            kept: vec!["the branch worker/t1 on the node could not be deleted: held".into()],
+        }))
+    }
 }
+
+/// A worker's worktree on a node, and where its branch is checked out here
+/// once brought back.
+const NODE_TREE: &str = "/home/h/hangar-repos/app-1a2b3c4d-worktrees/worker-t1";
+const BROUGHT: &str = "C:\\dev\\app-worktrees\\worker-t1";
 
 /// The orchestration engine, as far as deliveries reach it: the events.
 #[derive(Default)]
@@ -322,6 +359,7 @@ fn setup() -> Setup {
         preflight_tasks: Mutex::new(vec![]),
         running: Mutex::new(vec![]),
         listed_accounts: Mutex::new(0),
+        bring_back_error: Mutex::new(None),
     });
     let events = Arc::new(Events::default());
     *lock(&fake.delivery) = Some(delivery.clone());
@@ -1381,4 +1419,113 @@ async fn needs_a_window_that_delivers() {
         s.submit(json!({})).await.unwrap_err(),
         "Deliveries are not available in this Hangar window."
     );
+}
+
+/* ── A worker a local workspace sent to a node ───────────────── */
+
+impl Setup {
+    /// Bo runs on node n1, in a worktree there.
+    fn on_node(&self) {
+        self.fake.patch("w1", |ws| {
+            let bo = ws.panes.iter_mut().find(|pane| pane.id == "p2").unwrap();
+            bo.cwd = Some(NODE_TREE.into());
+            crate::nodes::away::set_pane_node(bo, "n1");
+        });
+    }
+}
+
+#[tokio::test]
+async fn a_worker_on_a_node_is_delivered_here_from_its_branch_brought_back() {
+    let s = setup();
+    s.on_node();
+    s.submit(json!({"summary": "Added the button."}))
+        .await
+        .unwrap();
+    s.fake.settle().await;
+
+    assert_eq!(
+        s.fake.logged("bring_back:"),
+        [format!("bring_back:C:\\dev\\app:n1:{NODE_TREE}:false")]
+    );
+    assert_eq!(
+        s.fake.logged("preflight:"),
+        [format!("preflight:{BROUGHT}:null:false")]
+    );
+    let run = &s.runs()[0];
+    assert_eq!(
+        (run.workspace.as_str(), run.worktree.as_str()),
+        ("C:\\dev\\app", BROUGHT),
+        "checked, reviewed and landed here"
+    );
+    assert_eq!(run.check_command.as_deref(), Some("pnpm test"));
+    // Landed: its checkout here goes, and its worktree on the node.
+    assert_eq!(
+        s.fake.logged("cleanup:"),
+        [format!("cleanup:{BROUGHT}:worker/t1:main")]
+    );
+    assert_eq!(
+        s.fake.logged("clean_node:"),
+        [format!("clean_node:n1:{NODE_TREE}:worker/t1")]
+    );
+    assert_eq!(s.task().column, "done");
+    contains(
+        &s.task().comments.last().unwrap().text,
+        "Kept: the branch worker/t1 on the node could not be deleted: held.",
+    );
+    assert!(s.fake.log().contains(&"close:w1:p2".into()));
+}
+
+#[tokio::test]
+async fn a_worker_on_a_node_hears_why_its_branch_did_not_come_back() {
+    let s = setup();
+    s.on_node();
+    *lock(&s.delivery.bring_back_error) = Some(
+        "Your worktree has uncommitted changes: a.ts. Only commits are delivered: commit them on worker/t1".into(),
+    );
+    contains(
+        &s.submit(json!({})).await.unwrap_err(),
+        "Your worktree has uncommitted changes: a.ts.",
+    );
+    assert!(s.fake.logged("preflight:").is_empty());
+    assert!(s.runs().is_empty());
+    assert_eq!(s.state(), None);
+    assert!(!delivering_in(&s.port(), "w1"));
+}
+
+#[tokio::test]
+async fn a_worker_s_delivery_from_a_node_that_waited_is_brought_back_again_to_land() {
+    let s = setup();
+    s.on_node();
+    s.settings(|settings| settings.auto_merge = false);
+    s.now(
+        Kind::Ready,
+        "worker/t1 passed: it waits for the person.",
+        |_| {},
+    );
+    s.submit(json!({})).await.unwrap();
+    s.fake.settle().await;
+    assert_eq!(s.task().column, "review");
+
+    s.now(Kind::Landed, "landed", |_| {});
+    land_delivery(&s.ws(), "t1", &s.port()).await.unwrap();
+    assert_eq!(
+        s.fake.logged("bring_back:"),
+        [
+            format!("bring_back:C:\\dev\\app:n1:{NODE_TREE}:false"),
+            // Landing asks nothing of the worktree, as the preflight does not.
+            format!("bring_back:C:\\dev\\app:n1:{NODE_TREE}:true"),
+        ]
+    );
+    assert_eq!(s.runs()[1].worktree, BROUGHT);
+    assert!(s.runs()[1].reuse);
+    assert_eq!(s.task().column, "done");
+}
+
+#[tokio::test]
+async fn a_local_worker_is_never_brought_back_from_anywhere() {
+    let s = setup();
+    s.submit(json!({})).await.unwrap();
+    s.fake.settle().await;
+    assert!(s.fake.logged("bring_back:").is_empty());
+    assert!(s.fake.logged("clean_node:").is_empty());
 }

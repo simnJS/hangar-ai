@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 
 use super::super::fake::{Fake, pane, workspace};
 use super::super::port::{AppPort, Port};
-use super::super::remote::{RemotePort, narrowed, refused};
+use super::super::remote::{AwayPort, RemotePort, away_workspace, narrowed, refused};
 use super::contains;
 use crate::nodes::testing::{answer, listen, read_request};
 use crate::services::Channel;
@@ -145,4 +145,72 @@ async fn a_message_for_a_node_s_pane_is_queued_on_the_node() {
         "not this machine's queue"
     );
     crate::nodes::remote::publish("n-queue", None);
+}
+
+/* ── A local workspace's worker on a node ──────────────────────── */
+
+/// "Hangar" of this machine has a worker, Zed, sent to node `node`.
+fn with_away(node: &str) -> Arc<Fake> {
+    let fake = with_remote(node);
+    let mut zed = pane(
+        "p7",
+        "Zed",
+        AgentId::Claude,
+        Some("/home/h/hangar-repos/hangar-1a-worktrees/hangar-x"),
+    );
+    zed.role = Some(crate::state::types::PaneRole::Worker);
+    zed.task_id = Some("t1".into());
+    crate::nodes::away::set_pane_node(&mut zed, node);
+    fake.patch("w1", |ws| ws.panes.push(zed));
+    fake
+}
+
+fn from_zed() -> Value {
+    json!({"caller": {"paneId": "p7", "paneName": "Zed"}})
+}
+
+#[test]
+fn a_worker_sent_to_a_node_asks_for_its_own_workspace_here() {
+    let fake = with_away("n-a");
+    let state = fake.snapshot().state.clone();
+    assert_eq!(
+        away_workspace(&state, "n-a", &from_zed()).as_deref(),
+        Some("w1")
+    );
+    // Another node does not speak for it; the node's own agents are the node's.
+    assert_eq!(away_workspace(&state, "n-b", &from_zed()), None);
+    assert_eq!(away_workspace(&state, "n-a", &from_nova()), None);
+    assert_eq!(away_workspace(&state, "n-a", &json!({})), None);
+    // A local pane that is not on a node is not reached through one.
+    let ava = json!({"caller": {"paneId": "p1"}});
+    assert_eq!(away_workspace(&state, "n-a", &ava), None);
+}
+
+#[tokio::test]
+async fn a_worker_sent_to_a_node_sees_its_workspace_only_and_no_file_here() {
+    let fake = with_away("n-a");
+    let port: Port = Arc::new(AwayPort::new(fake.port(), "w1".into()));
+    let ids: Vec<String> = port
+        .snapshot()
+        .state
+        .workspaces
+        .iter()
+        .map(|ws| ws.id.clone())
+        .collect();
+    assert_eq!(ids, ["w1"]);
+    let panes = super::super::answer("pane_list", from_zed(), Channel::Agent, &port)
+        .await
+        .unwrap();
+    assert_eq!(panes["workspace"]["name"], "Hangar", "{panes}");
+    let listed = super::super::answer("workspace_list", from_zed(), Channel::Agent, &port)
+        .await
+        .unwrap();
+    let names: Vec<&str> = listed["workspaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|ws| ws["name"].as_str())
+        .collect();
+    assert_eq!(names, ["Hangar"], "{listed}");
+    assert!(port.model_stat("C:\\dev\\hangar\\a.glb").await.is_err());
 }

@@ -13,6 +13,10 @@
 //!   `postCreate` in a new worktree; `POST /node/worktree/copy` `{from, to,
 //!   patterns}`: the ignored files a worktree is given (`.env`, …);
 //! - `DELETE /node/branch` `{repo, branch, force?}`: `git_branch_delete`;
+//! - `POST /node/repo` `{name}`: the bare repository the workers a local
+//!   workspace sends here work from, `~/hangar-repos/<name>`, made when
+//!   missing; the desktop pushes the workers' base branch into it over SSH
+//!   and fetches their branches back from it (see [`repo`]);
 //! - `POST /node/git` `{op, path, …}`: the read-only questions the engine
 //!   asks, and nothing else — no command line is ever taken (see [`GitOp`]);
 //! - `POST /node/board/claim-worker`, `/release-worker`, `/update`,
@@ -158,6 +162,94 @@ pub async fn branch_delete(Json(body): Json<BranchBody>) -> Response {
         return refused;
     }
     answered(hangar_core::git::git_branch_delete(body.repo, body.branch, body.force).await)
+}
+
+/// Where the repositories of the workers sent from local workspaces live,
+/// under the node's home.
+pub const REPOS_DIR: &str = "hangar-repos";
+
+#[derive(Deserialize)]
+pub struct RepoBody {
+    name: String,
+}
+
+/// What `POST /node/repo` answers.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Repo {
+    /// Absolute, on the node.
+    pub path: String,
+    /// Made by this call; `false`: it was there already.
+    pub created: bool,
+}
+
+/// A repository's name, as the desktop gives it: one plain folder name, so
+/// it stays inside [`REPOS_DIR`].
+fn repo_name_problem(name: &str) -> Option<&'static str> {
+    if name.is_empty() || name.len() > 100 {
+        return Some("name must be 1 to 100 characters");
+    }
+    if name.starts_with('.') || name.starts_with('-') {
+        return Some("name must not start with a dot or a dash");
+    }
+    if !name
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || "._-".contains(ch))
+    {
+        return Some("name takes letters, digits, dots, dashes and underscores only");
+    }
+    None
+}
+
+/// `<home>/hangar-repos/<name>`, a bare repository, made when it is not
+/// there. Bare: nothing is checked out in it, so the desktop's pushes never
+/// meet a checked-out branch, and each worker gets a worktree of it.
+pub fn ensure_repo(home: &std::path::Path, name: &str) -> Result<Repo, String> {
+    if let Some(problem) = repo_name_problem(name) {
+        return Err(problem.to_string());
+    }
+    let path = home.join(REPOS_DIR).join(name);
+    let spelled = path.to_string_lossy().into_owned();
+    if path.join("HEAD").is_file() && path.join("objects").is_dir() {
+        return Ok(Repo {
+            path: spelled,
+            created: false,
+        });
+    }
+    if path.exists()
+        && std::fs::read_dir(&path)
+            .map(|mut entries| entries.next().is_some())
+            .unwrap_or(true)
+    {
+        return Err(format!(
+            "{spelled} exists and is not a bare git repository: move it away first"
+        ));
+    }
+    std::fs::create_dir_all(&path).map_err(|err| format!("could not make {spelled}: {err}"))?;
+    let output = std::process::Command::new("git")
+        .args(["init", "--bare", "--quiet"])
+        .arg(&path)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|err| format!("git: {err}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "git init --bare {spelled}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(Repo {
+        path: spelled,
+        created: true,
+    })
+}
+
+pub async fn repo(State(node): State<Shared>, Json(body): Json<RepoBody>) -> Response {
+    if let Some(problem) = repo_name_problem(&body.name) {
+        return error(StatusCode::BAD_REQUEST, problem);
+    }
+    let home = node.home().to_path_buf();
+    answered(off_runtime(move || ensure_repo(&home, &body.name)).await)
 }
 
 /// The read-only questions `POST /node/git` answers: what the engine reads
@@ -399,6 +491,25 @@ pub async fn delivery_running() -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_repo_is_made_bare_once_and_its_name_stays_in_the_folder() {
+        let home = tempfile::tempdir().unwrap();
+        let made = ensure_repo(home.path(), "demo-1a2b3c4d").unwrap();
+        assert!(made.created);
+        let path = home.path().join(REPOS_DIR).join("demo-1a2b3c4d");
+        assert_eq!(made.path, path.to_string_lossy());
+        assert!(path.join("HEAD").is_file(), "bare: HEAD at its root");
+        let again = ensure_repo(home.path(), "demo-1a2b3c4d").unwrap();
+        assert!(!again.created);
+        for refused in ["", "../x", "a/b", ".hidden", "-x", "a b"] {
+            assert!(ensure_repo(home.path(), refused).is_err(), "{refused:?}");
+        }
+        let taken = home.path().join(REPOS_DIR).join("taken");
+        std::fs::create_dir_all(&taken).unwrap();
+        std::fs::write(taken.join("file"), "x").unwrap();
+        assert!(ensure_repo(home.path(), "taken").is_err());
+    }
 
     #[test]
     fn git_takes_its_known_questions_and_nothing_else() {

@@ -17,6 +17,11 @@
 //! does, so the node never holds a copy that could fall behind. What only
 //! means something on this machine is left out: its shells, its build
 //! cache, its Claude accounts (the node's review spends the node's login).
+//!
+//! A worker a local workspace sent to a node (nodes/away.rs) is not the
+//! node's: its requests come through the node all the same, and run here
+//! against its own workspace only ([`AwayPort`]), as a local worker's do —
+//! its board, its orchestrator, its delivery, landed on this machine.
 
 use std::sync::Arc;
 
@@ -31,7 +36,10 @@ use hangar_core::shells::ShellInfo;
 
 use crate::nodes::NodeClient;
 use crate::nodes::engine;
+use crate::state::types::AppState;
 use crate::state::{PaneId, Snapshot, WsId};
+
+use super::types::Caller;
 
 use super::delivery::Deliveries;
 use super::port::{
@@ -348,5 +356,171 @@ impl DeliveryDeps for RemoteDelivery {
         Box::pin(async move {
             engine::enqueue(&client?, &pane, &text, Some(super::delivery_text::HANGAR)).await
         })
+    }
+}
+
+/* ── A local workspace's worker on a node ──────────────────────── */
+
+/// The local workspace whose worker asks, when that worker is one sent to
+/// node `node`: its requests are this machine's, for that workspace.
+pub fn away_workspace(state: &AppState, node: &str, args: &Value) -> Option<WsId> {
+    let pane = Caller::of(args).pane_id?;
+    state
+        .workspaces
+        .iter()
+        .find(|ws| {
+            ws.node.is_none()
+                && ws.panes.iter().any(|entry| {
+                    entry.id == pane
+                        && crate::nodes::away::pane_node(entry).as_deref() == Some(node)
+                })
+        })
+        .map(|ws| ws.id.clone())
+}
+
+/// `snapshot` with only workspace `id`.
+pub fn narrowed_to(snapshot: &Snapshot, id: &str) -> Snapshot {
+    let mut state = (*snapshot.state).clone();
+    state.workspaces.retain(|ws| ws.id == id);
+    Snapshot {
+        state: Arc::new(state),
+        opened: snapshot
+            .opened
+            .iter()
+            .filter(|opened| *opened == id)
+            .cloned()
+            .collect(),
+        asleep: snapshot
+            .asleep
+            .iter()
+            .filter(|asleep| *asleep == id)
+            .cloned()
+            .collect(),
+        activity: snapshot.activity.clone(),
+        delivering: snapshot
+            .delivering
+            .iter()
+            .filter(|(ws, _)| *ws == id)
+            .map(|(ws, tasks)| (ws.clone(), tasks.clone()))
+            .collect(),
+        hydrated: snapshot.hydrated,
+    }
+}
+
+/// The app's port, for a worker of local workspace `workspace` running on a
+/// node: this machine's in everything (its panes on a node are reached
+/// there by the app's port itself), but it sees its own workspace only, and
+/// shows no file of this machine's in a preview — its files are the node's.
+pub struct AwayPort {
+    inner: Port,
+    workspace: WsId,
+}
+
+impl AwayPort {
+    pub fn new(inner: Port, workspace: WsId) -> AwayPort {
+        AwayPort { inner, workspace }
+    }
+}
+
+impl AppPort for AwayPort {
+    fn snapshot(&self) -> Arc<Snapshot> {
+        Arc::new(narrowed_to(&self.inner.snapshot(), &self.workspace))
+    }
+
+    fn apply(&self, cmd: ModelCmd) -> BoxFuture<Result<CmdOut, String>> {
+        self.inner.apply(cmd)
+    }
+
+    fn terminal(&self, pane: &PaneId) -> Option<Arc<dyn PaneTerminal>> {
+        self.inner.terminal(pane)
+    }
+
+    fn write(&self, pane: &PaneId, data: &str) -> BoxFuture<Result<(), String>> {
+        self.inner.write(pane, data)
+    }
+
+    fn alive(&self, pane: &PaneId) -> BoxFuture<bool> {
+        self.inner.alive(pane)
+    }
+
+    fn kill(&self, pane: &PaneId) -> BoxFuture<Result<(), String>> {
+        self.inner.kill(pane)
+    }
+
+    fn enqueue(
+        &self,
+        pane: &PaneId,
+        text: &str,
+        from: Option<&str>,
+    ) -> BoxFuture<Result<(), String>> {
+        self.inner.enqueue(pane, text, from)
+    }
+
+    fn dir_exists(&self, path: &str) -> BoxFuture<bool> {
+        self.inner.dir_exists(path)
+    }
+
+    fn can_detach(&self) -> bool {
+        self.inner.can_detach()
+    }
+
+    fn sleep(&self, ms: u64) -> BoxFuture<()> {
+        self.inner.sleep(ms)
+    }
+
+    fn spawn(&self, task: BoxFuture<()>) {
+        self.inner.spawn(task);
+    }
+
+    fn now_ms(&self) -> u64 {
+        self.inner.now_ms()
+    }
+
+    fn model_allow_roots(&self, _ws: &WsId, _roots: Vec<String>) -> BoxFuture<Result<(), String>> {
+        Box::pin(std::future::ready(Err(NO_PREVIEW.to_string())))
+    }
+
+    fn model_stat(&self, _path: &str) -> BoxFuture<Result<ModelFileInfo, String>> {
+        Box::pin(std::future::ready(Err(NO_PREVIEW.to_string())))
+    }
+
+    fn worktrees(&self, path: &str) -> BoxFuture<Result<Vec<Worktree>, String>> {
+        self.inner.worktrees(path)
+    }
+
+    fn preview(&self, ws: &WsId, detached: bool) -> BoxFuture<Option<Arc<dyn PreviewHost>>> {
+        self.inner.preview(ws, detached)
+    }
+
+    fn preview_inspect(&self, _path: &str) -> BoxFuture<Result<Value, String>> {
+        Box::pin(std::future::ready(Err(NO_PREVIEW.to_string())))
+    }
+
+    fn kits(&self) -> BoxFuture<Result<Vec<KitInfo>, String>> {
+        self.inner.kits()
+    }
+
+    fn kit_tabs(&self) -> Option<Arc<dyn KitTabCatalog>> {
+        self.inner.kit_tabs()
+    }
+
+    fn git_flow(&self) -> Option<Arc<dyn FromGit>> {
+        None
+    }
+
+    fn delivery(&self) -> Option<Arc<dyn DeliveryDeps>> {
+        self.inner.delivery()
+    }
+
+    fn orchestration(&self) -> Option<Arc<dyn OrchestrationHooks>> {
+        self.inner.orchestration()
+    }
+
+    fn mobile(&self) -> Option<Arc<dyn MobileHooks>> {
+        None
+    }
+
+    fn deliveries(&self) -> &Deliveries {
+        self.inner.deliveries()
     }
 }

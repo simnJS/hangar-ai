@@ -140,3 +140,58 @@ pub fn tunnel(node: &NodeConfig, local: u16, remote: u16) -> Cmd {
         .arg(format!("127.0.0.1:{local}:127.0.0.1:{remote}"))
         .arg(node.ssh_target.trim())
 }
+
+/* ── A local workspace's workers on a node (nodes/away.rs) ─────── */
+
+/// `word` as one word for a POSIX shell: git runs `core.sshCommand` through
+/// one (sh, Git for Windows' too).
+fn sh_quoted(word: &str) -> String {
+    if !word.is_empty()
+        && word
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || "-_./=:@,+".contains(ch))
+    {
+        return word.to_string();
+    }
+    format!("'{}'", word.replace('\'', r"'\''"))
+}
+
+/// What git reaches the node with: the same `ssh` and options as the
+/// connection, so a node that connects is a node git reaches.
+pub fn git_ssh_command(node: &NodeConfig) -> String {
+    std::iter::once("ssh".to_string())
+        .chain(common(node).iter().map(|word| sh_quoted(word)))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The node's repository as git names a remote over SSH: `<target>:<path>`.
+fn remote_url(node: &NodeConfig, repo: &str) -> String {
+    format!("{}:{repo}", node.ssh_target.trim())
+}
+
+/// `git -C <local> -c core.sshCommand=<ssh> <args…>`.
+fn git_over_ssh(node: &NodeConfig, local: &str) -> Cmd {
+    Cmd::new("git")
+        .args(["-C", local, "-c"])
+        .arg(format!("core.sshCommand={}", git_ssh_command(node)))
+}
+
+/// The branch a worker starts from, as it is in this machine's repository,
+/// put in the node's (`repo`, an absolute path there): forced, since the
+/// node's copy only ever follows this one.
+pub fn push_branch(node: &NodeConfig, local: &str, repo: &str, branch: &str) -> Cmd {
+    git_over_ssh(node, local)
+        .args(["push", "--quiet", "--force", "--no-verify"])
+        .arg(remote_url(node, repo))
+        .arg(format!("refs/heads/{branch}:refs/heads/{branch}"))
+}
+
+/// A worker's branch fetched back from the node's repository into this
+/// machine's, under the same name: forced, as the worker may have rebased.
+pub fn fetch_branch(node: &NodeConfig, local: &str, repo: &str, branch: &str) -> Cmd {
+    git_over_ssh(node, local)
+        .args(["fetch", "--quiet", "--no-tags"])
+        .arg(remote_url(node, repo))
+        .arg(format!("+refs/heads/{branch}:refs/heads/{branch}"))
+}

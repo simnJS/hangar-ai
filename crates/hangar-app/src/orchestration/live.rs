@@ -9,6 +9,10 @@
 //! API (`nodes::engine`), never this machine's disk. The port the runtime
 //! makes for one workspace's operation knows its node (`LivePort::on`);
 //! the ports of the engines' rounds find it from the folder or the pane.
+//!
+//! A worker a local workspace sends to a node (nodes/away.rs) has its
+//! repository and worktree there: the git calls given their paths go to
+//! that node (`away::node_of_path`), the board and the claim stay here.
 
 use std::sync::{Arc, Mutex};
 
@@ -128,11 +132,14 @@ impl LivePort {
     }
 
     /// The node `cwd` is on: this port's, else the remote workspace that
-    /// has that folder.
+    /// has that folder, else the node whose repository of a local
+    /// workspace's workers it is in.
     fn node_for(&self, cwd: &str) -> Option<String> {
-        self.node
-            .clone()
-            .or_else(|| crate::nodes::engine::node_of_cwd(&self.snapshot().state, cwd))
+        self.node.clone().or_else(|| {
+            let state = self.snapshot().state.clone();
+            crate::nodes::engine::node_of_cwd(&state, cwd)
+                .or_else(|| crate::nodes::away::node_of_path(&state, cwd))
+        })
     }
 
     /// The node pane `pane` runs on.
@@ -341,6 +348,9 @@ impl WorkerPort for LivePort {
                 target.port_base = Some(init.port_base);
                 if init.shared_folder.is_some() {
                     target.shared_folder = init.shared_folder;
+                }
+                if let Some(node) = &init.node {
+                    crate::nodes::away::set_pane_node(target, node);
                 }
             })
         });
@@ -606,6 +616,47 @@ impl WorkerPort for LivePort {
                 .await;
         }
         hangar_core::git::git_commits_ahead(path.into(), base.into(), head.into()).await
+    }
+
+    /// The nodes of the settings connected now, while the experiment is on.
+    fn nodes(&self) -> Vec<(String, String)> {
+        let state = self.snapshot().state.clone();
+        if !crate::settings::experiments::enabled(
+            &state.settings,
+            crate::settings::experiments::NODES,
+        ) {
+            return Vec::new();
+        }
+        state
+            .settings
+            .nodes
+            .iter()
+            .filter(|node| crate::nodes::remote::directory(&node.id).is_some())
+            .map(|node| (node.id.clone(), crate::nodes::away::label_of(node)))
+            .collect()
+    }
+
+    async fn send_branch(
+        &self,
+        node: &str,
+        main_root: &str,
+        branch: &str,
+    ) -> Result<String, String> {
+        let state = self.snapshot().state.clone();
+        let Some(config) = state.settings.nodes.iter().find(|entry| entry.id == node) else {
+            return Err(format!("Node {node} is no longer in the settings."));
+        };
+        let client = Self::client(node)?;
+        let repo = crate::nodes::away::send_branch(
+            &crate::nodes::runner::System,
+            config,
+            &client,
+            main_root,
+            branch,
+        )
+        .await?;
+        crate::nodes::away::remember(node, &repo);
+        Ok(repo)
     }
 }
 

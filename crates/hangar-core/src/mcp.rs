@@ -554,14 +554,15 @@ fn base_tool_definitions() -> Value {
                     "task": { "type": "string", "description": "Id of the board task to hand over." },
                     "name": { "type": "string", "description": "Name for the worker's pane, unique across Hangar. Defaults to the next free first name." },
                     "model": { "type": "string", "description": "Model the worker runs (--model): sonnet, opus, haiku or a full model id. Defaults to the workspace's worker model." },
-                    "worktree": { "type": "boolean", "description": "Default true in a git workspace: the worker gets a worktree and a branch of its own, and Hangar checks, reviews and lands its delivery. false: it starts in the workspace's own folder on its current branch, beside other agents, with no branch and no delivery to land." }
+                    "worktree": { "type": "boolean", "description": "Default true in a git workspace: the worker gets a worktree and a branch of its own, and Hangar checks, reviews and lands its delivery. false: it starts in the workspace's own folder on its current branch, beside other agents, with no branch and no delivery to land." },
+                    "node": { "type": "string", "description": "Run the worker on a node instead of this computer (experimental): the id or name of a connected node, as worker_list shows under nodes — a server or a GPU box for heavy builds. Hangar pushes the target branch to a repository on the node, gives the worker a worktree and a branch there, and when it delivers fetches its branch back here, where it is checked, reviewed and landed as usual. Only in a git workspace on this computer, and never with worktree: false." }
                 },
                 "required": ["task"]
             }
         },
         {
             "name": "worker_list",
-            "description": "List the workers of your workspace: pane name, task (id, title, column, attempts), what the agent is doing (working, waiting for the person, yours = finished its turn, idle), whether it runs, its branch and worktree, model, ports, and where its delivery stands. Only the workspace's orchestrator can call it.",
+            "description": "List the workers of your workspace: pane name, task (id, title, column, attempts), what the agent is doing (working, waiting for the person, yours = finished its turn, idle), whether it runs, its branch and worktree, model, ports, and where its delivery stands; a worker on a node names it. nodes lists the connected nodes a worker can be sent to (worker_spawn node). Only the workspace's orchestrator can call it.",
             "inputSchema": { "type": "object", "properties": {} }
         },
         {
@@ -1579,6 +1580,21 @@ mod tests {
 
     /// An orchestrator plans with these: files a task owns, the label that
     /// hands a task to the person, the order tasks run in.
+    /// A worker can be sent to a node: by its id or name, a string.
+    #[test]
+    fn worker_spawn_takes_a_node() {
+        let props = &tool("worker_spawn")["inputSchema"]["properties"];
+        assert_eq!(props["node"]["type"], "string");
+        assert!(props["node"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("fetches its branch back"));
+        assert_eq!(
+            tool("worker_spawn")["inputSchema"]["required"],
+            json!(["task"])
+        );
+    }
+
     #[test]
     fn the_board_tools_take_what_an_orchestrator_writes() {
         let create = &tool("board_create_task")["inputSchema"]["properties"];

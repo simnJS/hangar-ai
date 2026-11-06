@@ -757,14 +757,15 @@ pub fn node_of_cwd(state: &crate::state::types::AppState, cwd: &str) -> Option<S
         .and_then(|ws| ws.node.clone())
 }
 
-/// The node pane `pane` runs on: the remote panes mounted, else the
-/// workspace that holds it (a worker's pane just added, not started yet).
+/// The node pane `pane` runs on: the remote panes mounted, else the pane's
+/// own node (a worker sent from a local workspace), else the workspace that
+/// holds it (a worker's pane just added, not started yet).
 pub fn node_of_pane(state: &crate::state::types::AppState, pane: &str) -> Option<String> {
     super::remote::node_of(pane).or_else(|| {
-        state
-            .workspaces
-            .iter()
-            .find(|ws| ws.panes.iter().any(|entry| entry.id == pane))
-            .and_then(|ws| ws.node.clone())
+        state.workspaces.iter().find_map(|ws| {
+            let entry = ws.panes.iter().find(|entry| entry.id == pane)?;
+            // A worker a local workspace sent to a node runs there.
+            super::away::pane_node(entry).or_else(|| ws.node.clone())
+        })
     })
 }

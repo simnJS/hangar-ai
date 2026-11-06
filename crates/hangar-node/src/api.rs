@@ -75,6 +75,11 @@ impl Node {
     pub fn host(&self) -> &Host {
         &self.host
     }
+
+    /// The home directory of the user the node runs as.
+    pub fn home(&self) -> &std::path::Path {
+        &self.home
+    }
 }
 
 pub type Shared = Arc<Node>;
@@ -101,6 +106,7 @@ pub fn router(node: Shared) -> Router {
         .route("/node/worktree/hook", post(crate::engine::worktree_hook))
         .route("/node/worktree/copy", post(crate::engine::worktree_copy))
         .route("/node/branch", delete(crate::engine::branch_delete))
+        .route("/node/repo", post(crate::engine::repo))
         .route("/node/git", post(crate::engine::git))
         .route(
             "/node/board/claim-worker",

@@ -10,6 +10,7 @@
 //! connection then holds until Disconnect, the node's removal, the
 //! experiment turned off, or the app quitting, which kills the tunnels.
 
+pub mod away;
 pub mod commands;
 pub mod connect;
 pub mod engine;
