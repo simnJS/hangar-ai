@@ -339,6 +339,28 @@ fn shell_args(program: &str, recorded: &[String]) -> Vec<String> {
     args
 }
 
+/// Variables Hangar set in its own environment for itself alone, which no
+/// pane inherits: the app's `WGPU_BACKEND` (hangar-app's app/gpu.rs), a
+/// choice for its own drawing. One the person exported before starting
+/// Hangar is never listed here, and reaches the panes as before.
+static APP_ONLY_ENV: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+
+/// Keeps `name` out of every pane spawned from now on: the app set it for
+/// itself, the person did not.
+pub fn keep_from_panes(name: &'static str) {
+    let mut names = APP_ONLY_ENV.lock().unwrap_or_else(PoisonError::into_inner);
+    if !names.contains(&name) {
+        names.push(name);
+    }
+}
+
+/// Removes from a pane's environment what only the app was meant to have.
+fn apply_app_only_env(cmd: &mut CommandBuilder, names: &[&str]) {
+    for name in names {
+        cmd.env_remove(name);
+    }
+}
+
 /// How many ports a worker gets from its `HANGAR_PORT_BASE` (lib/workerControl.ts).
 const PORT_COUNT: u16 = 20;
 
@@ -642,6 +664,10 @@ pub fn pty_spawn_with(
         crate::bridge::sideloading_forbidden(),
     );
     apply_ports(&mut cmd, port_base);
+    apply_app_only_env(
+        &mut cmd,
+        &APP_ONLY_ENV.lock().unwrap_or_else(PoisonError::into_inner),
+    );
     apply_build_cache(&mut cmd, port_base, &build_env);
     apply_mcp_config(&mut cmd, mcp_config.as_deref());
     // The account's profile is brought level with the main account before
@@ -1305,6 +1331,37 @@ mod tests {
     fn env_of(cmd: &CommandBuilder, name: &str) -> Option<String> {
         cmd.get_env(name)
             .map(|value| value.to_string_lossy().into_owned())
+    }
+
+    #[test]
+    fn a_variable_the_app_set_for_itself_stays_out_of_the_panes() {
+        let mut pane = CommandBuilder::new("sh");
+        pane.env("WGPU_BACKEND", "vulkan");
+        apply_app_only_env(&mut pane, &["WGPU_BACKEND"]);
+        assert_eq!(env_of(&pane, "WGPU_BACKEND"), None);
+    }
+
+    #[test]
+    fn a_variable_the_person_exported_reaches_the_panes() {
+        // Hangar set nothing itself: the list is empty, the person's value stays.
+        let mut pane = CommandBuilder::new("sh");
+        pane.env("WGPU_BACKEND", "gl");
+        apply_app_only_env(&mut pane, &[]);
+        assert_eq!(env_of(&pane, "WGPU_BACKEND").as_deref(), Some("gl"));
+    }
+
+    #[test]
+    fn a_name_kept_from_the_panes_is_listed_once() {
+        keep_from_panes("HANGAR_TEST_APP_ONLY");
+        keep_from_panes("HANGAR_TEST_APP_ONLY");
+        let names = APP_ONLY_ENV.lock().unwrap();
+        assert_eq!(
+            names
+                .iter()
+                .filter(|name| **name == "HANGAR_TEST_APP_ONLY")
+                .count(),
+            1
+        );
     }
 
     #[test]

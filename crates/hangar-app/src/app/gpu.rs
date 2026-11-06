@@ -12,7 +12,8 @@
 //! it to Vulkan when a Vulkan adapter that is a real GPU is there. A machine
 //! whose only Vulkan device is a software one (llvmpipe) keeps every backend:
 //! its GPU may still draw through OpenGL, which beats Vulkan on the CPU. A
-//! `WGPU_BACKEND` the person set is never touched.
+//! `WGPU_BACKEND` the person set is never touched, and reaches the panes; the
+//! one set here does not (`hangar_core::pty::keep_from_panes`).
 
 use std::sync::OnceLock;
 
@@ -47,6 +48,8 @@ pub fn prefer_vulkan() {
         // SAFETY: `run` calls this before iced, tokio or any service starts a
         // thread, so nothing reads the environment while it changes.
         unsafe { std::env::set_var(VAR, value) };
+        // Hangar's choice, not the person's: the panes' shells start without it.
+        hangar_core::pty::keep_from_panes(VAR);
     }
 }
 
