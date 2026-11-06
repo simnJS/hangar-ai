@@ -72,7 +72,7 @@ fn base() -> Settings {
     const ICON: &[u8] = include_bytes!("../../packaging/icons/128x128.png");
     #[allow(unused_mut)]
     let mut settings = Settings {
-        icon: window::icon::from_file_data(ICON, None).ok(),
+        icon: window_icon(ICON),
         ..Settings::default()
     };
     #[cfg(target_os = "linux")]
@@ -91,6 +91,18 @@ fn base() -> Settings {
             window::settings::platform::CornerPreference::Round;
     }
     settings
+}
+
+/// The window icon from the PNG the installers carry. Decoded here rather
+/// than by `window::icon::from_file_data`, which iced builds only with its
+/// `image` feature, the one that turns on every codec of the image crate
+/// (the workspace's Cargo.toml, `iced`).
+fn window_icon(png: &[u8]) -> Option<window::Icon> {
+    let rgba = ::image::load_from_memory_with_format(png, ::image::ImageFormat::Png)
+        .ok()?
+        .into_rgba8();
+    let (width, height) = rgba.dimensions();
+    window::icon::from_rgba(rgba.into_raw(), width, height).ok()
 }
 
 /// The main window, centred. Its close request is the app's end, which the

@@ -36,3 +36,6 @@ chrono.workspace = true
 tempfile = "3"
 # Drives the widgets that are hangar-ui's as a person would (render/tests.rs).
 iced_test.workspace = true
+# Modules written as text in tests/tabs.rs: the app reads `.wasm` files only,
+# so `wat` (and its `wast` parser) is for the tests alone.
+wasmtime = { workspace = true, features = ["wat"] }
