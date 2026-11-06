@@ -84,7 +84,10 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
 }
 
 pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
-    conversation::subscription(&st.conversation, m)
+    Subscription::batch([
+        conversation::subscription(&st.conversation, m),
+        tasks::subscription(&st.tasks, m),
+    ])
 }
 
 pub fn on_intent(
@@ -102,7 +105,14 @@ pub fn on_event(
     _sv: &Services,
     event: &CoreEvent,
 ) -> Option<Task<Message>> {
-    conversation::on_event(&mut st.conversation, m, event)
+    let tasks: Vec<Task<Message>> = [
+        conversation::on_event(&mut st.conversation, m, event),
+        tasks::on_event(&mut st.tasks, m, event),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    (!tasks.is_empty()).then(|| Task::batch(tasks))
 }
 
 /// The chat view of `ws`, filling the main area.

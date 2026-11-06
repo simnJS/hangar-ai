@@ -59,6 +59,10 @@ pub use view::view;
 
 /// How often the tick looks whether to read again.
 const TICK: Duration = Duration::from_secs(2);
+/// How often it looks until a first read answered: Hangar Mobile's runtime
+/// starts a moment after the window, and the region says « Loading » until
+/// then.
+const FIRST_TICK: Duration = Duration::from_millis(300);
 /// A read at least this often while the region is shown, whatever else.
 const FALLBACK: Duration = Duration::from_secs(10);
 /// How far from the top a scroll asks for the page before.
@@ -840,11 +844,17 @@ fn permit(st: &mut State, m: &Model, ws: &str, allow: bool) -> Task<Message> {
 
 /// The tick, while a workspace is shown as the chat view with an
 /// orchestrator.
-pub fn subscription(_st: &State, m: &Model) -> Subscription<Message> {
-    if shown(m).next().is_none() {
+pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
+    let mut shown = shown(m).peekable();
+    if shown.peek().is_none() {
         return Subscription::none();
     }
-    iced::time::every(TICK).map(|_| msg(Msg::Tick))
+    let waiting = shown.any(|(ws, pane)| {
+        st.chat(&ws.id)
+            .is_none_or(|chat| chat.pane != pane.id || !chat.loaded)
+    });
+    let every = if waiting { FIRST_TICK } else { TICK };
+    iced::time::every(every).map(|_| msg(Msg::Tick))
 }
 
 /// The orchestrator's mod reported, or its queue changed: read again.

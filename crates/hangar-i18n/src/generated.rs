@@ -454,10 +454,6 @@ pub enum Key {
     ChatConvToolWriteMemory,
     /// `chatView.chat`
     ChatViewChat,
-    /// `chatView.comingSoon`
-    ChatViewComingSoon,
-    /// `chatView.conversation`
-    ChatViewConversation,
     /// `chatView.panes`
     ChatViewPanes,
     /// `chatView.showChat`
@@ -3719,7 +3715,7 @@ pub enum Key {
 }
 
 /// How many keys there are.
-pub const KEY_COUNT: usize = 1851;
+pub const KEY_COUNT: usize = 1849;
 
 impl Key {
     /// Every key, in the order of their ids.
@@ -3944,8 +3940,6 @@ impl Key {
         Key::ChatConvToolUpdateTask,
         Key::ChatConvToolWriteMemory,
         Key::ChatViewChat,
-        Key::ChatViewComingSoon,
-        Key::ChatViewConversation,
         Key::ChatViewPanes,
         Key::ChatViewShowChat,
         Key::ChatViewShowPanes,
@@ -5800,8 +5794,6 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "chatConv.tool.updateTask", en: Text::plain("Updated “{task}”"), fr: Text::plain("«\u{202f}{task}\u{202f}» modifiée") },
     Message { id: "chatConv.tool.writeMemory", en: Text::plain("Saved to the memory"), fr: Text::plain("Enregistré dans la mémoire") },
     Message { id: "chatView.chat", en: Text::plain("Chat"), fr: Text::plain("Chat") },
-    Message { id: "chatView.comingSoon", en: Text::plain("Coming soon."), fr: Text::plain("Bientôt disponible.") },
-    Message { id: "chatView.conversation", en: Text::plain("Conversation"), fr: Text::plain("Conversation") },
     Message { id: "chatView.panes", en: Text::plain("Panes"), fr: Text::plain("Panneaux") },
     Message { id: "chatView.showChat", en: Text::plain("Show the workspace as a chat"), fr: Text::plain("Afficher le workspace en chat") },
     Message { id: "chatView.showPanes", en: Text::plain("Show the workspace's panes"), fr: Text::plain("Afficher les panneaux du workspace") },
