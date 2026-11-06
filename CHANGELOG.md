@@ -8,7 +8,7 @@ change behaviour as well as add to it. The 0.x history is grouped by minor versi
 Every release, with its installers, is on the
 [releases page](https://github.com/hangar-ai/hangar/releases).
 
-## [Unreleased]
+## [2.1.0] - 2026-11-06
 
 ### Changed
 
@@ -720,6 +720,7 @@ statistics, workspace sleep and per-workspace MCP servers.
 - Automatic updates from signed GitHub releases.
 - An interface in English and French (0.1.1).
 
+[2.1.0]: https://github.com/simnJS/hangar-ai/releases/tag/v2.1.0
 [2.0.0]: https://github.com/simnJS/hangar-ai/releases/tag/v2.0.0
 [1.0.1]: https://github.com/simnJS/hangar-ai/releases/tag/v1.0.1
 [1.0.0]: https://github.com/simnJS/hangar-ai/releases/tag/v1.0.0
