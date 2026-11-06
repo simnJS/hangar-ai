@@ -25,7 +25,7 @@
 
 ![The chat view of a Recipes workspace: you talk to Iris, the orchestrator, who split the app into four board tasks and started workers; the side panel shows each task's progress, and the inspector shows Iris's session and context use.](docs/images/chat-view.png)
 
-Hangar is an open-source desktop app, written in Rust with no web view. It runs the Claude
+Hangar is an open-source native desktop app written in Rust (no Electron). It runs the Claude
 Code already on your machine, as many sessions as you need, and gives them a shared board,
 a shared memory and an orchestrator. No account, no telemetry, no server of ours.
 
