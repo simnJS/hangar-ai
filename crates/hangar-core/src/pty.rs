@@ -35,6 +35,7 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize}
 use serde::Serialize;
 
 mod scope;
+mod windows;
 
 /// A pane's input, shared out of the registry: `pty_write` takes a clone of
 /// it under the registry's lock and writes once that lock is released, so a
@@ -618,6 +619,10 @@ pub fn pty_spawn_with(
         cmd.arg(arg);
     }
     if std::path::Path::new(&cwd).is_dir() {
+        // A folder past MAX_PATH by its short name, which Windows starts in.
+        #[cfg(windows)]
+        cmd.cwd(windows::launch_cwd(std::path::Path::new(&cwd)));
+        #[cfg(not(windows))]
         cmd.cwd(&cwd);
     }
     // Agents render much better when they know they are on a real terminal.
