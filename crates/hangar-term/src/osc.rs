@@ -50,12 +50,25 @@ impl OscScanner {
     pub(crate) fn scan(&mut self, bytes: &[u8], found: &mut Vec<Osc>) {
         let mut i = 0;
         while i < bytes.len() {
-            // Most output is plain text. Skipping to the next escape in one
-            // go keeps the scanner free for it.
+            // Most output is text and the escapes that colour it and move the
+            // cursor, and from the ground only `ESC ]` starts a command: it is
+            // looked for in one vectorised search, rather than stepping
+            // through every escape a coloured listing is full of.
             if self.state == State::Ground {
-                match bytes[i..].iter().position(|&b| b == 0x1b) {
-                    Some(offset) => i += offset,
-                    None => return,
+                match memchr::memmem::find(&bytes[i..], b"\x1b]") {
+                    Some(offset) => {
+                        i += offset + 2;
+                        self.state = State::Number(0);
+                        continue;
+                    }
+                    None => {
+                        // An escape at the very end may be the start of one,
+                        // finished by the next chunk.
+                        if bytes.last() == Some(&0x1b) {
+                            self.state = State::Escape;
+                        }
+                        return;
+                    }
                 }
             }
             self.step(bytes[i], found);
@@ -269,6 +282,42 @@ mod tests {
             b"\x1b[31mred\x1b[0m\x1b]0;title\x07\x1b]8;;http://x\x1b\\link\x1b]9;hi\x07",
         ]);
         assert_eq!(found, [note("hi")]);
+    }
+
+    /// The search that skips the ground finds what stepping through every
+    /// byte finds, and leaves the scanner in the same state, however the
+    /// output is cut into chunks.
+    #[test]
+    fn skipping_the_ground_finds_what_every_byte_would() {
+        let alphabet = b"\x1b]]979;;\x07\\\x18[0ma\n";
+        let mut state = 0x2545_f491_u32;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            state as usize
+        };
+        for _ in 0..2000 {
+            let len = next() % 64;
+            let bytes: Vec<u8> = (0..len)
+                .map(|_| alphabet[next() % alphabet.len()])
+                .collect();
+            let mut stepped = OscScanner::default();
+            let mut expected = Vec::new();
+            for &byte in &bytes {
+                stepped.step(byte, &mut expected);
+            }
+            let mut skipped = OscScanner::default();
+            let mut found = Vec::new();
+            let mut rest = &bytes[..];
+            while !rest.is_empty() {
+                let (chunk, after) = rest.split_at(1 + next() % rest.len());
+                skipped.scan(chunk, &mut found);
+                rest = after;
+            }
+            assert_eq!(found, expected, "{bytes:?}");
+            assert_eq!(skipped.state, stepped.state, "{bytes:?}");
+        }
     }
 
     #[test]

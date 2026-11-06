@@ -10,6 +10,22 @@ edition = "2024"
 [dependencies]
 iced.workspace = true
 alacritty_terminal.workspace = true
+# The OSC scanner's search for `ESC ]` (osc.rs); already built for the parser.
+memchr = "2"
 
 [dev-dependencies]
 portable-pty.workspace = true
+
+# Samples the feed benchmark (`--profile`) from inside the process, with
+# signals: `perf` needs permissions a developer's machine may not grant.
+[target.'cfg(unix)'.dev-dependencies]
+pprof = { version = "0.15", features = ["flamegraph"] }
+# The feed benchmark's `pty` variant: the output of a real PTY, read by core's
+# reader thread (without the desktop's dependencies), and the CPU time that
+# thread spent, which std does not tell.
+hangar-core = { path = "../hangar-core", default-features = false }
+libc = "0.2"
+
+[[bench]]
+name = "feed"
+harness = false
