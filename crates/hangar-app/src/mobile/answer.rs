@@ -27,11 +27,11 @@ use std::sync::LazyLock;
 use regex::Regex;
 use serde_json::{Value, json};
 
-use hangar_core::chat::{Body, ChatItem, PendingQuestion, Question};
+use hangar_core::chat::{Answer, Body, ChatItem, PendingQuestion, Question};
 
 use crate::control::port::Port;
 use crate::control::run_as_person;
-use crate::state::AgentId;
+use crate::state::{AgentId, Pane, Workspace};
 
 use super::contract::RemoteAnswered;
 use super::engine::{ChatRead, Mobile};
@@ -122,29 +122,77 @@ fn clean_words(text: &str) -> String {
         .to_string()
 }
 
+/// Refused: not one answer per question.
+fn count_refused(questions: &[Question]) -> String {
+    if questions.len() == 1 {
+        "Give one answer: this is one question.".into()
+    } else {
+        format!("Give one answer per question: {} of them.", questions.len())
+    }
+}
+
+/// How a refusal names question `index`.
+fn name_of(questions: &[Question], index: usize) -> String {
+    let question = &questions[index];
+    if questions.len() == 1 {
+        format!("\"{}\"", question.header)
+    } else {
+        format!("Question {} (\"{}\")", index + 1, question.header)
+    }
+}
+
+/// One answer, its labels and the person's own words, held against its
+/// question.
+fn choice_for(
+    name: &str,
+    question: &Question,
+    selected: &[String],
+    other: &str,
+) -> Result<Choice, String> {
+    let mut unique: Vec<&String> = Vec::new();
+    for label in selected {
+        if !unique.contains(&label) {
+            unique.push(label);
+        }
+    }
+    let mut picked = Vec::new();
+    for label in unique {
+        let Some(at) = question
+            .options
+            .iter()
+            .position(|option| option.label == *label)
+        else {
+            return Err(format!("\"{label}\" is not one of the options of {name}."));
+        };
+        picked.push(at);
+    }
+    picked.sort_unstable();
+    let other = Some(clean_words(other)).filter(|words| !words.is_empty());
+    let given = picked.len() + usize::from(other.is_some());
+    if given == 0 {
+        return Err(format!("{name} has no answer."));
+    }
+    if !question.multi_select && given > 1 {
+        return Err(format!(
+            "{name} takes one answer: one option, or your own words."
+        ));
+    }
+    Ok(Choice { picked, other })
+}
+
 /// The phone's answers held against the questions; what does not fit is
 /// refused (`choicesOf`).
 pub fn choices_of(questions: &[Question], answers: Option<&Value>) -> Result<Vec<Choice>, String> {
     let answers = match answers.and_then(Value::as_array) {
         Some(list) if list.len() == questions.len() => list,
-        _ => {
-            return Err(if questions.len() == 1 {
-                "Give one answer: this is one question.".into()
-            } else {
-                format!("Give one answer per question: {} of them.", questions.len())
-            });
-        }
+        _ => return Err(count_refused(questions)),
     };
     questions
         .iter()
         .zip(answers)
         .enumerate()
         .map(|(index, (question, answer))| {
-            let name = if questions.len() == 1 {
-                format!("\"{}\"", question.header)
-            } else {
-                format!("Question {} (\"{}\")", index + 1, question.header)
-            };
+            let name = name_of(questions, index);
             let selected = match answer.get("selected") {
                 None | Some(Value::Null) => Vec::new(),
                 Some(Value::Array(labels)) if labels.iter().all(Value::is_string) => labels
@@ -163,35 +211,29 @@ pub fn choices_of(questions: &[Question], answers: Option<&Value>) -> Result<Vec
                     ));
                 }
             };
-            let mut unique: Vec<&String> = Vec::new();
-            for label in &selected {
-                if !unique.contains(&label) {
-                    unique.push(label);
-                }
-            }
-            let mut picked = Vec::new();
-            for label in unique {
-                let Some(at) = question
-                    .options
-                    .iter()
-                    .position(|option| option.label == *label)
-                else {
-                    return Err(format!("\"{label}\" is not one of the options of {name}."));
-                };
-                picked.push(at);
-            }
-            picked.sort_unstable();
-            let other = Some(clean_words(&other)).filter(|words| !words.is_empty());
-            let given = picked.len() + usize::from(other.is_some());
-            if given == 0 {
-                return Err(format!("{name} has no answer."));
-            }
-            if !question.multi_select && given > 1 {
-                return Err(format!(
-                    "{name} takes one answer: one option, or your own words."
-                ));
-            }
-            Ok(Choice { picked, other })
+            choice_for(&name, question, &selected, &other)
+        })
+        .collect()
+}
+
+/// The window's answers held against the questions, as `choices_of` holds
+/// the phone's.
+pub fn choices_from(questions: &[Question], answers: &[Answer]) -> Result<Vec<Choice>, String> {
+    if answers.len() != questions.len() {
+        return Err(count_refused(questions));
+    }
+    questions
+        .iter()
+        .zip(answers)
+        .enumerate()
+        .map(|(index, (question, answer))| {
+            let other = answer.other.as_deref().unwrap_or("");
+            choice_for(
+                &name_of(questions, index),
+                question,
+                &answer.selected,
+                other,
+            )
         })
         .collect()
 }
@@ -592,10 +634,7 @@ impl Drop for Answering<'_> {
 }
 
 /// `remote_answer {pane, toolUseId, answers}`: answers the question a Claude
-/// Code pane waits on, through its dialog on the PC: only the one its mod
-/// reports open, or its transcript shows unanswered, so a phone showing an
-/// older one is refused. A pane not up yet — asleep, or resuming — gets the
-/// answers in the queue.
+/// Code pane waits on, through its dialog on the PC (`answer_pane`).
 pub async fn remote_answer(
     port: &Port,
     mobile: &Mobile,
@@ -603,6 +642,25 @@ pub async fn remote_answer(
 ) -> Result<RemoteAnswered, String> {
     let (ws, pane) = find_pane(&port.snapshot().state, args.get("pane"))?;
     let tool_use_id = args.get("toolUseId").and_then(Value::as_str).unwrap_or("");
+    answer_pane(port, mobile, &ws, &pane, tool_use_id, |questions| {
+        choices_of(questions, args.get("answers"))
+    })
+    .await
+}
+
+/// Answers the question `tool_use_id` a Claude Code pane waits on, through
+/// its dialog on the PC: only the one its mod reports open, or its
+/// transcript shows unanswered, so a screen showing an older one is
+/// refused. `choose` holds the answers against its questions. A pane not up
+/// yet — asleep, or resuming — gets the answers in the queue.
+pub async fn answer_pane(
+    port: &Port,
+    mobile: &Mobile,
+    ws: &Workspace,
+    pane: &Pane,
+    tool_use_id: &str,
+    choose: impl FnOnce(&[Question]) -> Result<Vec<Choice>, String>,
+) -> Result<RemoteAnswered, String> {
     if tool_use_id.is_empty() {
         return Err("Name the question: its \"toolUseId\", from the chat.".into());
     }
@@ -646,10 +704,10 @@ pub async fn remote_answer(
         .map(|page| page.items.as_slice())
         .unwrap_or_default();
     let questions = pending_questions(pending.as_ref(), items, tool_use_id)?;
-    let choices = choices_of(&questions, args.get("answers"))?;
-    if resumes(port, mobile, &pane) {
+    let choices = choose(&questions)?;
+    if resumes(port, mobile, pane) {
         let text = answer_text(&questions, &choices);
-        hold(port, mobile, &ws, &pane, Some(&text)).await?;
+        hold(port, mobile, ws, pane, Some(&text)).await?;
         return Ok(RemoteAnswered {
             answered: true,
             queued: Some(true),

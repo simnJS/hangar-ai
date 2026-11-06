@@ -17,6 +17,7 @@ use super::super::answer::{
     AnswerIo, AnswerStep, Choice, NOT_ON_SCREEN, NOT_REVIEWED, choices_of, dialog_of, lost_at,
     pending_questions, steps_for, type_answers, untouched,
 };
+use super::super::contract::RemoteAnswered;
 use super::super::engine::{ChatRead, Mobile, locked, run};
 use super::fake::{App, Fakes, Screen, workspace};
 
@@ -1079,4 +1080,79 @@ async fn remote_answer_refuses_a_pane_without_a_claude_question_and_a_second_ans
         dialog.submitted(),
         answers(&[("Which color do you prefer?", "Blue")])
     );
+}
+
+/* ── desk::answer, the window's typed call ────────────────────── */
+
+#[tokio::test]
+async fn desk_answer_types_the_answers_step_by_step_and_refuses_what_does_not_fit() {
+    use super::super::desk;
+    let given = |selected: &[&str], other: Option<&str>| Answer {
+        selected: selected.iter().map(|label| (*label).to_string()).collect(),
+        other: other.map(str::to_string),
+    };
+    let dialog = Dialog::new(vec![color(), pet()], &[]);
+    let rig = answer_rig(
+        &dialog,
+        page_with(Some(pending("q1", vec![color(), pet()])), vec![]),
+        AgentId::Claude,
+    );
+    let refused = desk::answer(
+        &rig.port,
+        &rig.mobile,
+        "shop",
+        "a",
+        "q1",
+        &[given(&["Teal"], None), given(&["Cat"], None)],
+    )
+    .await;
+    assert_eq!(
+        refused,
+        Err("\"Teal\" is not one of the options of Question 1 (\"Color\").".into())
+    );
+    let refused = desk::answer(
+        &rig.port,
+        &rig.mobile,
+        "shop",
+        "a",
+        "q1",
+        &[given(&["Red"], None)],
+    )
+    .await;
+    assert_eq!(
+        refused,
+        Err("Give one answer per question: 2 of them.".into())
+    );
+    assert!(dialog.keys().is_empty());
+
+    let answered = desk::answer(
+        &rig.port,
+        &rig.mobile,
+        "shop",
+        "a",
+        "q1",
+        &[given(&["Blue"], None), given(&[], Some("A\nparrot"))],
+    )
+    .await;
+    assert_eq!(
+        answered,
+        Ok(RemoteAnswered {
+            answered: true,
+            queued: None
+        })
+    );
+    // Blue: two down, Enter; the pet's own words: down past Cat and Dog,
+    // pasted, Enter; then the review's Submit.
+    assert_eq!(
+        dialog.keys(),
+        keys(&["down", "down", "enter", "down", "down", "enter", "enter"])
+    );
+    assert_eq!(
+        dialog.submitted(),
+        answers(&[
+            ("Which color do you prefer?", "Blue"),
+            ("Which pet would you adopt?", "A parrot"),
+        ])
+    );
+    assert!(rig.mobile.book().answering.is_empty());
 }
