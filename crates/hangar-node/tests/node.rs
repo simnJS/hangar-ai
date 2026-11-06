@@ -1087,3 +1087,55 @@ async fn a_worker_claims_its_task_and_is_briefed_on_the_node() {
     assert_eq!(status, 200, "{queued}");
     assert_eq!(queued["value"]["text"], "Your brief");
 }
+
+/// The repository a local workspace's workers sent here work from: made
+/// bare once under the home, the desktop's branch pushed into it, and a
+/// worker's worktree made from it as from any repository.
+#[test]
+fn a_local_workspace_s_repository_is_made_here_and_its_workers_worktrees_come_from_it() {
+    let node = Node::start();
+    let (status, made) = node.post("/node/repo", json!({ "name": "site-1a2b3c4d" }));
+    assert_eq!(status, 200, "{made}");
+    assert_eq!(made["value"]["created"], true);
+    let repo = node.home().join("hangar-repos").join("site-1a2b3c4d");
+    assert_eq!(made["value"]["path"], repo.to_str().unwrap());
+    let (_, again) = node.post("/node/repo", json!({ "name": "site-1a2b3c4d" }));
+    assert_eq!(again["value"]["created"], false, "{again}");
+    for refused in ["../escape", "a/b", ".hidden", ""] {
+        let (status, body) = node.post("/node/repo", json!({ "name": refused }));
+        assert_eq!(status, 400, "{refused:?}: {body}");
+    }
+
+    // What the desktop's `git push <target>:<repo>` leaves there.
+    let here = node.home().join("desktop");
+    std::fs::create_dir_all(&here).unwrap();
+    git(&here, &["init", "-q"]);
+    std::fs::write(here.join("README"), "hi\n").unwrap();
+    git(&here, &["add", "README"]);
+    git(&here, &["commit", "-q", "-m", "first"]);
+    git(
+        &here,
+        &["push", "-q", repo.to_str().unwrap(), "main:refs/heads/main"],
+    );
+
+    let repo_s = repo.to_str().unwrap().to_string();
+    let tree = node
+        .home()
+        .join("hangar-repos")
+        .join("site-1a2b3c4d-worktrees")
+        .join("hangar-x-1a2b3c");
+    let (status, body) = node.post(
+        "/node/worktree",
+        json!({
+            "repo": repo_s, "path": tree.to_str().unwrap(),
+            "branch": "hangar/x-1a2b3c", "base": "main",
+        }),
+    );
+    assert_eq!(status, 200, "{body}");
+    assert!(tree.join("README").is_file());
+    let (_, info) = node.post(
+        "/node/git",
+        json!({ "op": "repo_info", "path": tree.to_str().unwrap() }),
+    );
+    assert_eq!(info["value"]["branch"], "hangar/x-1a2b3c", "{info}");
+}
