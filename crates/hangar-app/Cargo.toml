@@ -200,10 +200,10 @@ url = "https://github.com/hangar-ai/hangar"
 auto-req = "no"
 require-sh = false
 assets = [
-  { source = "target/release/hangar-ai", dest = "/usr/bin/hangar-ai", mode = "755" },
-  { source = "target/release/hangar-webview", dest = "/usr/bin/hangar-webview", mode = "755" },
-  { source = "target/release/hangar-node-x86_64", dest = "/usr/bin/hangar-node-x86_64", mode = "755" },
-  { source = "target/release/hangar-node-aarch64", dest = "/usr/bin/hangar-node-aarch64", mode = "755" },
+  { source = "target/dist/hangar-ai", dest = "/usr/bin/hangar-ai", mode = "755" },
+  { source = "target/dist/hangar-webview", dest = "/usr/bin/hangar-webview", mode = "755" },
+  { source = "target/dist/hangar-node-x86_64", dest = "/usr/bin/hangar-node-x86_64", mode = "755" },
+  { source = "target/dist/hangar-node-aarch64", dest = "/usr/bin/hangar-node-aarch64", mode = "755" },
   { source = "crates/hangar-app/packaging/linux/hangar-ai.desktop", dest = "/usr/share/applications/hangar-ai.desktop", mode = "644" },
   { source = "crates/hangar-app/packaging/icons/linux/16x16.png", dest = "/usr/share/icons/hicolor/16x16/apps/hangar-ai.png", mode = "644" },
   { source = "crates/hangar-app/packaging/icons/linux/24x24.png", dest = "/usr/share/icons/hicolor/24x24/apps/hangar-ai.png", mode = "644" },

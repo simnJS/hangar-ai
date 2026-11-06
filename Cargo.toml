@@ -97,3 +97,27 @@ uuid = { version = "1.24.0", features = ["v4"] }
 # build of the app optimises it alone (release builds are unaffected).
 [profile.dev.package.re_rav1d]
 opt-level = 2
+
+# What the release workflow and the packaging scripts build: `cargo build
+# --profile dist`, into target/dist. `--release` stays the default profile,
+# which builds a cold hangar-app in a fifth of the time, for working on the
+# app; dist is for what people download. Measured on hangar-app (32 cores,
+# docs/native/PACKAGING.md, "The dist profile"): the executable is a third
+# smaller (119 MB to 79 MB, hangar-node 17 MB to 10 MB, which the desktop
+# uploads to every node), parsing a pane's output is about 4% faster and the
+# app holds 5 MB less; the time to the first prompts does not move. The cost
+# is the build: 7 minutes cold instead of 1½, and 5 minutes instead of 30
+# seconds after a one-line change, which is why it is not `--release`.
+# Thin LTO alone changed nothing; with one codegen unit it was a quarter
+# smaller but no faster, and fat LTO with one unit beat it on every count.
+#
+# The symbol table stays: with `strip = "symbols"` a panic's backtrace is
+# addresses only, and the function names in it are what a bug report needs.
+# "debuginfo" is what release already does without debug info; it is
+# written out so that nobody takes it for an oversight. Panics still unwind:
+# the app catches them (catch_unwind) around decoders, kit tabs and jobs.
+[profile.dist]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+strip = "debuginfo"

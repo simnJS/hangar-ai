@@ -56,8 +56,8 @@ The release workflow's `node` job builds them, before the build jobs, which
 download them into `target/node` (`actions/download-artifact`) and whose
 packaging scripts refuse to run without them: `common.sh`'s
 `stage_node_binaries` checks that each is an ELF file of the right machine and
-copies it to where the packager reads binaries (`target/release`, or
-`target/universal-apple-darwin/release`); the `binaries` and `generate-rpm`
+copies it to where the packager reads binaries (`target/dist`, or
+`target/universal-apple-darwin/dist`); the `binaries` and `generate-rpm`
 assets of `crates/hangar-app/Cargo.toml` list them; the Windows script hands
 them to `installer.nsi`. The job:
 
@@ -80,11 +80,11 @@ section 3):
 ```bash
 rustup target add aarch64-unknown-linux-gnu           # and apt install gcc-aarch64-linux-gnu
 mkdir -p target/node
-cargo build --release --locked -p hangar-node
-strip -o target/node/hangar-node-x86_64 target/release/hangar-node
+cargo build --profile dist --locked -p hangar-node
+strip -o target/node/hangar-node-x86_64 target/dist/hangar-node
 CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
-  cargo build --release --locked -p hangar-node --target aarch64-unknown-linux-gnu
-aarch64-linux-gnu-strip -o target/node/hangar-node-aarch64 target/aarch64-unknown-linux-gnu/release/hangar-node
+  cargo build --profile dist --locked -p hangar-node --target aarch64-unknown-linux-gnu
+aarch64-linux-gnu-strip -o target/node/hangar-node-aarch64 target/aarch64-unknown-linux-gnu/dist/hangar-node
 ```
 
 (Run on the host's own glibc, the result wants that glibc: it is the workflow's
@@ -144,6 +144,75 @@ release bumps one number. What the alternatives would have cost:
 cargo-packager has no `.rpm` format, and the only `.rpm` tool that needs no
 `rpmbuild` is `cargo-generate-rpm`.
 
+### The dist profile
+
+What is released is built with `cargo build --profile dist` (the workspace
+`Cargo.toml`): `release` plus `lto = "fat"` and `codegen-units = 1`, written to
+`target/dist`, which is where the three packaging scripts, `cargo packager
+--profile dist` and `cargo generate-rpm --profile dist` read it from. `cargo
+build --release` is left as cargo has it, for working on the app: a one-line
+change in hangar-app rebuilds in about 30 seconds with it and in 5 minutes with
+dist, because fat LTO redoes the whole program's optimisation on every link.
+
+Measured on a 32-core Linux machine shared with other builds (Rust 1.99.1, the
+load average noted with each run), each variant built from a clean
+`target/release` with `CARGO_PROFILE_RELEASE_*` overrides, one build at a time.
+The runs are `bench/harness/resume.py open4` (time to all four prompts, memory)
+and `busy8` (app CPU from 10 to 40 s with eight busy agents), three of each per
+variant in alternating order, and `cargo bench -p hangar-term --bench feed`
+(`--sample claude`; `--pty --ls`, five runs per round, three rounds). The
+values are medians; the one-minute load was between 0.4 and 6.4 during these runs.
+
+| Variant | Cold build | hangar-ai (stripped) | hangar-node (stripped) | open4 all prompts | open4 PSS | busy8 PSS | busy8 CPU | feed claude | feed ls | pty-ls reader |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| release as it was (no LTO, 16 units) | 80 s | 118.9 MB (85.3) | 17.0 MB (11.9) | 0.393 s | 181.4 MB | 207.1 MB | 6.0 % | 236.9 MB/s | 141.3 MB/s | 77.5 MB/CPU-s |
+| `lto = "thin"` | 110 s | 118.2 MB (86.6) | 17.0 MB (12.1) | 0.383 s | 183.6 MB | 209.5 MB | 5.8 % | 234.7 | 138.1 | 75.2 |
+| `lto = "fat"` | 429 s | 84.2 MB (70.0) | 10.6 MB (8.7) | 0.401 s | 179.8 MB | 205.3 MB | 5.5 % | 245.2 | 157.3 | 82.2 |
+| thin, `codegen-units = 1` | 224 s | 88.8 MB (71.4) | 13.1 MB (10.3) | 0.414 s | 177.8 MB | 203.0 MB | 6.9 % | 228.3 | 130.4 | 70.7 |
+| **fat, `codegen-units = 1` (dist)** | 416 s | **78.8 MB (65.7)** | **10.0 MB (8.3)** | 0.396 s | **176.4 MB** | **202.3 MB** | 6.1 % | **247.9** | 147.5 | 80.5 |
+
+What the table says:
+
+- **Start-up and CPU at rest do not move.** The time to all prompts spreads
+  over ±30 ms from run to run in every variant, and busy8's CPU over a point or
+  two; none of the variants is outside that.
+- **Size** is where LTO pays: fat LTO with one unit makes `hangar-ai` a third
+  smaller and hangar-node 41% smaller (8.3 MB stripped instead of 11.9 MB: the
+  file the desktop uploads to each node over SSH). Thin LTO with sixteen units
+  saves nothing.
+- **Parsing a pane's output** (hangar-term) is about 4% faster with fat LTO
+  (claude +4.6%, ls +4.4%, the PTY reader thread +3.9% MB per CPU second), and
+  the app holds about 5 MB less. Thin LTO with one unit was no faster than no
+  LTO at all.
+- Fat LTO with sixteen units is as fast as with one (ls a little faster, claude
+  a little slower) and 5 MB bigger, for the same build time; one unit is kept
+  for the size.
+- A second cold build of the chosen profile took 395 s (load 4.8), the same as
+  the variant's 416 s. A cold build of the release workflow's runners will take
+  a few minutes longer than it did; the workflow sets no timeout.
+
+`strip` stays at `"debuginfo"`, which is what `release` already does when it
+has no debug info: the symbol table remains (13 MB of the dist `hangar-ai`, a
+sixth of it), and it is what a panic's backtrace is made from. The same panic in
+a program built both ways, with `RUST_BACKTRACE=1`:
+
+```
+strip = "debuginfo"                          strip = "symbols"
+stack backtrace:                             stack backtrace:
+   0: __rustc::rust_begin_unwind             note: Some details are omitted, ...
+   1: core::panicking::panic_fmt
+   2: core::panicking::panic_bounds_check
+   3: bt::parse_pane_output
+   4: bt::main
+```
+
+With `"symbols"` the backtrace is empty, and a bug report loses the one thing
+that says where the panic came from. (hangar-node is still stripped by the
+release workflow: nobody reads a node's backtrace from its file.) `panic` stays
+`"unwind"`: the app catches panics with `catch_unwind` around the image and
+AVIF decoders, the 3D loader, kit tabs, dictation and the git consent
+callbacks, and `"abort"` would turn each of those into a crash.
+
 ## 3. Building each bundle by hand
 
 Common to all: `pnpm install && pnpm mobile:build` first (Hangar Mobile's
@@ -151,9 +220,9 @@ Common to all: `pnpm install && pnpm mobile:build` first (Hangar Mobile's
 
 ```bash
 crates/hangar-app/packaging/check-mobile.sh                # dist-mobile/ is whole
-cargo build --release --locked -p hangar-app
-cargo build --release --locked -p hangar-webview --features engine
-crates/hangar-app/packaging/check-mobile.sh target/release/hangar-ai   # and it is in the binary
+cargo build --profile dist --locked -p hangar-app
+cargo build --profile dist --locked -p hangar-webview --features engine
+crates/hangar-app/packaging/check-mobile.sh target/dist/hangar-ai      # and it is in the binary
 ```
 
 The app and the helper are built separately so that `hangar-ai` is never built
@@ -185,8 +254,8 @@ does), never to the installed Hangar's.
 ```bash
 export MACOSX_DEPLOYMENT_TARGET=10.15   # the oldest macOS it runs on, as the workflow sets it
 for t in aarch64-apple-darwin x86_64-apple-darwin; do
-  cargo build --release --locked --target $t -p hangar-app
-  cargo build --release --locked --target $t -p hangar-webview --features engine
+  cargo build --profile dist --locked --target $t -p hangar-app
+  cargo build --profile dist --locked --target $t -p hangar-webview --features engine
 done
 crates/hangar-app/packaging/macos/build.sh target/packager
 ```
@@ -202,7 +271,7 @@ Tauri bundler used, `nsis-3.11.zip`, and checks its SHA-1):
 
 ```bash
 MAKENSIS=/path/to/makensis.exe \
-  crates/hangar-app/packaging/windows/build.sh target/release target/packager
+  crates/hangar-app/packaging/windows/build.sh target/dist target/packager
 ```
 
 On Linux the same script compiles the installer, which makes a quick check of
