@@ -44,6 +44,12 @@ pub fn directory(node: &str) -> Option<NodeClient> {
         .cloned()
 }
 
+/// Bumped at each [`publish`]: what waits on a node that was not there (a
+/// pane's stream started before its node connected) tries again as soon as
+/// it is, rather than at the end of its backoff.
+static PUBLISHED: LazyLock<tokio::sync::watch::Sender<u64>> =
+    LazyLock::new(|| tokio::sync::watch::Sender::new(0));
+
 /// Node `node` is reached through `client` from now on, or not at all.
 pub fn publish(node: &str, client: Option<NodeClient>) {
     let mut map = DIRECTORY
@@ -53,6 +59,8 @@ pub fn publish(node: &str, client: Option<NodeClient>) {
         Some(client) => map.insert(node.to_owned(), client),
         None => map.remove(node),
     };
+    drop(map);
+    PUBLISHED.send_modify(|count| *count = count.wrapping_add(1));
 }
 
 /// How long to wait between two attempts at a node that does not answer.
@@ -291,6 +299,8 @@ pub async fn follow(
     let mut size: Option<Outgoing> = None;
     let mut wait = backoff.first;
     loop {
+        // Before the look: a publish between the two is not missed.
+        let mut published = PUBLISHED.subscribe();
         let connected = match resolve(&node) {
             Some(client) => {
                 let path = format!("/node/panes/{}/stream?from={last}", wire::encode(&pane));
@@ -300,6 +310,7 @@ pub async fn follow(
         };
         match connected {
             Some(Ok(mut socket)) => {
+                super::connect::timing_line(&format!("node={node} pane={pane} step=stream ms=0"));
                 wait = backoff.first;
                 let sized = match &size {
                     Some(resize) => socket.send_text(&resize.frame()).await.is_ok(),
@@ -336,6 +347,7 @@ pub async fn follow(
         loop {
             tokio::select! {
                 () = &mut sleep => break,
+                Ok(()) = published.changed() => break,
                 next = outgoing.recv() => match next {
                     None => return,
                     Some(resize @ Outgoing::Resize(..)) => size = Some(resize),

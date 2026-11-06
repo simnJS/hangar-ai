@@ -5,13 +5,14 @@
 use std::future::Future;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 
-use super::commands::Cmd;
+use super::commands::{Cmd, PROBE_END};
 use super::model::NodeInfo;
 
 /// How a command ended.
@@ -35,6 +36,15 @@ pub trait Runner: Send + Sync + 'static {
 
     fn run(&self, cmd: Cmd) -> impl Future<Output = Result<CmdOutput, String>> + Send;
     fn spawn_tunnel(&self, cmd: Cmd) -> Result<Self::Tunnel, String>;
+    /// The tunnel as an SSH master ([`super::commands::link`]), kept
+    /// running, and what its session printed up to [`PROBE_END`] (`success`
+    /// once that line came; otherwise it ended first, and `stderr` says
+    /// why). `control_path` is its socket, removed when it is killed.
+    fn open_link(
+        &self,
+        cmd: Cmd,
+        control_path: PathBuf,
+    ) -> impl Future<Output = Result<(Self::Tunnel, CmdOutput), String>> + Send;
     /// A port of this machine nothing listens on.
     fn free_port(&self) -> Result<u16, String>;
     fn node_info(
@@ -86,31 +96,72 @@ impl Runner for System {
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|err| format!("{}: {err}", cmd.program))?;
-        // What ssh says on its way out is the reason the page shows; it is
-        // read as it comes so the pipe never fills.
-        let said = Arc::new(Mutex::new(String::new()));
-        if let Some(mut stderr) = child.stderr.take() {
-            let said = said.clone();
-            tokio::spawn(async move {
-                let mut buf = [0u8; 1024];
-                while let Ok(n) = stderr.read(&mut buf).await {
-                    if n == 0 {
-                        break;
-                    }
-                    let mut said = said.lock().unwrap_or_else(|p| p.into_inner());
-                    said.push_str(&String::from_utf8_lossy(&buf[..n]));
-                    // The last words are the ones that matter.
-                    if said.len() > 4096 {
-                        let cut = said.len() - 2048;
-                        let cut = (cut..said.len())
-                            .find(|i| said.is_char_boundary(*i))
-                            .unwrap_or(cut);
-                        said.drain(..cut);
+        let (said, _) = follow_stderr(&mut child);
+        Ok(SystemTunnel {
+            child,
+            said,
+            held: None,
+        })
+    }
+
+    async fn open_link(
+        &self,
+        cmd: Cmd,
+        control_path: PathBuf,
+    ) -> Result<(SystemTunnel, CmdOutput), String> {
+        let mut child = command(&cmd)
+            // Held open for as long as the link runs: the session's `cat`
+            // ends with it.
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|err| format!("{}: {err}", cmd.program))?;
+        let (said, mut closed) = follow_stderr(&mut child);
+        let stdin = child.stdin.take();
+        let mut stdout = child.stdout.take().map(BufReader::new);
+        let mut text = String::new();
+        let mut ended = false;
+        if let Some(reader) = stdout.as_mut() {
+            let mut line = String::new();
+            loop {
+                line.clear();
+                match reader.read_line(&mut line).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {
+                        if let Some(before) = line.trim_end().strip_suffix(PROBE_END) {
+                            text.push_str(before);
+                            ended = true;
+                            break;
+                        }
+                        text.push_str(&line);
                     }
                 }
-            });
+            }
         }
-        Ok(SystemTunnel { child, said })
+        if !ended {
+            // It ended: what it said on its way out is the reason.
+            let _ =
+                tokio::time::timeout(Duration::from_secs(2), closed.wait_for(|done| *done)).await;
+        }
+        let stderr = said.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        let tunnel = SystemTunnel {
+            child,
+            said,
+            held: Some(Held {
+                _stdin: stdin,
+                _stdout: stdout,
+                control_path,
+            }),
+        };
+        Ok((
+            tunnel,
+            CmdOutput {
+                success: ended,
+                stdout: text,
+                stderr,
+            },
+        ))
     }
 
     fn free_port(&self) -> Result<u16, String> {
@@ -131,9 +182,54 @@ impl Runner for System {
     }
 }
 
+/// What ssh says on its way out is the reason the page shows; it is read as
+/// it comes so the pipe never fills. The receiver turns true once stderr
+/// closed (ssh ended).
+fn follow_stderr(
+    child: &mut tokio::process::Child,
+) -> (Arc<Mutex<String>>, tokio::sync::watch::Receiver<bool>) {
+    let said = Arc::new(Mutex::new(String::new()));
+    let (done, closed) = tokio::sync::watch::channel(false);
+    if let Some(mut stderr) = child.stderr.take() {
+        let said = said.clone();
+        tokio::spawn(async move {
+            let mut buf = [0u8; 1024];
+            while let Ok(n) = stderr.read(&mut buf).await {
+                if n == 0 {
+                    break;
+                }
+                let mut said = said.lock().unwrap_or_else(|p| p.into_inner());
+                said.push_str(&String::from_utf8_lossy(&buf[..n]));
+                // The last words are the ones that matter.
+                if said.len() > 4096 {
+                    let cut = said.len() - 2048;
+                    let cut = (cut..said.len())
+                        .find(|i| said.is_char_boundary(*i))
+                        .unwrap_or(cut);
+                    said.drain(..cut);
+                }
+            }
+            let _ = done.send(true);
+        });
+    } else {
+        let _ = done.send(true);
+    }
+    (said, closed)
+}
+
 pub struct SystemTunnel {
     child: tokio::process::Child,
     said: Arc<Mutex<String>>,
+    /// A master's ([`Runner::open_link`]).
+    held: Option<Held>,
+}
+
+/// What a master keeps: its session's pipes (stdin's end closed would end
+/// it), and its socket, to remove once it is killed.
+struct Held {
+    _stdin: Option<tokio::process::ChildStdin>,
+    _stdout: Option<BufReader<tokio::process::ChildStdout>>,
+    control_path: PathBuf,
 }
 
 impl Tunnel for SystemTunnel {
@@ -155,6 +251,10 @@ impl Tunnel for SystemTunnel {
 
     fn kill(&mut self) {
         let _ = self.child.start_kill();
+        // Killed, it leaves its socket behind.
+        if let Some(held) = &self.held {
+            let _ = std::fs::remove_file(&held.control_path);
+        }
     }
 }
 

@@ -380,6 +380,42 @@ async fn a_stream_waits_for_its_node_and_ends_with_its_pane() {
     assert!(events.lock().unwrap().is_empty());
 }
 
+/// A stream started before its node connected follows it as soon as the
+/// node is published, not at the end of its backoff (a long one here).
+#[tokio::test]
+async fn a_waiting_stream_follows_its_node_once_it_is_published() {
+    let (listener, client) = listen().await;
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = accept_ws(&listener).await;
+        send_text(&mut socket, &json!({ "exit": { "code": 0 } }).to_string()).await;
+    });
+    let node = format!("late-{}", std::process::id());
+    let slow = remote::Backoff {
+        first: Duration::from_secs(30),
+        max: Duration::from_secs(30),
+    };
+    let (_outgoing, inbox) = tokio::sync::mpsc::unbounded_channel();
+    let (events, emit) = gathered();
+    let follow = tokio::spawn(remote::follow(
+        node.clone(),
+        "p".into(),
+        0,
+        inbox,
+        emit,
+        slow,
+        remote::directory,
+    ));
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    remote::publish(&node, Some(client));
+    tokio::time::timeout(Duration::from_secs(5), follow)
+        .await
+        .expect("the stream follows the node once published")
+        .unwrap();
+    server.await.unwrap();
+    remote::publish(&node, None);
+    assert_eq!(*events.lock().unwrap(), vec![StreamEvent::Exit]);
+}
+
 /// A shell still running under the pane's id is followed, not spawned
 /// again; one that is not is spawned, with the MCP file the node wrote.
 #[tokio::test]

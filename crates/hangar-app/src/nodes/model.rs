@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+use super::commands::{PROBE_END, PROBE_SEP, PROBE_STARTED};
+
 /// The version this desktop installs on its nodes: the workspace's, which
 /// `hangar-node` shares (both are built from the same release).
 pub const NODE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -128,33 +130,71 @@ pub fn parse_node_json(text: &str) -> Result<NodeJson, String> {
     Ok(json)
 }
 
-/// What the probe found: the machine's architecture and the installed
-/// version, if any.
+/// What the probe found ([`super::commands::probe_script`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Probe {
     /// `uname -m` as the machine said it.
     pub arch: String,
     /// The first word of `hangar-node version`; `None` when it is not there.
     pub installed: Option<String>,
+    /// The daemon answers: the installed version was the one asked for.
+    pub started: bool,
+    /// What `serve --detach --if-version` said, when it did not start.
+    pub said: String,
+    /// `node.json` as it is after the start (empty when there is none): the
+    /// daemon's that was started, or what an older one left.
+    pub node_json: String,
 }
 
-/// The probe's output: `uname -m` on the first line, then whatever
-/// `hangar-node version` printed (`<version> <target-triple>`), nothing when
-/// it is missing.
+/// The probe's output: its answers apart, in order, each after a
+/// [`PROBE_SEP`] line, and nothing from [`PROBE_END`] on.
 pub fn parse_probe(output: &str) -> Result<Probe, String> {
-    let mut lines = output
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty());
-    let arch = lines
-        .next()
-        .ok_or_else(|| "uname -m printed nothing".to_string())?
-        .to_string();
-    let installed = lines
-        .next()
-        .and_then(|line| line.split_whitespace().next())
-        .map(str::to_string);
-    Ok(Probe { arch, installed })
+    let mut sections: Vec<Vec<&str>> = vec![Vec::new()];
+    for line in output.lines() {
+        let line = line.trim_end_matches('\r');
+        if let Some(before) = line.trim_end().strip_suffix(PROBE_END) {
+            if let Some(section) = sections.last_mut() {
+                section.push(before);
+            }
+            break;
+        }
+        if line.trim() == PROBE_SEP {
+            sections.push(Vec::new());
+        } else if let Some(section) = sections.last_mut() {
+            section.push(line);
+        }
+    }
+    let section = |i: usize| sections.get(i).map(Vec::as_slice).unwrap_or_default();
+    let first_word = |lines: &[&str]| {
+        lines
+            .iter()
+            .find_map(|line| line.split_whitespace().next())
+            .map(str::to_string)
+    };
+    // The last line before the first separator: what a shell's startup
+    // files print comes before `uname -m`.
+    let arch = section(0)
+        .iter()
+        .rev()
+        .find_map(|line| line.split_whitespace().next())
+        .map(str::to_string)
+        .ok_or_else(|| "uname -m printed nothing".to_string())?;
+    let installed = first_word(section(1));
+    let start = section(2);
+    let started = start.iter().any(|line| line.trim() == PROBE_STARTED);
+    let said = start
+        .iter()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty() && *line != PROBE_STARTED)
+        .collect::<Vec<_>>()
+        .join("\n");
+    Ok(Probe {
+        arch,
+        installed,
+        started,
+        said,
+        node_json: section(3).join("\n").trim().to_string(),
+    })
 }
 
 /// What to do with the binary on the node.

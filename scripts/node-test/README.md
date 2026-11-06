@@ -11,10 +11,13 @@ a dedicated key pair and known_hosts in `.keys/` (gitignored).
 | `ssh.sh <cmd>` | runs a command on the node with the right options |
 | `check.sh [--arm64]` | smoke test: up, `uname -m`, `whoami`, scp round trip, password/root refused, down |
 | `e2e.sh [--no-build] [--keep]` | the whole node flow, end to end, against an isolated debug Hangar (below) |
-| `bench.sh [--runs N] [--samples N] [--lines N] …` | what a remote pane costs: key echo, throughput, the node's memory (below) |
+| `bench.sh [--runs N] [--samples N] [--lines N] [--connect-only] [--latency "0 20"] …` | what a remote pane costs: key echo, throughput, the node's memory, the time to connect (below) |
 
 - Image: pinned Debian (dated tag + digest), openssh-server, git, bash, curl,
-  ca-certificates, procps; user `hangar`; key auth only, no root login, port 22.
+  ca-certificates, procps, iproute2; user `hangar`; key auth only, no root login, port 22.
+- `HANGAR_NODE_TEST_NET_ADMIN=1`: the container gets `NET_ADMIN`, so that
+  `tc qdisc add dev eth0 root netem delay 20ms` (as root, `docker exec`) can
+  add latency to its link (`bench.sh` does).
 - Port: `HANGAR_NODE_TEST_PORT`, else the first free one from 2222. Container
   name: `HANGAR_NODE_TEST_CONTAINER` (default `hangar-node-test`).
 - `--with-claude` adds Node.js and `@anthropic-ai/claude-code` (off by default;
@@ -129,6 +132,7 @@ bash scripts/node-test/bench.sh                    # builds, 3 runs of each meas
 bash scripts/node-test/bench.sh --no-build --runs 5
 bash scripts/node-test/bench.sh --node-bin old/hangar-node --app-bin old/hangar-ai   # a baseline
 HANGAR_BENCH_OUT=after.json bash scripts/node-test/bench.sh   # the medians as JSON too
+bash scripts/node-test/bench.sh --connect-only --latency "0 20"   # only the connect measures
 ```
 
 Same needs and the same isolation as `e2e.sh` (every `HANGAR_*` dropped, its
@@ -154,6 +158,22 @@ each number over the runs):
 | `node-flood` | `seq 1 N` on the node's stream alone: seconds to the line after it, data and wire bytes, frames, bytes per frame, resets (output skipped by a stream that fell behind), hangar-node's CPU |
 | `desktop-flood-local-pane` / `-remote-pane` | `seq 1 N` with `pane_send`, `pane_read` polled until the line after it shows; CPU of the app, of hangar-node and of the app's ssh tunnel over it |
 | `node-rest-1-pane` / `-8-panes` | 10 s of nothing: hangar-node's RSS, threads and CPU (the desktop attached, its one pane, then 7 more spawned through the API), and the app's |
+| `connect-cold-<L>ms` | the app started on its remote workspace, hangar-node never seen on the node (binary, state and daemon removed): `prompt_ms` until the remote pane shows text |
+| `connect-warm-<L>ms` | the same with the binary there and its daemon running, the pane not (the app makes it) |
+| `connect-reconnect-<L>ms` | the app quit and started again, everything left as it was (the pane's screen replayed) |
+| `connect-local-<L>ms` | the app started on its local workspace instead: the floor |
+
+The connect measures run once per `--latency` (milliseconds added with
+`tc netem` on the container's `eth0`: what the node sends is delayed, so
+each round trip grows by that much; default `0 20`), cold, warm, reconnect
+and local `--runs` times each. Times are from the app's launch:
+`endpoint_ms` (its control API up), `prompt_ms`, and from its
+`HANGAR_NODES_TIMING=1` log (nodes/connect.rs) `begin_at_ms` (the
+connection starts), each step's time (`probe_ms`, `upload_ms`, `start_ms`,
+`tunnel_ms`, `handshake_ms`; older builds: `install_ms`, `config_ms`),
+`connected_at_ms` and `stream_at_ms` (the pane's stream opened).
+The app's SSH master sockets go to `HANGAR_NODES_SSH_DIR`, in the run's
+folder (e2e.sh too).
 
 Echo samples: `--samples` keys (200), median, p95, min and max per run; a
 line is cleared with ctrl+c every 30 keys. `--lines` (2000000) for the

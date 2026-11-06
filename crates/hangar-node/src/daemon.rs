@@ -17,7 +17,10 @@ use crate::state::{self, NodeFile};
 /// `--detach` on the one it started: the login shell's PATH is read first,
 /// which a slow profile can stretch.
 const START_TIMEOUT: Duration = Duration::from_secs(30);
-const POLL: Duration = Duration::from_millis(50);
+/// A look at `node.json` costs a failed open until the daemon writes it:
+/// often, so that `--detach` returns as soon as it answers (the desktop's
+/// connection waits on it).
+const POLL: Duration = Duration::from_millis(5);
 
 /// The node in the foreground, until SIGTERM, SIGINT or SIGHUP. A daemon of
 /// the account's already running and answering is success: there is one.

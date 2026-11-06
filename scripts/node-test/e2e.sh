@@ -43,6 +43,8 @@ work="$(mktemp -d "${TMPDIR:-/tmp}/hangar-node-e2e.XXXXXX")"
 work="$(cd "$work" && pwd -P)"
 export HANGAR_DATA_ROOT="$work/home"
 export HANGAR_ENDPOINT_FILE="$work/home/hangar/endpoint.json"
+# The app's SSH master sockets (nodes/connect.rs), in the run's folder.
+export HANGAR_NODES_SSH_DIR="$work/ssh"
 # Delivery check worktrees and other per-user folders of the app, kept in the run.
 export XDG_DATA_HOME="$work/xdg/data" XDG_CACHE_HOME="$work/xdg/cache" XDG_STATE_HOME="$work/xdg/state"
 export HANGAR_NODE_TEST_CONTAINER="$container"

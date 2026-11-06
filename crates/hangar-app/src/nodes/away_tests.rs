@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use serde_json::{Value, json};
 
 use super::*;
-use crate::nodes::commands::Cmd;
+use crate::nodes::commands::{Cmd, Mux};
 use crate::nodes::model::NodeInfo;
 use crate::nodes::runner::{CmdOutput, Runner, Tunnel};
 use crate::nodes::testing::{answer, listen, read_request};
@@ -34,6 +34,7 @@ fn node(config: Option<&str>) -> NodeConfig {
 fn git_reaches_the_node_with_the_connection_s_ssh() {
     let push = commands::push_branch(
         &node(Some("/home/me/my ssh/config")),
+        &Mux::Off,
         "/home/me/site",
         "/home/me/hangar-repos/site-1a2b3c4d",
         "main",
@@ -55,7 +56,13 @@ fn git_reaches_the_node_with_the_connection_s_ssh() {
         ]
     );
 
-    let fetch = commands::fetch_branch(&node(None), "/home/me/site", "/r", "hangar/x-1a2b3c");
+    let fetch = commands::fetch_branch(
+        &node(None),
+        &Mux::Off,
+        "/home/me/site",
+        "/r",
+        "hangar/x-1a2b3c",
+    );
     assert_eq!(
         fetch.args,
         [
@@ -71,7 +78,22 @@ fn git_reaches_the_node_with_the_connection_s_ssh() {
         ]
     );
     // A quote in a config's path stays one word for the shell git uses.
-    assert!(commands::git_ssh_command(&node(Some("/it's"))).ends_with(r"-F '/it'\''s'"));
+    assert!(commands::git_ssh_command(&node(Some("/it's")), &Mux::Off).ends_with(r"-F '/it'\''s'"));
+}
+
+#[test]
+fn git_goes_through_the_connection_s_master_when_it_has_one() {
+    let own = Mux::Own("/run/user/1000/hangar-ssh/42-ab".into());
+    assert_eq!(
+        commands::git_ssh_command(&node(None), &own),
+        "ssh -o BatchMode=yes -o ConnectTimeout=10 -o ControlMaster=no \
+         -o ControlPath=/run/user/1000/hangar-ssh/42-ab"
+    );
+    // The person's own sharing: their config applies, nothing is added.
+    assert_eq!(
+        commands::git_ssh_command(&node(None), &Mux::Theirs),
+        "ssh -o BatchMode=yes -o ConnectTimeout=10"
+    );
 }
 
 #[test]
@@ -235,6 +257,14 @@ impl Runner for LocalSsh {
     }
 
     fn spawn_tunnel(&self, _cmd: Cmd) -> Result<NoTunnel, String> {
+        Err("no tunnel".into())
+    }
+
+    async fn open_link(
+        &self,
+        _cmd: Cmd,
+        _control_path: PathBuf,
+    ) -> Result<(NoTunnel, CmdOutput), String> {
         Err("no tunnel".into())
     }
 

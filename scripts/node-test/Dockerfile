@@ -7,7 +7,7 @@ ARG WITH_CLAUDE=0
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      openssh-server git bash curl ca-certificates procps \
+      openssh-server git bash curl ca-certificates procps iproute2 \
  && rm -rf /var/lib/apt/lists/*
 
 RUN if [ "$WITH_CLAUDE" = "1" ]; then \

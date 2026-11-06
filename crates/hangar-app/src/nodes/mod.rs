@@ -345,6 +345,7 @@ fn connect(st: &mut State, m: &mut Model, sv: &Services, id: &str) {
         source: BinarySource::from_env(),
         version: NODE_VERSION.to_string(),
         timing: Timing::default(),
+        control_dir: connect::control_dir(),
     };
     let tunnel: TunnelSlot<SystemTunnel> = Arc::new(Mutex::new(None));
     let sender = sv.clone();
