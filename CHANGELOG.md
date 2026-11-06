@@ -31,6 +31,7 @@ Every release, with its installers, is on the
 
 ### Fixed
 
+- Windows: a pane whose folder is longer than 258 characters starts its shell (in the folder's short 8.3 name) instead of failing with "The directory name is invalid".
 - Windows: Hangar starts on a Windows without the Visual C++ Redistributable. The installer now puts the runtime's three DLLs beside the executables; before, they exited at once (STATUS_DLL_NOT_FOUND) on a fresh install.
 - A Hangar started in a folder inside a worktree no longer removes other workers' worktrees: the sweep of orphan worktrees at start only removes the worktree of a task that is done, and never one a live process works in; landing a delivery and stopping a worker keep a folder another pane or process uses.
 - Kits, Windows: removing a kit's clone folder retries for a moment when a git process that was just stopped still holds it, instead of failing.
