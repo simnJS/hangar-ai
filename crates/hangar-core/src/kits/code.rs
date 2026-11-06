@@ -161,7 +161,42 @@ fn walk(root: &Path, path: &Path, depth: usize, found: &mut Vec<(String, String)
     }
 }
 
-type Seen = HashMap<PathBuf, (u64, Option<SystemTime>, String)>;
+/// What a file looked like when its hash was taken, and when that was.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Stamp {
+    len: u64,
+    modified: SystemTime,
+    /// Unix: the inode and the status change time, which a rewrite through a
+    /// new file (git checkout, a rename) changes even when size and
+    /// modification time come out the same.
+    extra: (u64, i64, i64),
+}
+
+impl Stamp {
+    fn of(meta: &fs::Metadata) -> Option<Stamp> {
+        let modified = meta.modified().ok()?;
+        #[cfg(unix)]
+        let extra = {
+            use std::os::unix::fs::MetadataExt;
+            (meta.ino(), meta.ctime(), meta.ctime_nsec())
+        };
+        #[cfg(not(unix))]
+        let extra = (0, 0, 0);
+        Some(Stamp {
+            len: meta.len(),
+            modified,
+            extra,
+        })
+    }
+}
+
+/// A stamp is trusted only when the file had not been touched for this long
+/// when its hash was taken: a file written again within the clock's
+/// granularity, with the same size, would otherwise keep the old hash (git's
+/// "racily clean" files). A grant must never miss a change.
+const SETTLED: std::time::Duration = std::time::Duration::from_secs(2);
+
+type Seen = HashMap<PathBuf, (Stamp, SystemTime, String)>;
 
 /// The SHA-256 of a file. Remembered by its size and modification time, as the
 /// grants are worked out for every listing of the kits and a `bin/` can hold
@@ -169,16 +204,21 @@ type Seen = HashMap<PathBuf, (u64, Option<SystemTime>, String)>;
 fn hash_file(path: &Path, meta: &fs::Metadata) -> String {
     static SEEN: OnceLock<Mutex<Seen>> = OnceLock::new();
     let seen = SEEN.get_or_init(Mutex::default);
-    let stamp = (meta.len(), meta.modified().ok());
-    if let Some((len, modified, hash)) = seen
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .get(path)
-    {
-        if (*len, *modified) == stamp && stamp.1.is_some() {
+    let stamp = Stamp::of(meta);
+    if let (Some(stamp), Some((was, taken, hash))) = (
+        stamp,
+        seen.lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(path),
+    ) {
+        let settled = taken
+            .duration_since(was.modified)
+            .is_ok_and(|age| age >= SETTLED);
+        if *was == stamp && settled {
             return hash.clone();
         }
     }
+    let taken = SystemTime::now();
     let hash: String = match fs::File::open(path) {
         Ok(mut file) => {
             let mut hasher = Sha256::new();
@@ -199,9 +239,11 @@ fn hash_file(path: &Path, meta: &fs::Metadata) -> String {
         }
         Err(err) => return format!("unreadable: {err}"),
     };
-    seen.lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .insert(path.to_path_buf(), (stamp.0, stamp.1, hash.clone()));
+    if let Some(stamp) = stamp {
+        seen.lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(path.to_path_buf(), (stamp, taken, hash.clone()));
+    }
     hash
 }
 
