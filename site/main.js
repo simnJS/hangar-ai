@@ -6,7 +6,8 @@
      1. themes: repaint the page, and show the hero in the matching scheme
      2. the section bar, which marks where you are
      3. the download for the system you are on
-     4. the delivery, which plays its four stages once
+     4. the delivery, which plays its four stages once (assets/motion.js
+        drives them by the scroll when it runs)
      5. the short lists, folded to their titles on a phone
    ═══════════════════════════════════════════════════════════════ */
 (function () {
@@ -161,7 +162,9 @@
 
   /* ── 4. the delivery ───────────────────────────────────────────
      Written in its final state, so nothing moves without script or
-     for anyone who asked for less motion. */
+     for anyone who asked for less motion. assets/motion.js drives it
+     by the scroll when it runs (it sets motion-ready on <html>); this
+     plays it on a timer only when it did not. */
 
   (function delivery() {
     var box = document.getElementById('delivery');
@@ -174,6 +177,7 @@
       if (played || !entries.some(function (e) { return e.isIntersecting; })) return;
       played = true;
       watch.disconnect();
+      if (root.classList.contains('motion-ready')) return;
       var i = 0;
       (function next() {
         if (i >= steps.length) return;
