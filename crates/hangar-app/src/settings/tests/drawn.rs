@@ -23,8 +23,49 @@ fn model() -> Model {
             ..Workspace::default()
         }],
         active_workspace_id: Some("w1".into()),
+        // The Nodes page exists only with its experiment, and draws each
+        // status its own way: one connected, one that could not be.
+        settings: crate::state::Settings {
+            experiments: vec![crate::settings::experiments::NODES.into()],
+            nodes: ["gpu", "vps"]
+                .into_iter()
+                .map(|id| crate::state::types::NodeConfig {
+                    id: id.into(),
+                    label: id.to_uppercase(),
+                    ssh_target: format!("me@{id}"),
+                    ssh_config: (id == "vps").then(|| "~/.ssh/other".into()),
+                    extra: Default::default(),
+                })
+                .collect(),
+            ..crate::state::Settings::default()
+        },
         ..AppState::default()
     });
+    model.live.nodes.statuses.insert(
+        "gpu".into(),
+        crate::nodes::NodeStatus::Connected {
+            info: crate::nodes::model::NodeInfo {
+                version: "0.5.0".into(),
+                target: "x86_64-unknown-linux-gnu".into(),
+                hostname: "gpu-01".into(),
+                home: "/home/me".into(),
+                claude: true,
+                git: false,
+            },
+            local_port: 40000,
+            token: "t".into(),
+        },
+    );
+    model.live.nodes.statuses.insert(
+        "vps".into(),
+        crate::nodes::NodeStatus::Unreachable {
+            failure: crate::nodes::model::Failure::Ssh {
+                step: crate::nodes::model::Step::Probe,
+                detail: "Permission denied (publickey).".into(),
+            },
+            retry_in: Some(4),
+        },
+    );
     model.ui.shells = vec![hangar_core::shells::ShellInfo {
         id: "bash".into(),
         label: "Bash".into(),

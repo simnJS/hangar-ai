@@ -138,11 +138,12 @@ fn table(built: &[Category], id: SettingsCategory) -> Vec<String> {
 fn the_categories_come_in_the_order_of_the_page() {
     let built = World::new().build();
     let order: Vec<SettingsCategory> = built.iter().map(|c| c.id).collect();
-    // No Experimental page while the registry is empty.
+    // No Experimental page while the registry is empty, and no Nodes page
+    // while its experiment is off.
     let expected: Vec<SettingsCategory> = ORDER
         .iter()
         .copied()
-        .filter(|id| *id != SettingsCategory::Experimental)
+        .filter(|id| *id != SettingsCategory::Experimental && *id != SettingsCategory::Nodes)
         .collect();
     assert_eq!(order, expected);
     assert_eq!(
@@ -813,4 +814,34 @@ fn the_page_warns_that_the_features_are_unfinished() {
             .as_deref()
             .is_some_and(|hint| hint.starts_with("Unfinished work"))
     );
+}
+
+#[test]
+fn the_nodes_page_exists_only_while_its_experiment_is_on() {
+    let registry = crate::settings::experiments::EXPERIMENTS;
+    let off = with_experiments(Settings::default(), registry);
+    assert!(off.iter().all(|c| c.id != SettingsCategory::Nodes));
+
+    let on = with_experiments(
+        Settings {
+            experiments: vec![crate::settings::experiments::NODES.into()],
+            ..Settings::default()
+        },
+        registry,
+    );
+    let order: Vec<SettingsCategory> = on.iter().map(|c| c.id).collect();
+    let nodes = order
+        .iter()
+        .position(|id| *id == SettingsCategory::Nodes)
+        .expect("the page exists");
+    assert_eq!(order[nodes + 1], SettingsCategory::Experimental);
+    let page = category(&on, SettingsCategory::Nodes);
+    assert_eq!(page.icon, Icon::Link);
+    assert!(matches!(
+        items(page)[0].kind,
+        Kind::Custom {
+            block: Block::Nodes,
+            ..
+        }
+    ));
 }

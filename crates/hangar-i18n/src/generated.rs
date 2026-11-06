@@ -866,6 +866,10 @@ pub enum Key {
     ExperimentsChatViewHint,
     /// `experiments.chatView.title`
     ExperimentsChatViewTitle,
+    /// `experiments.nodes.hint`
+    ExperimentsNodesHint,
+    /// `experiments.nodes.title`
+    ExperimentsNodesTitle,
     /// `experiments.onlyOn`
     ExperimentsOnlyOn,
     /// `experiments.paneScopes.hint`
@@ -2134,6 +2138,86 @@ pub enum Key {
     NeedsYouWaiting,
     /// `needsYou.waitingDetail`
     NeedsYouWaitingDetail,
+    /// `nodes.add.config`
+    NodesAddConfig,
+    /// `nodes.add.configPlaceholder`
+    NodesAddConfigPlaceholder,
+    /// `nodes.add.hint`
+    NodesAddHint,
+    /// `nodes.add.label`
+    NodesAddLabel,
+    /// `nodes.add.labelPlaceholder`
+    NodesAddLabelPlaceholder,
+    /// `nodes.add.submit`
+    NodesAddSubmit,
+    /// `nodes.add.target`
+    NodesAddTarget,
+    /// `nodes.add.targetEmpty`
+    NodesAddTargetEmpty,
+    /// `nodes.add.targetInvalid`
+    NodesAddTargetInvalid,
+    /// `nodes.add.targetPlaceholder`
+    NodesAddTargetPlaceholder,
+    /// `nodes.add.title`
+    NodesAddTitle,
+    /// `nodes.claudeFound`
+    NodesClaudeFound,
+    /// `nodes.claudeMissing`
+    NodesClaudeMissing,
+    /// `nodes.connect`
+    NodesConnect,
+    /// `nodes.disconnect`
+    NodesDisconnect,
+    /// `nodes.error.api`
+    NodesErrorApi,
+    /// `nodes.error.local`
+    NodesErrorLocal,
+    /// `nodes.error.noBinary`
+    NodesErrorNoBinary,
+    /// `nodes.error.nodeJson`
+    NodesErrorNodeJson,
+    /// `nodes.error.retrying`
+    NodesErrorRetrying,
+    /// `nodes.error.ssh`
+    NodesErrorSsh,
+    /// `nodes.error.tunnel`
+    NodesErrorTunnel,
+    /// `nodes.error.unsupportedArch`
+    NodesErrorUnsupportedArch,
+    /// `nodes.gitFound`
+    NodesGitFound,
+    /// `nodes.gitMissing`
+    NodesGitMissing,
+    /// `nodes.info`
+    NodesInfo,
+    /// `nodes.remove`
+    NodesRemove,
+    /// `nodes.settings.empty`
+    NodesSettingsEmpty,
+    /// `nodes.settings.intro`
+    NodesSettingsIntro,
+    /// `nodes.settings.keywords`
+    NodesSettingsKeywords,
+    /// `nodes.status.connected`
+    NodesStatusConnected,
+    /// `nodes.status.connecting`
+    NodesStatusConnecting,
+    /// `nodes.status.disconnected`
+    NodesStatusDisconnected,
+    /// `nodes.status.unreachable`
+    NodesStatusUnreachable,
+    /// `nodes.step.config`
+    NodesStepConfig,
+    /// `nodes.step.handshake`
+    NodesStepHandshake,
+    /// `nodes.step.install`
+    NodesStepInstall,
+    /// `nodes.step.probe`
+    NodesStepProbe,
+    /// `nodes.step.start`
+    NodesStepStart,
+    /// `nodes.step.tunnel`
+    NodesStepTunnel,
     /// `notify.aborted`
     NotifyAborted,
     /// `notify.dropped`
@@ -2656,6 +2740,8 @@ pub enum Key {
     SettingsCatGeneral,
     /// `settings.catMobile`
     SettingsCatMobile,
+    /// `settings.catNodes`
+    SettingsCatNodes,
     /// `settings.catNotifications`
     SettingsCatNotifications,
     /// `settings.catShell`
@@ -3719,7 +3805,7 @@ pub enum Key {
 }
 
 /// How many keys there are.
-pub const KEY_COUNT: usize = 1851;
+pub const KEY_COUNT: usize = 1894;
 
 impl Key {
     /// Every key, in the order of their ids.
@@ -4150,6 +4236,8 @@ impl Key {
         Key::EditorOpen,
         Key::ExperimentsChatViewHint,
         Key::ExperimentsChatViewTitle,
+        Key::ExperimentsNodesHint,
+        Key::ExperimentsNodesTitle,
         Key::ExperimentsOnlyOn,
         Key::ExperimentsPaneScopesHint,
         Key::ExperimentsPaneScopesTitle,
@@ -4784,6 +4872,46 @@ impl Key {
         Key::NeedsYouTitle,
         Key::NeedsYouWaiting,
         Key::NeedsYouWaitingDetail,
+        Key::NodesAddConfig,
+        Key::NodesAddConfigPlaceholder,
+        Key::NodesAddHint,
+        Key::NodesAddLabel,
+        Key::NodesAddLabelPlaceholder,
+        Key::NodesAddSubmit,
+        Key::NodesAddTarget,
+        Key::NodesAddTargetEmpty,
+        Key::NodesAddTargetInvalid,
+        Key::NodesAddTargetPlaceholder,
+        Key::NodesAddTitle,
+        Key::NodesClaudeFound,
+        Key::NodesClaudeMissing,
+        Key::NodesConnect,
+        Key::NodesDisconnect,
+        Key::NodesErrorApi,
+        Key::NodesErrorLocal,
+        Key::NodesErrorNoBinary,
+        Key::NodesErrorNodeJson,
+        Key::NodesErrorRetrying,
+        Key::NodesErrorSsh,
+        Key::NodesErrorTunnel,
+        Key::NodesErrorUnsupportedArch,
+        Key::NodesGitFound,
+        Key::NodesGitMissing,
+        Key::NodesInfo,
+        Key::NodesRemove,
+        Key::NodesSettingsEmpty,
+        Key::NodesSettingsIntro,
+        Key::NodesSettingsKeywords,
+        Key::NodesStatusConnected,
+        Key::NodesStatusConnecting,
+        Key::NodesStatusDisconnected,
+        Key::NodesStatusUnreachable,
+        Key::NodesStepConfig,
+        Key::NodesStepHandshake,
+        Key::NodesStepInstall,
+        Key::NodesStepProbe,
+        Key::NodesStepStart,
+        Key::NodesStepTunnel,
         Key::NotifyAborted,
         Key::NotifyDropped,
         Key::NotifyPermission,
@@ -5045,6 +5173,7 @@ impl Key {
         Key::SettingsCatExperimental,
         Key::SettingsCatGeneral,
         Key::SettingsCatMobile,
+        Key::SettingsCatNodes,
         Key::SettingsCatNotifications,
         Key::SettingsCatShell,
         Key::SettingsCatShortcuts,
@@ -6006,6 +6135,8 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "editor.open", en: Text::plain("Open with VS Code"), fr: Text::plain("Ouvrir avec VS Code") },
     Message { id: "experiments.chatView.hint", en: Text::plain("Each workspace can be shown as a chat instead of its panes: the conversation, its tasks, and the previews and kit tabs beside them. The terminals keep running behind it, and the panes come back as they were."), fr: Text::plain("Chaque workspace peut s'afficher en chat plutôt qu'en panneaux\u{202f}: la conversation, ses tâches, et les aperçus et onglets de kits à côté. Les terminaux continuent de tourner derrière, et les panneaux reviennent tels qu'ils étaient.") },
     Message { id: "experiments.chatView.title", en: Text::plain("Chat view"), fr: Text::plain("Vue chat") },
+    Message { id: "experiments.nodes.hint", en: Text::plain("Adds a Nodes page to the settings: Hangar connects to a Linux machine by its SSH target, installs and starts hangar-node there and keeps a tunnel to it. Remote workspaces come later."), fr: Text::plain("Ajoute une page Nœuds aux réglages\u{202f}: Hangar se connecte à une machine Linux par sa cible SSH, y installe et lance hangar-node, et garde un tunnel vers lui. Les workspaces distants viendront plus tard.") },
+    Message { id: "experiments.nodes.title", en: Text::plain("Nodes over SSH"), fr: Text::plain("Nœuds par SSH") },
     Message { id: "experiments.onlyOn", en: Text::plain("Only on {platforms}"), fr: Text::plain("Uniquement sur {platforms}") },
     Message { id: "experiments.paneScopes.hint", en: Text::plain("Each pane runs in a systemd scope of its own, named after it, so when memory runs out the system stops the pane that uses it rather than Hangar and every agent. Applies to the panes started or restarted after it is turned on; Hangar itself does not need a restart."), fr: Text::plain("Chaque panneau tourne dans un scope systemd à lui, nommé d'après lui\u{202f}: quand la mémoire vient à manquer, le système arrête le panneau qui la consomme plutôt que Hangar et tous les agents. S'applique aux panneaux démarrés ou redémarrés après l'activation\u{202f}; Hangar lui-même n'a pas besoin de redémarrer.") },
     Message { id: "experiments.paneScopes.title", en: Text::plain("One systemd scope per pane"), fr: Text::plain("Un scope systemd par panneau") },
@@ -6640,6 +6771,46 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "needsYou.title", en: Text::plain("Needs you"), fr: Text::plain("Besoin de toi") },
     Message { id: "needsYou.waiting", en: Text::plain("Waiting for your answer"), fr: Text::plain("Attendent ta réponse") },
     Message { id: "needsYou.waitingDetail", en: Text::plain("waits for your answer"), fr: Text::plain("attend ta réponse") },
+    Message { id: "nodes.add.config", en: Text::plain("SSH config file (optional)"), fr: Text::plain("Fichier de config SSH (facultatif)") },
+    Message { id: "nodes.add.configPlaceholder", en: Text::plain("~/.ssh/config is used when empty"), fr: Text::plain("~/.ssh/config est utilisé si vide") },
+    Message { id: "nodes.add.hint", en: Text::plain("The machine must accept your SSH key without a password prompt."), fr: Text::plain("La machine doit accepter ta clé SSH sans demander de mot de passe.") },
+    Message { id: "nodes.add.label", en: Text::plain("Name"), fr: Text::plain("Nom") },
+    Message { id: "nodes.add.labelPlaceholder", en: Text::plain("GPU box, VPS…"), fr: Text::plain("Machine GPU, VPS…") },
+    Message { id: "nodes.add.submit", en: Text::plain("Add"), fr: Text::plain("Ajouter") },
+    Message { id: "nodes.add.target", en: Text::plain("SSH target"), fr: Text::plain("Cible SSH") },
+    Message { id: "nodes.add.targetEmpty", en: Text::plain("Give the SSH target."), fr: Text::plain("Indique la cible SSH.") },
+    Message { id: "nodes.add.targetInvalid", en: Text::plain("An SSH target is one word that does not start with a dash."), fr: Text::plain("Une cible SSH est un seul mot qui ne commence pas par un tiret.") },
+    Message { id: "nodes.add.targetPlaceholder", en: Text::plain("user@host or a Host of ~/.ssh/config"), fr: Text::plain("user@hôte ou un Host de ~/.ssh/config") },
+    Message { id: "nodes.add.title", en: Text::plain("Add a node"), fr: Text::plain("Ajouter un nœud") },
+    Message { id: "nodes.claudeFound", en: Text::plain("Claude Code"), fr: Text::plain("Claude Code") },
+    Message { id: "nodes.claudeMissing", en: Text::plain("No Claude Code"), fr: Text::plain("Pas de Claude Code") },
+    Message { id: "nodes.connect", en: Text::plain("Connect"), fr: Text::plain("Connecter") },
+    Message { id: "nodes.disconnect", en: Text::plain("Disconnect"), fr: Text::plain("Déconnecter") },
+    Message { id: "nodes.error.api", en: Text::plain("The node did not answer through the tunnel: {detail}"), fr: Text::plain("Le nœud n’a pas répondu par le tunnel\u{202f}: {detail}") },
+    Message { id: "nodes.error.local", en: Text::plain("{detail}"), fr: Text::plain("{detail}") },
+    Message { id: "nodes.error.noBinary", en: Text::plain("No hangar-node build for {arch}: set HANGAR_NODE_BINARY or put {file} beside hangar-ai ({dir})."), fr: Text::plain("Aucun hangar-node pour {arch}\u{202f}: définis HANGAR_NODE_BINARY ou place {file} à côté de hangar-ai ({dir}).") },
+    Message { id: "nodes.error.nodeJson", en: Text::plain("The node’s node.json could not be read: {detail}"), fr: Text::plain("Le node.json du nœud est illisible\u{202f}: {detail}") },
+    Message { id: "nodes.error.retrying", en: Text::plain("Retrying in {seconds}\u{a0}s."), fr: Text::plain("Nouvel essai dans {seconds}\u{a0}s.") },
+    Message { id: "nodes.error.ssh", en: Text::plain("SSH failed while {step}: {detail}"), fr: Text::plain("SSH a échoué pendant l’étape «\u{202f}{step}\u{202f}»\u{202f}: {detail}") },
+    Message { id: "nodes.error.tunnel", en: Text::plain("The tunnel closed: {detail}"), fr: Text::plain("Le tunnel s’est fermé\u{202f}: {detail}") },
+    Message { id: "nodes.error.unsupportedArch", en: Text::plain("This machine runs {arch}; nodes run on Linux x86_64 and arm64."), fr: Text::plain("Cette machine tourne sur {arch}\u{202f}; les nœuds tournent sur Linux x86_64 et arm64.") },
+    Message { id: "nodes.gitFound", en: Text::plain("git"), fr: Text::plain("git") },
+    Message { id: "nodes.gitMissing", en: Text::plain("No git"), fr: Text::plain("Pas de git") },
+    Message { id: "nodes.info", en: Text::plain("hangar-node {version} on {hostname} ({target})"), fr: Text::plain("hangar-node {version} sur {hostname} ({target})") },
+    Message { id: "nodes.remove", en: Text::plain("Remove"), fr: Text::plain("Retirer") },
+    Message { id: "nodes.settings.empty", en: Text::plain("No node yet."), fr: Text::plain("Aucun nœud pour l’instant.") },
+    Message { id: "nodes.settings.intro", en: Text::plain("Linux machines Hangar reaches over SSH with your keys. Connecting installs or updates hangar-node there, starts it and keeps a tunnel to it."), fr: Text::plain("Des machines Linux que Hangar joint par SSH avec tes clés. Se connecter y installe ou met à jour hangar-node, le lance et garde un tunnel vers lui.") },
+    Message { id: "nodes.settings.keywords", en: Text::plain("node nodes ssh server remote tunnel nœud nœuds serveur distant"), fr: Text::plain("node nodes ssh server remote tunnel nœud nœuds serveur distant") },
+    Message { id: "nodes.status.connected", en: Text::plain("Connected"), fr: Text::plain("Connecté") },
+    Message { id: "nodes.status.connecting", en: Text::plain("Connecting"), fr: Text::plain("Connexion") },
+    Message { id: "nodes.status.disconnected", en: Text::plain("Disconnected"), fr: Text::plain("Déconnecté") },
+    Message { id: "nodes.status.unreachable", en: Text::plain("Unreachable"), fr: Text::plain("Injoignable") },
+    Message { id: "nodes.step.config", en: Text::plain("Reading the node’s address…"), fr: Text::plain("Lecture de l’adresse du nœud…") },
+    Message { id: "nodes.step.handshake", en: Text::plain("Asking the node who it is…"), fr: Text::plain("Identification du nœud…") },
+    Message { id: "nodes.step.install", en: Text::plain("Installing hangar-node…"), fr: Text::plain("Installation de hangar-node…") },
+    Message { id: "nodes.step.probe", en: Text::plain("Looking at the machine…"), fr: Text::plain("Examen de la machine…") },
+    Message { id: "nodes.step.start", en: Text::plain("Starting hangar-node…"), fr: Text::plain("Démarrage de hangar-node…") },
+    Message { id: "nodes.step.tunnel", en: Text::plain("Opening the tunnel…"), fr: Text::plain("Ouverture du tunnel…") },
     Message { id: "notify.aborted", en: Text::plain("Interrupted"), fr: Text::plain("Interrompu") },
     Message { id: "notify.dropped", en: Text::plain("Did not take the prompt held for it: {text}"), fr: Text::plain("N'a pas pris le prompt gardé pour lui\u{202f}: {text}") },
     Message { id: "notify.permission", en: Text::plain("Waiting for your permission: {tool}"), fr: Text::plain("Attend ta permission\u{202f}: {tool}") },
@@ -6901,6 +7072,7 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "settings.catExperimental", en: Text::plain("Experimental"), fr: Text::plain("Expérimental") },
     Message { id: "settings.catGeneral", en: Text::plain("General"), fr: Text::plain("Général") },
     Message { id: "settings.catMobile", en: Text::plain("Mobile"), fr: Text::plain("Mobile") },
+    Message { id: "settings.catNodes", en: Text::plain("Nodes"), fr: Text::plain("Nœuds") },
     Message { id: "settings.catNotifications", en: Text::plain("Notifications"), fr: Text::plain("Notifications") },
     Message { id: "settings.catShell", en: Text::plain("Shell"), fr: Text::plain("Shell") },
     Message { id: "settings.catShortcuts", en: Text::plain("Shortcuts"), fr: Text::plain("Raccourcis") },

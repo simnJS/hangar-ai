@@ -21,7 +21,9 @@ use hangar_ui::Icon;
 use hangar_ui::shortcut::Platform as KeyboardPlatform;
 
 use super::change::{Target, cursor_style_id, voice_engine_id};
-use super::experiments::{Experiment, Platform, available_experiments};
+use super::experiments::{
+    Experiment, NODES, Platform, available_experiments, is_experiment_enabled,
+};
 use super::format::{num, plain};
 use crate::commands::CommandId;
 use crate::keymap::KeymapIndex;
@@ -98,6 +100,8 @@ pub enum Block {
     VoiceKey,
     DiscordCard,
     Shortcuts,
+    /// The `nodes` package's (`nodes::settings_page`).
+    Nodes,
 }
 
 /// What a row is made of.
@@ -263,7 +267,7 @@ pub const VOICE_LANGUAGES: [&str; 11] = [
 ];
 
 /// The categories in the order of the page.
-pub const ORDER: [SettingsCategory; 13] = [
+pub const ORDER: [SettingsCategory; 14] = [
     SettingsCategory::General,
     SettingsCategory::Appearance,
     SettingsCategory::Terminal,
@@ -275,6 +279,7 @@ pub const ORDER: [SettingsCategory; 13] = [
     SettingsCategory::Voice,
     SettingsCategory::Discord,
     SettingsCategory::Shortcuts,
+    SettingsCategory::Nodes,
     SettingsCategory::Experimental,
     SettingsCategory::About,
 ];
@@ -628,6 +633,7 @@ pub fn build_categories(ctx: &Context) -> Vec<Category> {
         },
     ]
     .into_iter()
+    .chain(nodes(ctx))
     .chain(experimental(ctx, &experiments))
     .chain([about(ctx, version)])
     .collect()
@@ -1211,6 +1217,24 @@ fn discord(ctx: &Context) -> Category {
             ),
         ],
     }
+}
+
+/// The Nodes page, which only exists while its experiment is on.
+fn nodes(ctx: &Context) -> Option<Category> {
+    let Context { t, settings, .. } = *ctx;
+    if !is_experiment_enabled(settings, NODES, ctx.experiments, ctx.platform) {
+        return None;
+    }
+    let tx = |key: Key| t.t(key).into_owned();
+    Some(entry_point(
+        SettingsCategory::Nodes,
+        tx(Key::SettingsCatNodes),
+        Icon::Link,
+        "nodes",
+        Some(tx(Key::NodesSettingsIntro)),
+        tx(Key::NodesSettingsKeywords),
+        Block::Nodes,
+    ))
 }
 
 /// The Experimental page, which only exists while there is a feature to put

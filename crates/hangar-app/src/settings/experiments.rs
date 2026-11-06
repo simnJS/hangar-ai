@@ -96,6 +96,10 @@ pub const CHAT_VIEW: &str = "chat-view";
 /// starts: panes started before it changed keep where they are.
 pub const PANE_SCOPES: &str = "pane-scopes";
 
+/// Machines reached over SSH that run `hangar-node` (`nodes`, and the
+/// Settings › Nodes page). Every desktop has an `ssh` to reach them with.
+pub const NODES: &str = "nodes";
+
 /// Newest last.
 pub const EXPERIMENTS: &[Experiment] = &[
     Experiment {
@@ -111,6 +115,13 @@ pub const EXPERIMENTS: &[Experiment] = &[
         title: Key::ExperimentsPaneScopesTitle,
         hint: Key::ExperimentsPaneScopesHint,
         platforms: Some(&[Platform::Linux]),
+    },
+    Experiment {
+        id: NODES,
+        stage: Stage::Experimental,
+        title: Key::ExperimentsNodesTitle,
+        hint: Key::ExperimentsNodesHint,
+        platforms: Some(&[Platform::Linux, Platform::Macos, Platform::Windows]),
     },
 ];
 
@@ -359,6 +370,32 @@ mod tests {
             PANE_SCOPES,
             EXPERIMENTS,
             Some(Platform::Linux)
+        ));
+    }
+
+    #[test]
+    fn nodes_are_offered_on_every_desktop_and_off_until_turned_on() {
+        for platform in [Platform::Linux, Platform::Macos, Platform::Windows] {
+            let offered = available_experiments(EXPERIMENTS, Some(platform));
+            assert!(offered.iter().any(|e| e.id == NODES), "{platform:?}");
+            assert!(!is_experiment_enabled(
+                &Settings::default(),
+                NODES,
+                EXPERIMENTS,
+                Some(platform)
+            ));
+            assert!(is_experiment_enabled(
+                &with(&[NODES]),
+                NODES,
+                EXPERIMENTS,
+                Some(platform)
+            ));
+        }
+        assert!(!is_experiment_enabled(
+            &with(&[NODES]),
+            NODES,
+            EXPERIMENTS,
+            None
         ));
     }
 

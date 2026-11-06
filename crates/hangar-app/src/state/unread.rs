@@ -40,6 +40,8 @@ pub enum Owner {
     Settings,
     /// One of `settings.savedCommands`.
     SettingsCommand(String),
+    /// One of `settings.nodes`.
+    SettingsNode(String),
     Folder(String),
     Workspace(WsId),
     /// A workspace's `orchestration`.
@@ -183,6 +185,7 @@ pub(super) fn locate<'v>(state: &'v Value, owner: &Owner) -> Option<&'v Map<Stri
         Owner::Root => Some(root),
         Owner::Settings => root.get("settings")?.as_object(),
         Owner::SettingsCommand(id) => by_id(root.get("settings")?.get("savedCommands"), id),
+        Owner::SettingsNode(id) => by_id(root.get("settings")?.get("nodes"), id),
         Owner::Folder(id) => by_id(root.get("folders"), id),
         Owner::Workspace(ws) => by_id(root.get("workspaces"), ws),
         Owner::Orchestration(ws) => by_id(root.get("workspaces"), ws)?
@@ -204,6 +207,7 @@ fn locate_mut<'v>(state: &'v mut Value, owner: &Owner) -> Option<&'v mut Map<Str
         Owner::SettingsCommand(id) => {
             by_id_mut(root.get_mut("settings")?.get_mut("savedCommands"), id)
         }
+        Owner::SettingsNode(id) => by_id_mut(root.get_mut("settings")?.get_mut("nodes"), id),
         Owner::Folder(id) => by_id_mut(root.get_mut("folders"), id),
         Owner::Workspace(ws) => by_id_mut(root.get_mut("workspaces"), ws),
         Owner::Orchestration(ws) => by_id_mut(root.get_mut("workspaces"), ws)?
