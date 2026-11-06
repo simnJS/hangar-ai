@@ -961,9 +961,7 @@ pub fn login_ready(rt: &mut PaneRt) {
 
 /// The workspace and the pane of `pane`, if both still exist.
 pub fn find<'a>(m: &'a Model, ws: &str, pane: &str) -> Option<(&'a Workspace, &'a Pane)> {
-    let ws = m.workspace(ws)?;
-    let pane = ws.panes.iter().find(|p| p.id == pane)?;
-    Some((ws, pane))
+    m.find_pane(pane).filter(|(found, _)| found.id == ws)
 }
 
 /// Unmounts a pane: its shell killed (off the UI thread: the kill takes

@@ -77,8 +77,9 @@ pub fn publish(port: u16, token: &str) -> Result<(), String> {
     result
 }
 
-/// The token in this file lets whoever reads it type into the person's
-/// shells (`/api/control/pane_send`), so the file is the owner's alone (0600,
+/// The token in this file is the outside one (server.rs, `outside_token`):
+/// never Hangar's own, and no pane's. It still lets whoever reads it type
+/// into the person's shells (`/api/control/pane_send`), so the file is the owner's alone (0600,
 /// `Access::Private`), and so is the folder Hangar keeps it in (0700): a
 /// home that other users may list (Debian, Fedora) must not hand it out.
 ///

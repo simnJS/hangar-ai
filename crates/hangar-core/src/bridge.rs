@@ -98,7 +98,9 @@ pub fn set_endpoint(port: u16, token: &str) {
     let _ = ENDPOINT.set((port, token.to_string()));
 }
 
-/// The loopback API's port and token, once it is listening.
+/// The loopback API's port and Hangar's own token, once it is listening. The
+/// token is the app's (`Caller::App`): it never goes into a pane, which gets
+/// its own (pty.rs, `pane_api`).
 pub fn endpoint() -> Option<(u16, &'static str)> {
     ENDPOINT.get().map(|(port, token)| (*port, token.as_str()))
 }
@@ -107,11 +109,12 @@ pub fn endpoint() -> Option<(u16, &'static str)> {
 /// `HANGAR_PANE_NAME` every pane is given (pty.rs), for its Claude Code to
 /// find its way back here, and the mod's folder, which `apply_plugin_dirs`
 /// then puts on `CLAUDE_CODE_PLUGIN_DIRS` beside the workspace's kits.
+/// `endpoint` is the API's port and the pane's own token (pty.rs, `pane_api`).
 /// Nothing is set, and no folder handed back, when either half is missing — a
 /// mod with no URL would only make requests that fail — or when the machine
 /// forbids sideloading.
-pub fn apply_env(cmd: &mut CommandBuilder) -> Option<&'static Path> {
-    let (Some(dir), Some((port, token))) = (plugin_dir(), ENDPOINT.get()) else {
+pub fn apply_env(cmd: &mut CommandBuilder, endpoint: Option<(u16, &str)>) -> Option<&'static Path> {
+    let (Some(dir), Some((port, token))) = (plugin_dir(), endpoint) else {
         return None;
     };
     if sideloading_forbidden() {

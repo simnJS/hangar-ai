@@ -136,8 +136,11 @@ impl Core {
                 Ok(port) => {
                     bridge::set_endpoint(port, &advertised);
                     // Agents discover the live port/token here rather than
-                    // having them baked into their config files.
-                    if let Err(err) = endpoint::publish(port, &advertised) {
+                    // having them baked into their config files. The file is
+                    // readable by any process of the person's, so it carries
+                    // the outside token, never Hangar's own: a pane Hangar
+                    // started has its own token in its environment.
+                    if let Err(err) = endpoint::publish(port, server::outside_token()) {
                         eprintln!("could not publish endpoint: {err}");
                     }
                 }

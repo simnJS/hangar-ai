@@ -415,8 +415,24 @@ fn apply_plugins(
     issues
 }
 
+/// The loopback API as pane `id` reaches it, when something in the pane will
+/// (`wanted`: the bridge mod, a kit's hook) and the API is listening (`port`):
+/// its port and the pane's own token (server.rs, `pane_tokens`), never
+/// Hangar's, so that the API takes whatever the pane asks as the pane's. The
+/// same id gets the same token until the pane is closed for good, so a
+/// restart or a hibernation that brings the id back keeps it.
+fn pane_api(
+    port: Option<u16>,
+    id: &str,
+    name: Option<&str>,
+    wanted: bool,
+) -> Option<(u16, String)> {
+    let port = port.filter(|_| wanted)?;
+    Some((port, crate::server::pane_tokens().issue(id, name)))
+}
+
 /// What a hook of a kit, which has no MCP, needs to reach Hangar from its pane
-/// (docs/kits.md): the loopback API's URL and token, beside the `HANGAR_PANE_ID`
+/// (docs/kits.md): the loopback API's URL and the pane's token, beside the `HANGAR_PANE_ID`
 /// every pane has. A pane with kits gets them whether or not the bridge mod comes
 /// along; any other starts without them, even under a Hangar launched from inside
 /// a pane, whose token would be that Hangar's.
@@ -590,15 +606,26 @@ pub fn pty_spawn_with(
         Some(name) => cmd.env("HANGAR_PANE_NAME", name),
         None => cmd.env_remove("HANGAR_PANE_NAME"),
     }
+    // The API as this pane reaches it: its port, and a token of the pane's
+    // own, never Hangar's, so that what the pane asks is done as the pane.
+    let kits = kits.unwrap_or_default();
+    let endpoint = pane_api(
+        crate::bridge::endpoint().map(|(port, _)| port),
+        &id,
+        name.as_deref(),
+        bridge != Some(false) || !kits.is_empty(),
+    );
+    let endpoint = endpoint
+        .as_ref()
+        .map(|(port, token)| (*port, token.as_str()));
     // Lets a Claude Code started in this pane load the hangar-bridge mod, and
     // the plugins of its workspace's kits.
     let bridge_dir = if bridge != Some(false) {
-        crate::bridge::apply_env(&mut cmd)
+        crate::bridge::apply_env(&mut cmd, endpoint)
     } else {
         None
     };
-    let kits = kits.unwrap_or_default();
-    apply_kit_api(&mut cmd, !kits.is_empty(), crate::bridge::endpoint());
+    apply_kit_api(&mut cmd, !kits.is_empty(), endpoint);
     let kit_issues = apply_plugins(
         &mut cmd,
         bridge_dir,
@@ -1274,6 +1301,35 @@ mod tests {
             assert_eq!(env_of(&inherited, "HANGAR_API_URL"), None);
             assert_eq!(env_of(&inherited, "HANGAR_API_TOKEN"), None);
         }
+    }
+
+    #[test]
+    fn a_pane_s_environment_carries_its_own_token_and_not_hangar_s() {
+        let tokens = crate::server::pane_tokens();
+        let api = pane_api(Some(4242), "p-own-token", Some("Ada"), true);
+        let (port, token) = api.clone().expect("the API is listening");
+        assert_eq!(port, 4242);
+        // The pane's own: the one the API knows it by, and no other pane's.
+        assert_eq!(token, tokens.issue("p-own-token", Some("Ada")));
+        assert_ne!(token, tokens.issue("p-own-token-other", None));
+        let mut cmd = CommandBuilder::new("sh");
+        apply_kit_api(&mut cmd, true, api.as_ref().map(|(p, t)| (*p, t.as_str())));
+        assert_eq!(env_of(&cmd, "HANGAR_API_TOKEN"), Some(token.clone()));
+
+        // A respawn on the same id (a restart, a hibernation) keeps it.
+        let again = pane_api(Some(4242), "p-own-token", Some("Ada"), true);
+        assert_eq!(again.map(|(_, t)| t), Some(token.clone()));
+
+        // Closed for good, the next pane on that id is somebody else.
+        tokens.revoke("p-own-token");
+        let after = pane_api(Some(4242), "p-own-token", Some("Ada"), true);
+        assert_ne!(after.map(|(_, t)| t), Some(token));
+
+        // Nothing in the pane would use one, or the API is not listening.
+        assert_eq!(pane_api(Some(4242), "p-own-token-none", None, false), None);
+        assert_eq!(pane_api(None, "p-own-token-none", None, true), None);
+        tokens.revoke("p-own-token");
+        tokens.revoke("p-own-token-other");
     }
 
     #[test]

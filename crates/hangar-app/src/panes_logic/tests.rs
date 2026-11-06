@@ -965,3 +965,92 @@ fn the_trust_question_is_looked_for_on_the_screen_and_not_in_the_history() {
     impl crate::services::TerminalAccess for Nothing {}
     assert_eq!(screen_of(&Nothing, &pane), "");
 }
+
+#[test]
+fn a_pane_is_found_through_the_index_even_one_it_has_not_caught_up_with() {
+    let (mut m, _) = model(vec![
+        workspace("w1", vec![pane("ix-a", "Ava", AgentId::Claude)]),
+        workspace(
+            "w2",
+            vec![
+                pane("ix-b", "Bob", AgentId::Claude),
+                pane("ix-c", "Cid", AgentId::Shell),
+            ],
+        ),
+    ]);
+    index_panes(&mut m);
+    let (ws, found) = m.find_pane("ix-c").expect("indexed");
+    assert_eq!((ws.id.as_str(), found.name.as_str()), ("w2", "Cid"));
+    assert_eq!(m.find_workspace("w2").map(|ws| ws.panes.len()), Some(2));
+    assert!(m.find_pane("nobody").is_none());
+
+    // A store action moves the panes under the index: what it finds is
+    // still what the state says, before and after it catches up.
+    m.apply(StoreAction::ClosePane {
+        ws: "w2".into(),
+        pane: "ix-b".into(),
+    });
+    for _ in 0..2 {
+        assert!(m.find_pane("ix-b").is_none());
+        let (ws, found) = m.find_pane("ix-c").expect("still there");
+        assert_eq!((ws.id.as_str(), found.id.as_str()), ("w2", "ix-c"));
+        index_panes(&mut m);
+    }
+
+    // The machines get a `PaneInfo` that says what the state says, the
+    // session a capture just stored included.
+    m.apply(StoreAction::UpdatePane {
+        ws: "w1".into(),
+        pane: "ix-a".into(),
+        patch: Patch::new(|pane: &mut Pane| pane.session_id = Some("s-new".into())),
+    });
+    let (info, _) = inputs(&m, "ix-a", NOW).unwrap();
+    assert_eq!(info.session_id.as_deref(), Some("s-new"));
+    index_panes(&mut m);
+    let (info, _) = inputs(&m, "ix-a", NOW).unwrap();
+    assert_eq!(info.session_id.as_deref(), Some("s-new"));
+
+    // A state hydrated anew, at the same revision, is indexed anew.
+    m.hydrate(AppState {
+        workspaces: vec![workspace("w9", vec![pane("ix-z", "Zed", AgentId::Shell)])],
+        ..AppState::default()
+    });
+    index_panes(&mut m);
+    assert_eq!(
+        m.find_pane("ix-z").map(|(ws, _)| ws.id.as_str()),
+        Some("w9")
+    );
+    assert!(m.find_pane("ix-a").is_none());
+}
+
+#[test]
+fn a_pane_closed_for_good_loses_its_api_token_and_one_still_in_the_state_keeps_it() {
+    let tokens = hangar_core::server::pane_tokens();
+    let (mut m, _) = model(vec![workspace(
+        "w1",
+        vec![
+            pane("tok-kept", "Ava", AgentId::Claude),
+            pane("tok-closed", "Bob", AgentId::Claude),
+        ],
+    )]);
+    index_panes(&mut m);
+    // What their spawn put in their environment.
+    let kept = tokens.issue("tok-kept", Some("Ava"));
+    let closed = tokens.issue("tok-closed", Some("Bob"));
+
+    m.apply(StoreAction::ClosePane {
+        ws: "w1".into(),
+        pane: "tok-closed".into(),
+    });
+    // What the package's next message (`update`, `on_intent`, `on_event`)
+    // and the terminals' run first: the pane is seen gone.
+    index_panes(&mut m);
+
+    // Revoked: the token issued again for that id is a new one. The other
+    // pane, still in the state (as a pane asleep or restarted on its id is),
+    // keeps its own.
+    assert_ne!(tokens.issue("tok-closed", None), closed);
+    assert_eq!(tokens.issue("tok-kept", Some("Ava")), kept);
+    tokens.revoke("tok-closed");
+    tokens.revoke("tok-kept");
+}

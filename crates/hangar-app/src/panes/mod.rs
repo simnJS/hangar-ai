@@ -244,6 +244,8 @@ fn logic(msg: Logic) -> Task<Message> {
 }
 
 pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
+    // Panes are found through the index from here on (`Model::find_pane`).
+    crate::panes_logic::index_panes(m);
     // Keys, pointer moves, scrolls and ticks of a terminal come many times a
     // second, and only a measure or a press can change what the sync and the
     // reports depend on (`term_settles`).
@@ -1111,16 +1113,10 @@ fn signature(st: &State, m: &Model) -> u64 {
         region.hash(&mut hash);
     }
     m.state().active_workspace_id.hash(&mut hash);
-    let mut windows: Vec<String> = m
-        .live
-        .windows
-        .iter()
-        .map(|(id, kind)| format!("{id:?}{kind:?}"))
-        .collect();
-    windows.sort();
-    windows.hash(&mut hash);
+    // The windows in no order of their own: summed, each hashed apart.
+    unordered(m.live.windows.iter()).hash(&mut hash);
     // A resume waiting its wave goes when its window takes the focus.
-    format!("{:?}", m.ui.focused_window).hash(&mut hash);
+    m.ui.focused_window.hash(&mut hash);
     let s = m.settings();
     (
         &s.theme_id,
@@ -1133,9 +1129,9 @@ fn signature(st: &State, m: &Model) -> u64 {
         s.padding.to_bits(),
     )
         .hash(&mut hash);
-    format!("{:?}", s.cursor_style).hash(&mut hash);
+    std::mem::discriminant(&s.cursor_style).hash(&mut hash);
     for id in &m.ui.opened_ids {
-        let Some(ws) = m.workspace(id) else {
+        let Some(ws) = m.find_workspace(id) else {
             continue;
         };
         (&ws.id, &ws.theme_id, ws.detached).hash(&mut hash);
@@ -1143,7 +1139,7 @@ fn signature(st: &State, m: &Model) -> u64 {
         for pane in &ws.panes {
             pane.id.hash(&mut hash);
             if pane.role.is_some() {
-                format!("{:?}", pane.role).hash(&mut hash);
+                pane.role.hash(&mut hash);
                 pane.session_id.hash(&mut hash);
                 let activity = m.live.panes_logic.activity_or_idle(&pane.id);
                 crate::orchestration_ui::actions::is_mid_turn(activity).hash(&mut hash);
@@ -1152,23 +1148,32 @@ fn signature(st: &State, m: &Model) -> u64 {
         focused_pane(m, ws).hash(&mut hash);
         m.ui.zoom_by_workspace.get(&ws.id).hash(&mut hash);
     }
-    let mut typing: Vec<&PaneId> = st
-        .panes
-        .iter()
-        .filter(|(_, rt)| rt.search.as_ref().is_some_and(|s| s.typing))
-        .map(|(id, _)| id)
-        .collect();
-    typing.sort();
-    typing.hash(&mut hash);
-    let mut running: Vec<&PaneId> = st
-        .panes
-        .iter()
-        .filter(|(_, rt)| rt.status == PaneStatus::Running)
-        .map(|(id, _)| id)
-        .collect();
-    running.sort();
-    running.hash(&mut hash);
+    unordered(
+        st.panes
+            .iter()
+            .filter(|(_, rt)| rt.search.as_ref().is_some_and(|s| s.typing))
+            .map(|(id, _)| id),
+    )
+    .hash(&mut hash);
+    unordered(
+        st.panes
+            .iter()
+            .filter(|(_, rt)| rt.status == PaneStatus::Running)
+            .map(|(id, _)| id),
+    )
+    .hash(&mut hash);
     hash.finish()
+}
+
+/// The items of a map, whatever order it gives them in, as one value to hash:
+/// their count and the sum of their own hashes. Nothing is allocated or
+/// sorted, which `signature` would otherwise do after every message.
+fn unordered<T: Hash>(items: impl Iterator<Item = T>) -> (usize, u64) {
+    items.fold((0, 0u64), |(count, sum), item| {
+        let mut one = std::hash::DefaultHasher::new();
+        item.hash(&mut one);
+        (count + 1, sum.wrapping_add(one.finish()))
+    })
 }
 
 fn sync_if_needed(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
@@ -1234,15 +1239,21 @@ fn sync(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
 
     // A split, a close or a preset ends the zoom, as it does in tmux: the
     // person asked for a change of the arrangement and expects to see it.
-    for id in m.ui.opened_ids.clone() {
-        let Some(count) = m.workspace(&id).map(Workspace::pane_count) else {
+    let state = m.state_arc();
+    for id in &m.ui.opened_ids {
+        let Some(count) = state
+            .workspaces
+            .iter()
+            .find(|ws| ws.id == *id)
+            .map(Workspace::pane_count)
+        else {
             continue;
         };
         if let Some(before) = st.pane_counts.insert(id.clone(), count)
             && before != count
-            && m.ui.zoom_by_workspace.get(&id) == Some(&true)
+            && m.ui.zoom_by_workspace.get(id) == Some(&true)
         {
-            m.ui.zoom_by_workspace.insert(id, false);
+            m.ui.zoom_by_workspace.insert(id.clone(), false);
         }
     }
 

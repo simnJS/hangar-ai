@@ -81,6 +81,7 @@ pub mod hibernate;
 pub mod hibernation;
 pub mod pane_agent;
 pub mod pane_branch;
+mod pane_index;
 pub mod pane_insight;
 pub mod session_watch;
 pub mod shells;
@@ -137,6 +138,7 @@ use self::pane_branch::{
     BranchCache, Lookup, PANE_BRANCH_FOCUS_MS, PANE_BRANCH_REFRESH_MS, PANE_BRANCH_TTL_MS,
     pane_branch_of,
 };
+use self::pane_index::{PaneIndex, info_of};
 use self::pane_insight::Insights;
 use self::session_watch::SessionWatch;
 use crate::message::{Intent, Message};
@@ -191,6 +193,8 @@ pub struct Live {
     recent: Vec<WsId>,
     /// The workspace it showed when `sync_active` last looked.
     last_active: Option<WsId>,
+    /// Where each pane is in the state (`index_panes`).
+    index: PaneIndex,
 }
 
 /// The package's messages, routed by the shell as `Message::PanesLogic(Msg)`.
@@ -628,24 +632,41 @@ pub fn sleep_line(
 
 // ----- the model, read for the machines
 
-/// A pane and its workspace, from the persisted state.
-fn locate(m: &Model, pane: &str) -> Option<(PaneInfo, Pane)> {
-    for ws in &m.state().workspaces {
-        if let Some(found) = ws.panes.iter().find(|p| p.id == pane) {
-            return Some((info_of(ws, found), found.clone()));
-        }
+impl Model {
+    /// The pane `pane` and its workspace, wherever it is: one lookup in the
+    /// index of the panes (`index_panes`) rather than a walk through every
+    /// workspace.
+    pub fn find_pane(&self, pane: &str) -> Option<(&Workspace, &Pane)> {
+        let (ws, found, _) = self.live.panes_logic.index.find(self.state(), pane)?;
+        Some((ws, found))
     }
-    None
+
+    /// `workspace`, through the same index.
+    pub fn find_workspace(&self, id: &str) -> Option<&Workspace> {
+        self.live.panes_logic.index.workspace(self.state(), id)
+    }
 }
 
-fn info_of(ws: &Workspace, pane: &Pane) -> PaneInfo {
-    PaneInfo {
-        id: pane.id.clone(),
-        workspace_id: ws.id.clone(),
-        name: pane.name.clone(),
-        agent: pane.agent,
-        session_id: pane.session_id.clone(),
+/// Brings the index of the panes level with the state, when the state
+/// changed since it was built. A pane that left the state was closed for
+/// good — closed by hand, restarted under a new id, gone with its workspace —
+/// and its API token goes with it; one asleep or restarted on the same id is
+/// still in the state and keeps its own. Run before every message of this
+/// package and of the terminals' (`panes::update`).
+pub fn index_panes(m: &mut Model) {
+    let state = m.state_arc();
+    let revision = m.revision();
+    let tokens = hangar_core::server::pane_tokens();
+    for gone in m.live.panes_logic.index.refresh(&state, revision) {
+        tokens.revoke(&gone);
     }
+}
+
+/// A pane, its workspace and what the machines know it as.
+fn lookup<'a>(m: &'a Model, pane: &str) -> Option<(&'a Workspace, &'a Pane, Arc<PaneInfo>)> {
+    let (ws, found, info) = m.live.panes_logic.index.find(m.state(), pane)?;
+    let info = info.unwrap_or_else(|| Arc::new(info_of(ws, found)));
+    Some((ws, found, info))
 }
 
 /// The folder a pane's shell opens in: its own, else its workspace's. Public
@@ -698,13 +719,9 @@ fn ambient(m: &Model, ws: &Workspace, pane: &str, now: EpochMs) -> Ambient {
 }
 
 /// A pane's machine inputs, or `None` when the pane is not in the state.
-fn inputs(m: &Model, pane: &str, now: EpochMs) -> Option<(PaneInfo, Ambient)> {
-    let (ws, found) = m
-        .state()
-        .workspaces
-        .iter()
-        .find_map(|ws| ws.panes.iter().find(|p| p.id == pane).map(|p| (ws, p)))?;
-    Some((info_of(ws, found), ambient(m, ws, pane, now)))
+fn inputs(m: &Model, pane: &str, now: EpochMs) -> Option<(Arc<PaneInfo>, Ambient)> {
+    let (ws, _, info) = lookup(m, pane)?;
+    Some((info, ambient(m, ws, pane, now)))
 }
 
 fn bump(m: &mut Model) {
@@ -759,20 +776,23 @@ fn sync_active(m: &mut Model, now: EpochMs) {
         live.last_active = active;
     }
     // Mounted again: awake, and as good as used just now.
-    let opened = m.ui.opened_ids.clone();
-    m.live.panes_logic.hibernation.wake_mounted(&opened, now);
+    m.live
+        .panes_logic
+        .hibernation
+        .wake_mounted(&m.ui.opened_ids, now);
 }
 
 /// Looking at a pane clears its badge. `window_back`: the window of these
 /// panes just came to the front (only those it draws), with the pane
 /// already the one looked at.
 fn refresh_attention(m: &mut Model, window_back: Option<window::Id>, now: EpochMs) {
-    let mut looks: Vec<(PaneInfo, bool, bool)> = Vec::new();
+    let live = &m.live.panes_logic;
+    let mut looks: Vec<(Arc<PaneInfo>, bool, bool)> = Vec::with_capacity(live.machines.len());
     for ws in &m.state().workspaces {
         let back = window_back.is_some_and(|window| host_window(m, ws) == Some(window));
         for pane in &ws.panes {
-            if m.live.panes_logic.is_pane_mounted(&pane.id) {
-                looks.push((info_of(ws, pane), attended(m, ws, &pane.id), back));
+            if live.is_pane_mounted(&pane.id) {
+                looks.push((live.index.info(ws, pane), attended(m, ws, &pane.id), back));
             }
         }
     }
@@ -793,17 +813,6 @@ impl Live {
         self.machines
             .get(pane)
             .map(|machine| (machine.activity, machine.attention))
-    }
-
-    /// What a tick of the watchers can change in what is read, every pane's.
-    fn state_marks(&self) -> Vec<(PaneId, AgentActivity, bool)> {
-        let mut marks: Vec<_> = self
-            .machines
-            .iter()
-            .map(|(id, machine)| (id.clone(), machine.activity, machine.attention))
-            .collect();
-        marks.sort_by(|a, b| a.0.cmp(&b.0));
-        marks
     }
 }
 
@@ -1057,29 +1066,24 @@ fn act_on(
 
 pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
     let now = wall_clock_ms();
+    index_panes(m);
     match msg {
         Msg::Mounted { pane } => {
-            let Some((ws, found)) = m.state().workspaces.iter().find_map(|ws| {
-                ws.panes
-                    .iter()
-                    .find(|p| p.id == pane)
-                    .map(|p| (ws.clone(), p.clone()))
-            }) else {
+            let Some((ws, found, info)) = lookup(m, &pane) else {
                 return Task::none();
             };
+            let folder = folder_of(ws, found);
             let live = &mut m.live.panes_logic;
-            live.mount_pane(&pane, &ws.id, &found.name, now);
+            live.mount_pane(&pane, &info.workspace_id, &info.name, now);
             // A restart gave this pane a new id: the prompts still queued for
             // the old one come along.
-            let carried: Vec<QueuedPrompt> =
-                live.carried.take(&carry_key(&ws.id, &found.name), now);
+            let carried: Vec<QueuedPrompt> = live
+                .carried
+                .take(&carry_key(&info.workspace_id, &info.name), now);
             let requeued = requeue(sv.core().host().clone(), pane.clone(), carried);
             bump(m);
             // A pane asks once on mount.
-            Task::batch([
-                requeued,
-                ask_branch(m, &folder_of(&ws, &found), now, PANE_BRANCH_TTL_MS),
-            ])
+            Task::batch([requeued, ask_branch(m, &folder, now, PANE_BRANCH_TTL_MS)])
         }
         Msg::Unmounted { pane, handing_over } => {
             let live = &m.live.panes_logic;
@@ -1220,7 +1224,9 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
         }
         Msg::Context { pane, usage } => {
             // A pane switched to a shell since the read has no gauge.
-            let claude = locate(m, &pane).is_some_and(|(info, _)| info.agent == AgentId::Claude);
+            let claude = m
+                .find_pane(&pane)
+                .is_some_and(|(_, found)| found.agent == AgentId::Claude);
             let gauge = usage
                 .filter(|_| claude)
                 .and_then(|usage| compute_context_gauge(&usage));
@@ -1272,30 +1278,41 @@ fn with_pane(
 /// The watchers' checks that came due, and the trust question to look for.
 fn tick(m: &mut Model, sv: &Services, now: EpochMs) -> Task<Message> {
     let idle_ms = m.settings().notify_idle_ms;
-    let panes: Vec<PaneId> = m.live.panes_logic.machines.keys().cloned().collect();
-    let before = m.live.panes_logic.state_marks();
+    // The mounted panes as the index made them once: no id or name copied
+    // per tick.
+    let panes: Vec<Arc<PaneInfo>> = m
+        .live
+        .panes_logic
+        .machines
+        .keys()
+        .filter_map(|pane| lookup(m, pane).map(|(_, _, info)| info))
+        .collect();
+    let mut changed = false;
     let mut tasks = Vec::new();
     for pane in panes {
-        let Some((info, amb)) = inputs(m, &pane, now) else {
+        let Some((info, amb)) = inputs(m, &pane.id, now) else {
             continue;
         };
+        // A step changes the machine of its own pane and no other.
+        let before = m.live.panes_logic.pane_state_mark(&info.id);
         let mut effects = m.live.panes_logic.poll_pane(&info, idle_ms, &amb);
-        if m.live.panes_logic.trust_look_due(&pane, now) {
+        if m.live.panes_logic.trust_look_due(&info.id, now) {
             // The rows of the screen, read a moment after the last output.
-            let screen = screen_of(sv.terminals().as_ref(), &pane);
+            let screen = screen_of(sv.terminals().as_ref(), &info.id);
             effects.extend(
                 m.live
                     .panes_logic
                     .look_for_trust_question(&info, &screen, &amb),
             );
         }
+        changed |= m.live.panes_logic.pane_state_mark(&info.id) != before;
         if !effects.is_empty() {
             tasks.push(run_effects(m, &info, effects));
         }
     }
     // A burst of output ticks every quarter second; what the readers see
     // changes only when a pane starts working or hands back.
-    if m.live.panes_logic.state_marks() != before {
+    if changed {
         bump(m);
     }
     Task::batch(tasks)
@@ -1564,6 +1581,7 @@ pub fn on_intent(
     intent: &Intent,
 ) -> Option<Task<Message>> {
     let now = wall_clock_ms();
+    index_panes(m);
     // Whatever the intent was, the workspace on screen may be another, a
     // pane may have taken the focus, a workspace may have been mounted again.
     sync_active(m, now);
@@ -1619,6 +1637,7 @@ pub fn on_event(
     event: &CoreEvent,
 ) -> Option<Task<Message>> {
     let _ = (st, sv);
+    index_panes(m);
     reduce_core_event(m, event, wall_clock_ms())
 }
 
