@@ -67,19 +67,19 @@ pub fn shown(m: &Model, ws: &Workspace) -> bool {
     ws.chat_view == Some(true) && available(m)
 }
 
-pub fn update(st: &mut State, m: &mut Model, _sv: &Services, msg: Msg) -> Task<Message> {
+pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
     match msg {
         Msg::SetShown(ws, on) => {
             m.apply(StoreAction::SetChatView { ws, on });
             Task::none()
         }
-        Msg::Conversation(msg) => conversation::update(&mut st.conversation, m, msg),
+        Msg::Conversation(msg) => conversation::update(&mut st.conversation, m, sv, msg),
         Msg::Tasks(msg) => tasks::update(&mut st.tasks, m, msg),
     }
 }
 
-pub fn subscription(_st: &State, _m: &Model) -> Subscription<Message> {
-    Subscription::none()
+pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
+    conversation::subscription(&st.conversation, m)
 }
 
 pub fn on_intent(
@@ -92,12 +92,12 @@ pub fn on_intent(
 }
 
 pub fn on_event(
-    _st: &mut State,
-    _m: &mut Model,
+    st: &mut State,
+    m: &mut Model,
     _sv: &Services,
-    _event: &CoreEvent,
+    event: &CoreEvent,
 ) -> Option<Task<Message>> {
-    None
+    conversation::on_event(&mut st.conversation, m, event)
 }
 
 /// The chat view of `ws`, filling the main area.
