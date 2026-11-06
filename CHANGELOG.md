@@ -17,6 +17,10 @@ Every release, with its installers, is on the
 - **Nodes (experimental).** A headless Hangar, `hangar-node`, runs on a Linux machine you reach over SSH: add it in Settings › Nodes and Hangar installs it, starts it and keeps a tunnel to it. A workspace can then live on the node: its terminals, Claude Code and board run there, and the window shows them like a local workspace's, catching up on what happened while it was away. Its memory, transcripts and orchestration work too: the orchestrator and its workers run on the node, in worktrees there, while the connected window drives them. Design in `docs/native/nodes.md`.
 - **Pane scopes (experimental, Linux).** Each pane can run in a systemd scope of its own, so when memory runs out the system stops the pane that uses it (a build, say) rather than Hangar and every agent with it.
 
+### Changed
+
+- Terminal output is parsed faster (+6 % on a listing, +8 % on an agent's interface): the scan for title and link sequences skips plain text in one search.
+
 ### Fixed
 
 - Tests remove the temporary folders they create, even when they fail; a full test run used to leave thousands behind in `/tmp`.
