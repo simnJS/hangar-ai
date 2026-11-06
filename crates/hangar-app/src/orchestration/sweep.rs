@@ -262,7 +262,9 @@ mod tests {
     }
 
     /// Done on the board, yet a live process stands in it (a pane of a
-    /// Hangar this one does not see): kept.
+    /// Hangar this one does not see): kept. Live processes are found
+    /// through /proc, so on Linux only (elsewhere the board rule alone holds).
+    #[cfg(target_os = "linux")]
     #[test]
     fn a_worktree_a_live_process_stands_in_is_kept() {
         let scene = scene();
