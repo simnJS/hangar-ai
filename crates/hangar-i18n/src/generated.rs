@@ -868,6 +868,10 @@ pub enum Key {
     ExperimentsChatViewTitle,
     /// `experiments.onlyOn`
     ExperimentsOnlyOn,
+    /// `experiments.paneScopes.hint`
+    ExperimentsPaneScopesHint,
+    /// `experiments.paneScopes.title`
+    ExperimentsPaneScopesTitle,
     /// `experiments.stage.beta`
     ExperimentsStageBeta,
     /// `experiments.stage.experimental`
@@ -3715,7 +3719,7 @@ pub enum Key {
 }
 
 /// How many keys there are.
-pub const KEY_COUNT: usize = 1849;
+pub const KEY_COUNT: usize = 1851;
 
 impl Key {
     /// Every key, in the order of their ids.
@@ -4147,6 +4151,8 @@ impl Key {
         Key::ExperimentsChatViewHint,
         Key::ExperimentsChatViewTitle,
         Key::ExperimentsOnlyOn,
+        Key::ExperimentsPaneScopesHint,
+        Key::ExperimentsPaneScopesTitle,
         Key::ExperimentsStageBeta,
         Key::ExperimentsStageExperimental,
         Key::ExperimentsTitle,
@@ -6001,6 +6007,8 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "experiments.chatView.hint", en: Text::plain("Each workspace can be shown as a chat instead of its panes: the conversation, its tasks, and the previews and kit tabs beside them. The terminals keep running behind it, and the panes come back as they were."), fr: Text::plain("Chaque workspace peut s'afficher en chat plutôt qu'en panneaux\u{202f}: la conversation, ses tâches, et les aperçus et onglets de kits à côté. Les terminaux continuent de tourner derrière, et les panneaux reviennent tels qu'ils étaient.") },
     Message { id: "experiments.chatView.title", en: Text::plain("Chat view"), fr: Text::plain("Vue chat") },
     Message { id: "experiments.onlyOn", en: Text::plain("Only on {platforms}"), fr: Text::plain("Uniquement sur {platforms}") },
+    Message { id: "experiments.paneScopes.hint", en: Text::plain("Each pane runs in a systemd scope of its own, named after it, so when memory runs out the system stops the pane that uses it rather than Hangar and every agent. Applies to the panes started or restarted after it is turned on; Hangar itself does not need a restart."), fr: Text::plain("Chaque panneau tourne dans un scope systemd à lui, nommé d'après lui\u{202f}: quand la mémoire vient à manquer, le système arrête le panneau qui la consomme plutôt que Hangar et tous les agents. S'applique aux panneaux démarrés ou redémarrés après l'activation\u{202f}; Hangar lui-même n'a pas besoin de redémarrer.") },
+    Message { id: "experiments.paneScopes.title", en: Text::plain("One systemd scope per pane"), fr: Text::plain("Un scope systemd par panneau") },
     Message { id: "experiments.stage.beta", en: Text::plain("Beta"), fr: Text::plain("Bêta") },
     Message { id: "experiments.stage.experimental", en: Text::plain("Experimental"), fr: Text::plain("Expérimental") },
     Message { id: "experiments.title", en: Text::plain("Experimental features"), fr: Text::plain("Fonctionnalités expérimentales") },
