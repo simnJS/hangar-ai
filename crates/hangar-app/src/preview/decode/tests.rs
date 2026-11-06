@@ -342,9 +342,27 @@ fn a_picture_that_fits_is_decoded_whole_either_way() {
 
 #[test]
 fn the_reduced_size_keeps_the_proportions_and_never_reaches_zero() {
-    assert_eq!(shown_size(8000, 6000, Size::Shown), (4096, 3072));
-    assert_eq!(shown_size(6000, 8000, Size::Shown), (3072, 4096));
-    assert_eq!(shown_size(100_000, 10, Size::Shown), (4096, 1));
+    assert_eq!(shown_size(8000, 6000, Size::Shown), (4000, 3000));
+    assert_eq!(shown_size(6000, 8000, Size::Shown), (3000, 4000));
+    // Just past three times the edge: reduced four times.
+    assert_eq!(shown_size(12_289, 5, Size::Shown), (3073, 2));
+    assert_eq!(shown_size(100_000, 10, Size::Shown), (4000, 1));
     assert_eq!(shown_size(8000, 6000, Size::Full), (8000, 6000));
     assert_eq!(shown_size(4096, 10, Size::Shown), (4096, 10));
+}
+
+#[test]
+fn a_reduced_pixel_is_the_mean_of_its_block_edges_included() {
+    // 3 × 2 RGB, halved: the first output pixel averages a block of four,
+    // the second the last column's two.
+    let rgb = [
+        0, 0, 0, 100, 100, 100, 50, 60, 70, //
+        200, 200, 200, 100, 100, 100, 150, 160, 170,
+    ];
+    let (rgba, w, h) = reduce(&rgb, 3, 2, 3, 2);
+    assert_eq!((w, h), (2, 1));
+    assert_eq!(rgba, [100, 100, 100, 255, 100, 110, 120, 255]);
+    // Grey and alpha keep their alpha.
+    let (rgba, ..) = reduce(&[10, 0, 30, 255], 2, 1, 2, 2);
+    assert_eq!(rgba, [20, 20, 20, 128]);
 }
