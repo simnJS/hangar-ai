@@ -307,6 +307,11 @@ impl App {
             request.reply.send(Err(STARTING.into()));
             return Task::none();
         }
+        // The panes off screen are looked at with the pane logic's tick, and
+        // before it, so that it reads what they printed since the last.
+        if matches!(message, Message::PanesLogic(crate::panes_logic::Msg::Tick)) {
+            crate::panes::look_off_screen(&mut self.pkg.panes, &mut self.model);
+        }
         if Self::is_package_message(&message) {
             return self.route(message);
         }
