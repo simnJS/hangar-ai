@@ -25,6 +25,7 @@ Every release, with its installers, is on the
 
 ### Fixed
 
+- Kits, Windows: removing a kit's clone folder retries for a moment when a git process that was just stopped still holds it, instead of failing.
 - Tests remove the temporary folders they create, even when they fail; a full test run used to leave thousands behind in `/tmp`.
 
 ## [2.1.0] - 2026-11-06
