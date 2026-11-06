@@ -30,24 +30,26 @@ download page and `latest.json` link to them.
 ### hangar-node
 
 Every desktop package also carries the headless node daemon for Linux x86_64 and
-arm64, as two files **beside the executable**: `hangar-node-x86_64` and
-`hangar-node-aarch64`. The desktop uploads the one that matches a node's
-`uname -m` over SSH (`crates/hangar-app/src/nodes/model.rs`, `BinarySource`:
-`HANGAR_NODE_BINARY`, else `hangar-node-<arch>` in the running `hangar-ai`'s
-folder), and a Mac or a Windows desktop drives Linux nodes too, so all three
-platforms carry both:
+arm64, as two files: `hangar-node-x86_64` and `hangar-node-aarch64`. They are
+packager **resources**, not binaries (`resources` in
+`crates/hangar-app/Cargo.toml`). The desktop uploads the one that matches a
+node's `uname -m` over SSH (`crates/hangar-app/src/nodes/model.rs`,
+`BinarySource`: `HANGAR_NODE_BINARY`, else `hangar-node-<arch>` looked for in
+three places from the running `hangar-ai`'s folder: beside it, in
+`../Resources` and in `../lib/hangar-ai`), and a Mac or a Windows desktop
+drives Linux nodes too, so all three platforms carry both:
 
 | Package | Where |
 | --- | --- |
-| `.deb`, `.rpm` | `/usr/bin/hangar-node-{x86_64,aarch64}` |
-| AppImage | `usr/bin/` in the image |
-| macOS `.app` | `Contents/MacOS/` |
-| Windows installer | the install folder, removed by the uninstaller |
+| `.deb`, `.rpm` | `/usr/lib/hangar-ai/hangar-node-{x86_64,aarch64}` |
+| AppImage | `usr/lib/hangar-ai/` in the image (the executable is in `usr/bin/`) |
+| macOS `.app` | `Contents/Resources/` |
+| Windows installer | the install folder, beside the executable, removed by the uninstaller |
 
-They are not programs the desktop's own system runs. On macOS they sit in `Contents/MacOS` with the
-other executables: cargo-packager (`package/app`) codesigns only the files that
-have a Mach-O header, so these ELF files are copied and neither signed nor
-refused (read in 0.11.8's source; a signed build has not been run here). The same two files are on
+They are not programs the desktop's own system runs. On macOS they are not in
+`Contents/MacOS`: everything there is signed as nested code, and codesign
+refuses these ELF files ("code object is not signed at all"), whereas
+`Contents/Resources` takes them as data. The same two files are on
 the release as `hangar-node-<v>-linux-x86_64` and `-linux-aarch64`, for a node
 set up by hand (`chmod +x`, then `hangar-node serve`); not in `latest.json`, not
 signed.
@@ -56,10 +58,9 @@ The release workflow's `node` job builds them, before the build jobs, which
 download them into `target/node` (`actions/download-artifact`) and whose
 packaging scripts refuse to run without them: `common.sh`'s
 `stage_node_binaries` checks that each is an ELF file of the right machine and
-copies it to where the packager reads binaries (`target/dist`, or
-`target/universal-apple-darwin/dist`); the `binaries` and `generate-rpm`
-assets of `crates/hangar-app/Cargo.toml` list them; the Windows script hands
-them to `installer.nsi`. The job:
+leaves it in `target/node`, where the packager reads resources (the
+`resources` and the `generate-rpm` assets of `crates/hangar-app/Cargo.toml`
+list them there); the Windows script hands them to `installer.nsi`. The job:
 
 - builds on `ubuntu-22.04`, so the binary wants glibc 2.35 at most (checked, and
   the job fails otherwise), like the AppImage;
