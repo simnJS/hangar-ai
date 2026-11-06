@@ -22,8 +22,15 @@
 //! only what was appended to the transcript since, nothing when it did not
 //! change, and one read is out at a time (another asked meanwhile follows
 //! it), so this is never a read per frame.
+//!
+//! What it costs between reads: the window is laid out again after every
+//! message the app handles, many a second while the panes print behind the
+//! view. The messages keep their layout until what they show changes
+//! (`settled`, keyed by `Chat::revision`), and an unchanged message keeps
+//! the Markdown it was parsed into (`Chat::prose`).
 
 pub mod rich;
+mod settled;
 mod thread;
 mod titles;
 mod view;
@@ -33,6 +40,7 @@ mod tests;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use iced::widget::markdown;
@@ -148,6 +156,16 @@ pub struct Chat {
     refusal: Option<String>,
     /// The view is at its bottom: new items keep it there.
     at_bottom: bool,
+    /// Changes whenever what the messages show does: the key their layout
+    /// is kept under (`settled`). Unique across chats, so a chat started
+    /// over never takes another's layout.
+    revision: u64,
+}
+
+/// A revision no chat had yet.
+fn next_revision() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
 }
 
 impl Chat {
@@ -171,7 +189,13 @@ impl Chat {
             deciding: false,
             refusal: None,
             at_bottom: true,
+            revision: next_revision(),
         }
+    }
+
+    /// What the messages show changed: their layout is made again.
+    fn touch(&mut self) {
+        self.revision = next_revision();
     }
 }
 
@@ -537,6 +561,40 @@ pub fn update(st: &mut State, m: &mut Model, _sv: &Services, msg: Msg) -> Task<M
 /// `update`, without the services: the region reaches the pane through the
 /// desk calls alone.
 fn handle(st: &mut State, m: &mut Model, msg_: Msg) -> Task<Message> {
+    let touched = touches(&msg_).map(str::to_string);
+    let task = route(st, m, msg_);
+    if let Some(chat) = touched.and_then(|ws| st.chats.get_mut(&ws)) {
+        chat.touch();
+    }
+    task
+}
+
+/// The chat whose messages `msg_` may change, if any: not the draft, the
+/// form, a scroll (`load_older` touches its own) or a tick (a read
+/// answering does).
+fn touches(msg_: &Msg) -> Option<&str> {
+    match msg_ {
+        Msg::Read { ws, .. }
+        | Msg::Sent { ws, .. }
+        | Msg::Toggle(ws, _)
+        | Msg::SubmitAnswer(ws)
+        | Msg::Permit(ws, _)
+        | Msg::Decided { ws, .. }
+        | Msg::Coloured(ws, _)
+        | Msg::Send(ws) => Some(ws),
+        Msg::Tick
+        | Msg::LoadOlder(_)
+        | Msg::Scrolled(..)
+        | Msg::Edit(..)
+        | Msg::Pick { .. }
+        | Msg::Other { .. }
+        | Msg::OtherText { .. }
+        | Msg::Start(_)
+        | Msg::Link(_) => None,
+    }
+}
+
+fn route(st: &mut State, m: &mut Model, msg_: Msg) -> Task<Message> {
     match msg_ {
         Msg::Read {
             ws,
@@ -715,6 +773,7 @@ fn load_older(st: &mut State, m: &Model, ws: &str) -> Task<Message> {
         return Task::none();
     };
     chat.reading_older = true;
+    chat.touch();
     let pane = chat.pane.clone();
     read(st, m, ws, &pane, Some(cursor))
 }

@@ -908,3 +908,65 @@ fn a_read_refused_is_said_and_what_was_held_stays() {
         2
     );
 }
+
+/* ── what it costs between reads ───────────────────────────────── */
+
+#[test]
+fn the_messages_keep_their_layout_until_what_they_show_changes() {
+    let mut m = shop(true);
+    let mut st = State::default();
+    read_into(&mut st, &mut m, page(vec![person("u0", "Hello")], None));
+    let revision = |st: &State| st.chat(WS).unwrap().revision;
+
+    // What does not change the messages: a tick, the draft, the form.
+    let held = revision(&st);
+    apply(
+        &mut st,
+        &mut m,
+        vec![
+            Msg::Tick,
+            Msg::Edit(
+                WS.into(),
+                text_editor::Action::Edit(text_editor::Edit::Insert('a')),
+            ),
+            Msg::Pick {
+                ws: WS.into(),
+                question: 0,
+                option: 0,
+            },
+            Msg::OtherText {
+                ws: WS.into(),
+                question: 0,
+                text: "words".into(),
+            },
+        ],
+    );
+    assert_eq!(revision(&st), held);
+
+    // What does: a read answering, a message sent, a call shown, colours.
+    let mut seen = vec![held];
+    read_into(
+        &mut st,
+        &mut m,
+        page(vec![person("u0", "Hello again")], None),
+    );
+    seen.push(revision(&st));
+    st.chat_mut(WS, LEO).draft = text_editor::Content::with_text("Ship it");
+    for message in [
+        Msg::Send(WS.into()),
+        Msg::Toggle(WS.into(), "u0".into()),
+        Msg::Coloured(WS.into(), Vec::new()),
+    ] {
+        apply(&mut st, &mut m, vec![message]);
+        seen.push(revision(&st));
+    }
+    let mut unique = seen.clone();
+    unique.dedup();
+    assert_eq!(unique, seen, "each changed it: {seen:?}");
+
+    // A chat started over for another orchestrator never takes a layout
+    // made for the one before.
+    let before = revision(&st);
+    let other = st.chat_mut(WS, "ava").revision;
+    assert_ne!(other, before);
+}

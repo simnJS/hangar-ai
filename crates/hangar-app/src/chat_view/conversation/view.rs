@@ -2,6 +2,8 @@
 //! the messages newest at the bottom (the scroll anchored there), the card of
 //! the question or permission it waits on, and the input.
 
+use std::hash::{DefaultHasher, Hash, Hasher};
+
 use hangar_core::chat::{Answer, Body, CallResult, CallState, ChatItem, Question, Sender};
 use hangar_i18n::{Key, args};
 use hangar_theme::{AgentState, Theme, fonts, style, tokens};
@@ -20,6 +22,7 @@ use crate::orchestration_ui::actions::can_create_orchestrator;
 use crate::state::roles::orchestrator_of;
 use crate::state::{AgentActivity, Pane, Workspace};
 
+use super::settled::settled;
 use super::thread::{Outgoing, Sent};
 use super::{Blocked, Chat, Msg, State, blocked, msg, rich, titles};
 
@@ -195,18 +198,41 @@ fn messages<'a>(
         );
     }
     let ws_id = ws.id.clone();
-    scrollable(centred(container(list).padding(Padding {
+    let content = centred(container(list).padding(Padding {
         top: tokens::space::XXL,
         right: tokens::space::XXL,
         bottom: tokens::space::XXL,
         left: tokens::space::XXL,
-    })))
-    .anchor_bottom()
-    .on_scroll(move |viewport| msg(Msg::Scrolled(ws_id.clone(), viewport)))
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .style(style::scrollable::default(t))
-    .into()
+    }));
+    scrollable(settled(layout_key(ctx, pane, chat, tasks), content))
+        .anchor_bottom()
+        .on_scroll(move |viewport| msg(Msg::Scrolled(ws_id.clone(), viewport)))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(style::scrollable::default(t))
+        .into()
+}
+
+/// What the messages' words come from: the chat's own state, and the
+/// names, titles and language they are written with, and the theme (a
+/// Markdown span's colour is set as it is laid out). Laid out again only
+/// when it changes.
+fn layout_key(
+    ctx: Ctx<'_>,
+    pane: &Pane,
+    chat: &Chat,
+    tasks: Option<&[crate::board::model::Task]>,
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    chat.revision.hash(&mut hasher);
+    ctx.model.locale().hash(&mut hasher);
+    ctx.theme.id.hash(&mut hasher);
+    pane.name.hash(&mut hasher);
+    for task in tasks.unwrap_or_default() {
+        task.id.hash(&mut hasher);
+        task.title.hash(&mut hasher);
+    }
+    hasher.finish()
 }
 
 fn centre_line<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
