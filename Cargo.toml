@@ -29,10 +29,23 @@ hangar-i18n = { path = "crates/hangar-i18n" }
 hangar-update = { path = "crates/hangar-update" }
 hangar-model3d = { path = "crates/hangar-model3d" }
 
-iced = { version = "0.14", features = ["tokio", "advanced", "canvas", "image", "svg", "lazy", "markdown", "highlighter"] }
+# `image-without-codecs` rather than `image`: iced's `image` turns on the
+# image crate's default formats, every one of them (EXR, TIFF, DDS, HDR, QOI,
+# PNM, ICO, farbfeld and an AVIF *encoder*, rav1e), when the app shows PNG,
+# JPEG, GIF, WebP and BMP (and AVIF, which it decodes itself). The formats it
+# reads are the `image` entry's below, which every crate here shares; the 3D
+# view adds the texture formats it reads (hangar-model3d's Cargo.toml).
+iced = { version = "0.14", features = ["tokio", "advanced", "canvas", "image-without-codecs", "svg", "lazy", "markdown", "highlighter"] }
 alacritty_terminal = "0.26"
 portable-pty = "0.9.0"
-wasmtime = "50"
+# A native kit tab is a core module compiled by Cranelift, run with epoch
+# interruption and a ResourceLimiter, with wasmtime's on-disk code cache
+# (hangar-kit-host's runtime.rs): only what that needs, and `threads`, which
+# `Config::wasm_threads` (set to false there) is behind. Off: the text format
+# (`wat`, the `wast` parser), the component model, the GC proposal, async,
+# the pooling allocator, profiling, coredumps, the debugger hooks and the
+# addr2line/demangle of a trap's frames.
+wasmtime = { version = "50", default-features = false, features = ["runtime", "cranelift", "cache", "std", "parallel-compilation", "backtrace", "threads"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # `signal`: the app quits in order on SIGTERM, SIGINT and SIGHUP (hangar-app's
