@@ -1203,6 +1203,8 @@ mod tests {
         );
     }
 
+    // The paths are macOS ones: on Windows a backslash in them is a separator.
+    #[cfg(unix)]
     #[test]
     fn the_administrator_script_survives_hostile_paths() {
         let command = admin_swap_command(
