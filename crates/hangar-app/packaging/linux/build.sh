@@ -55,6 +55,20 @@ rm -rf "$out/.cargo-packager"
 # to the ones the Tauri build published.
 mv "$out/hangar-ai_${version}_x86_64.AppImage" "$out/Hangar.AI_${version}_amd64.AppImage"
 mv "$out/hangar-ai_${version}_amd64.deb" "$out/Hangar.AI_${version}_amd64.deb"
+
+# dpkg reads 2.2.0-rc.1 as version 2.2.0, Debian revision rc.1, which sorts
+# after 2.2.0 itself: apt would take the release for a downgrade from its
+# release candidate. A pre-release goes into the package the Debian way,
+# 2.2.0~rc.1 (`~` sorts first), as the .rpm does; the file keeps its name.
+if [ "$version" != "${version//-/\~}" ]; then
+  deb="$out/Hangar.AI_${version}_amd64.deb"
+  unpacked="$(mktemp -d "$target_dir/deb-version.XXXXXX")"
+  chmod 755 "$unpacked" # mktemp's 0700 would become the package's ./
+  dpkg-deb -R "$deb" "$unpacked"
+  sed -i "s/^Version: .*/Version: ${version//-/\~}/" "$unpacked/DEBIAN/control"
+  dpkg-deb --root-owner-group -b "$unpacked" "$deb" >/dev/null
+  rm -rf "$unpacked"
+fi
 rm -rf "$out/.cargo-packager"
 
 # cargo-generate-rpm writes the package itself, without rpmbuild. It names it
