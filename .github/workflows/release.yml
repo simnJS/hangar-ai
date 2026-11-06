@@ -257,14 +257,6 @@ jobs:
             libclang-dev \
             libssl-dev
 
-      # hangar-node for Linux x86_64 and arm64, from the `node` job, where the
-      # packaging scripts take them from (they refuse to package without).
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: hangar-node-*
-          path: target/node
-          merge-multiple: true
-
       - uses: pnpm/action-setup@v4
         with:
           version: 10
@@ -388,6 +380,16 @@ jobs:
             cargo build --profile dist --locked -p hangar-webview --features engine
             crates/hangar-app/packaging/check-mobile.sh "target/dist/hangar-ai${{ runner.os == 'Windows' && '.exe' || '' }}"
           fi
+
+      # hangar-node for Linux x86_64 and arm64, from the `node` job, where the
+      # packaging scripts take them from (they refuse to package without).
+      # After the build, not before: rust-cache restores target/ and would
+      # remove a target/node downloaded ahead of it.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: hangar-node-*
+          path: target/node
+          merge-multiple: true
 
       # Linux and macOS are packaged by cargo-packager. Windows is not: its
       # installer is the Tauri bundler's NSIS script with Hangar's pages and the
