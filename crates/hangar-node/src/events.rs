@@ -13,8 +13,10 @@ pub fn to_json(event: &Event) -> Value {
         Event::BridgeEvent { pane_id, event } => {
             json!({ "event": name, "paneId": pane_id, "payload": event })
         }
+        // The id beside the payload: what `POST /node/control/{id}/reply`
+        // answers (control.rs).
         Event::ControlRequest(request) | Event::ControlInternal(request) => {
-            json!({ "event": name, "payload": request })
+            json!({ "event": name, "id": request.id, "payload": request })
         }
         Event::BridgeQueue(queue) => json!({ "event": name, "payload": queue }),
         Event::GitCloneProgress(progress) => json!({ "event": name, "payload": progress }),
@@ -50,5 +52,19 @@ mod tests {
             }),
             json!({ "event": "bridge:event", "paneId": "p1", "payload": { "kind": "stop" } })
         );
+        let request = hangar_core::control::ControlRequest {
+            id: "r1".into(),
+            op: "worker_spawn".into(),
+            args: json!({ "task": "t1" }),
+        };
+        assert_eq!(
+            to_json(&Event::ControlRequest(request.clone())),
+            json!({
+                "event": Event::ControlRequest(request.clone()).name(),
+                "id": "r1",
+                "payload": { "id": "r1", "op": "worker_spawn", "args": { "task": "t1" } }
+            })
+        );
+        assert_eq!(to_json(&Event::ControlInternal(request))["id"], "r1");
     }
 }

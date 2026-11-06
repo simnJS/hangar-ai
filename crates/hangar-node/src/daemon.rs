@@ -68,6 +68,7 @@ async fn run(
             token: headless.token().to_string(),
         },
     ));
+    crate::control::watch(node.host(), node.drivers.clone());
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
         .await
         .map_err(|err| format!("the node API could not listen: {err}"))?;

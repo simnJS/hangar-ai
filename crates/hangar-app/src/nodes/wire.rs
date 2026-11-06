@@ -89,7 +89,19 @@ pub async fn request(
     path: &str,
     body: Option<&Value>,
 ) -> Result<Answer, String> {
-    tokio::time::timeout(REQUEST_TIMEOUT, exchange(client, method, path, body))
+    request_within(client, method, path, body, REQUEST_TIMEOUT).await
+}
+
+/// [`request`], given `limit` to answer: what the node does at length (a
+/// worktree's checkout, a delivery's check and review).
+pub async fn request_within(
+    client: &NodeClient,
+    method: &str,
+    path: &str,
+    body: Option<&Value>,
+    limit: Duration,
+) -> Result<Answer, String> {
+    tokio::time::timeout(limit, exchange(client, method, path, body))
         .await
         .map_err(|_| format!("{method} {path}: no answer"))?
 }

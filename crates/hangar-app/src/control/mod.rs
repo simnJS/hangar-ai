@@ -21,7 +21,9 @@
 //! - `panes.rs`, `preview.rs`, `kit_tabs.rs`, `workspace.rs`, `manager.rs`,
 //!   `delivery.rs` (+ `delivery_text.rs`): the operations;
 //! - `writes.rs`: the model writes, carried out on the UI thread;
-//! - `live.rs`: the port over the app's `Services`.
+//! - `live.rs`: the port over the app's `Services`;
+//! - `remote.rs`: the requests of a node's agents, run against the node's
+//!   workspaces and answered on the node (`Msg::Node`).
 
 pub mod delivery;
 pub mod delivery_text;
@@ -33,6 +35,7 @@ mod panes;
 mod paths;
 pub mod port;
 mod preview;
+pub mod remote;
 mod run;
 pub mod types;
 mod workspace;
@@ -194,7 +197,25 @@ pub enum Msg {
     /// Another package's handler for its part of the bus, sent once it has
     /// hydrated (port.rs, "For P19 and P20").
     Install(Hook),
+    /// A control request of a node's core (an agent of the node, or a
+    /// briefing it asks), forwarded on its events (`nodes::follow_events`):
+    /// answered on that node.
+    Node(NodeRequest),
 }
+
+/// A request a node forwarded, with what to answer it with.
+#[derive(Debug, Clone)]
+pub struct NodeRequest {
+    pub node: String,
+    pub id: String,
+    pub op: String,
+    pub args: Value,
+    pub channel: Channel,
+}
+
+/// Said to a node's agent before the state is in.
+const STARTING: &str =
+    "Hangar.AI is still starting on the person's computer. Try again in a moment.";
 
 pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
     st.sync_engines(m);
@@ -213,6 +234,26 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
             st.shared.install(hook);
             m.live.control.port = Some(st.port(sv));
             Task::none()
+        }
+        Msg::Node(request) => {
+            let ready = m.live.hydrated;
+            let port: Port = Arc::new(remote::RemotePort::new(st.port(sv), request.node.clone()));
+            Task::future(async move {
+                let answer = match remote::refused(&request.op) {
+                    _ if !ready => Err(STARTING.to_string()),
+                    Some(refusal) => Err(refusal.to_string()),
+                    None => answer(&request.op, request.args, request.channel, &port).await,
+                };
+                if let Err(error) =
+                    crate::nodes::engine::control_reply(&request.node, &request.id, answer).await
+                {
+                    eprintln!(
+                        "the answer to {} did not reach node {}: {error}",
+                        request.op, request.node
+                    );
+                }
+                Message::Noop
+            })
         }
     }
 }
@@ -265,7 +306,11 @@ pub fn on_intent(
         return None;
     };
     let workspace = m.workspace(ws)?.clone();
-    let port = st.port(sv);
+    // A workspace on a node lands there.
+    let port = match &workspace.node {
+        Some(node) => Arc::new(remote::RemotePort::new(st.port(sv), node.clone())) as Port,
+        None => st.port(sv),
+    };
     let landing = land(workspace, task.clone(), port, m.locale());
     Some(Task::future(landing).then(|said| Task::batch(said.into_iter().map(Task::done))))
 }

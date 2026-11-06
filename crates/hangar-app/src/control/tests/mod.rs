@@ -15,6 +15,7 @@ mod kit_tabs;
 mod manager;
 mod panes;
 mod preview;
+mod remote;
 mod workspace;
 
 use std::sync::Arc;

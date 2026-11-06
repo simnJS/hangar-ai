@@ -243,6 +243,12 @@ impl OrchestrationHandle {
         LivePort::new(self.clone())
     }
 
+    /// The ports for an operation on workspace `ws`: on its node, when it
+    /// lives on one.
+    fn port_for(&self, ws: &Workspace) -> LivePort {
+        LivePort::on(self.clone(), ws.node.clone())
+    }
+
     /// Hands a core event over (from the package's `on_event`).
     pub fn send(&self, message: EngineMsg) {
         // The runtime gone, the app is closing: nothing to tell.
@@ -279,6 +285,9 @@ impl OrchestrationHandle {
                 Reads::Boards => handle.engines().watched_boards(&port),
                 Reads::Nothing => Vec::new(),
             };
+            // The remote boards are read from their nodes here, on the
+            // blocking pool, for the engines' synchronous reads.
+            port.refresh_remote_boards(&wanted);
             let io = Prefetched::read(&port, wanted);
             let mut engines = handle.engines();
             work(&mut engines, &io, now_ms());
@@ -341,6 +350,8 @@ impl OrchestrationHandle {
             let fresh: Vec<String> = state
                 .workspaces
                 .iter()
+                // A remote workspace's folder is a path on its node.
+                .filter(|ws| ws.node.is_none())
                 .filter(|ws| !ws.cwd.is_empty() && done.insert(ws.cwd.clone()))
                 .map(|ws| ws.cwd.clone())
                 .collect();
@@ -435,17 +446,29 @@ impl OrchestrationHandle {
         args: &Value,
         caller: &Caller,
     ) -> Result<Value, String> {
-        worker::worker_control(op, ws, args, caller, &self.port()).await
+        worker::worker_control(op, ws, args, caller, &self.port_for(ws)).await
     }
 
     /// The person's « Arrêter les workers »: how many were stopped.
     pub async fn stop_all_workers(&self, workspace_id: &str) -> usize {
-        worker::stop_all_workers(workspace_id, &self.port()).await
+        let state = self.port().state();
+        let port = match state.workspaces.iter().find(|ws| ws.id == workspace_id) {
+            Some(ws) => self.port_for(ws),
+            None => self.port(),
+        };
+        worker::stop_all_workers(workspace_id, &port).await
     }
 
-    /// The answer to the internal request `orchestrator_briefing {paneId}`.
+    /// The answer to the internal request `orchestrator_briefing {paneId}`:
+    /// a pane of a remote workspace is briefed from its node's board and
+    /// memory.
     pub async fn briefing(&self, args: &Value) -> Result<Value, String> {
-        brief::answer_briefing(args, &self.port()).await
+        let pane = args
+            .get("paneId")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let node = crate::nodes::engine::node_of_pane(&self.port().state(), pane);
+        brief::answer_briefing(args, &LivePort::on(self.clone(), node)).await
     }
 
     /// Tells a running session the role its pane was just given or lost.
