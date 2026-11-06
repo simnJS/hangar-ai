@@ -253,6 +253,7 @@ fn task() -> Task {
         owns: vec!["src/export".into()],
         attempts: 0,
         blocked: None,
+        progress: None,
     }
 }
 

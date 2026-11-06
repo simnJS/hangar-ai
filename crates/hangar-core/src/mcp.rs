@@ -197,6 +197,7 @@ fn tool_definitions() -> Value {
     if let Some(all) = tools.as_array_mut() {
         for more in [
             block_tool_definitions(),
+            progress_tool_definitions(),
             preview_tool_definitions(),
             kit_tool_definitions(),
             manager_tool_definitions(),
@@ -220,7 +221,7 @@ fn base_tool_definitions() -> Value {
     json!([
         {
             "name": "board_list_tasks",
-            "description": "List every task on the workspace board, with column, priority, assignee and comments. Call this first to understand the current state of the work.",
+            "description": "List every task on the workspace board, with column, priority, assignee, comments and the progress its agent last reported. Call this first to understand the current state of the work.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -765,6 +766,25 @@ fn block_tool_definitions() -> Value {
     ])
 }
 
+/// The tool an agent reports how far along its task is with.
+fn progress_tool_definitions() -> Value {
+    json!([
+        {
+            "name": "board_report_progress",
+            "description": "Say how far along your task is: the person sees the percentage and the note beside it. Call it at real milestones, not every few minutes: when you start, after each meaningful step, before you deliver (e.g. 10 plan read, 50 main change done, 80 tests passing, 95 delivering). Give an honest estimate, not a flattering one, and a short note in the person's words. Only for a task in 'doing' that you hold: anything else is refused, and the answer says why. Moving the task to done sets it to 100; back to todo clears it.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" },
+                    "percent": { "type": "integer", "minimum": 0, "maximum": 100, "description": "Your estimate, 0 to 100. Out of range is clamped." },
+                    "note": { "type": "string", "description": "What you reached, in a few words (at most 200 characters)." }
+                },
+                "required": ["id", "percent"]
+            }
+        }
+    ])
+}
+
 fn manager_tool_definitions() -> Value {
     json!([
         // orchestration: the project manager (project_* tools)
@@ -948,6 +968,20 @@ fn unblock_body(args: &Value, agent: &str) -> Value {
     json!({ "unblock": unblock })
 }
 
+/// The body board_report_progress sends. Who reports is the pane's name, not
+/// the model's to state; inside a pane the API puts the pane there anyway.
+fn progress_body(args: &Value, agent: &str) -> Result<Value, String> {
+    let percent = args
+        .get("percent")
+        .and_then(Value::as_f64)
+        .ok_or("missing 'percent': a number from 0 to 100")?;
+    let mut body = json!({ "percent": percent, "by": agent });
+    if let Some(note) = optional_text(args, "note") {
+        body["note"] = json!(note);
+    }
+    Ok(body)
+}
+
 /// Whether `agent` is the assignee of task `id` on a board as the API returns it.
 fn held_by(board: &Value, id: &str, agent: &str) -> bool {
     board
@@ -1037,6 +1071,14 @@ fn call_tool(api: &Api, name: &str, args: &Value) -> Result<Value, String> {
                 "POST",
                 &format!("/api/tasks/{id}/comment"),
                 json!({ "author": author, "text": text }),
+            )
+        }
+        "board_report_progress" => {
+            let id = str_arg("id").ok_or("missing 'id'")?;
+            api.send(
+                "POST",
+                &format!("/api/tasks/{id}/progress"),
+                progress_body(args, &agent_name())?,
             )
         }
         "board_delete_task" => {
@@ -1268,6 +1310,30 @@ mod tests {
             .find(|tool| tool["name"] == name)
             .cloned()
             .unwrap_or_else(|| panic!("no tool named {name}"))
+    }
+
+    #[test]
+    fn board_report_progress_asks_for_milestones_and_sends_no_identity_of_the_model_s() {
+        let report = tool("board_report_progress");
+        let description = report["description"].as_str().unwrap();
+        assert!(description.contains("real milestones") && description.contains("honest"));
+        assert_eq!(report["inputSchema"]["required"], json!(["id", "percent"]));
+
+        let body = progress_body(
+            &json!({ "percent": 50, "note": "main change done", "by": "user" }),
+            "Sam",
+        )
+        .unwrap();
+        assert_eq!(
+            body,
+            json!({ "percent": 50.0, "note": "main change done", "by": "Sam" })
+        );
+        assert_eq!(
+            progress_body(&json!({ "percent": 10 }), "Sam").unwrap(),
+            json!({ "percent": 10.0, "by": "Sam" })
+        );
+        assert!(progress_body(&json!({ "percent": "half" }), "Sam").is_err());
+        assert!(progress_body(&json!({}), "Sam").is_err());
     }
 
     fn listing(count: u64) -> Value {

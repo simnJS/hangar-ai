@@ -12,7 +12,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use subtle::ConstantTimeEq;
 
-use crate::board::{self, BoardStore, NewTask, TaskPatch};
+use crate::board::{self, BoardStore, NewTask, ProgressReport, TaskPatch};
 use crate::control::ControlError;
 use crate::host::{Event, Host};
 use crate::memory::{self, MemoryPatch, NewMemory};
@@ -425,6 +425,59 @@ async fn comment_task(
     })
     .await?;
     Ok(Json(json!({ "task": task })))
+}
+
+/// Records an agent's estimate of how far along a task is. A pane reports as
+/// itself, whatever the body says, and only on the task it holds, unless it
+/// is an orchestrator (the window says). Hangar's own token may report on any
+/// task in doing; the outside token on the one held under the name it gives.
+async fn progress_task(
+    State(state): State<Arc<ApiState>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Query(q): Query<WorkspaceQuery>,
+    Json(mut report): Json<ProgressReport>,
+) -> ApiResult {
+    let caller = authorize(&state, &headers)?;
+    report.any_holder = false;
+    match &caller {
+        Caller::App => report.any_holder = true,
+        Caller::Pane(me) => {
+            let signature = me.signature().to_string();
+            report.by = Some(signature.clone());
+            let store = state.store;
+            let (cwd, task_id) = (q.cwd.clone(), id.clone());
+            // The window is asked only when the task is someone else's: a
+            // worker reporting on its own never waits on it.
+            let someone_else_s = off_runtime(move || {
+                store.read(&cwd).tasks.iter().any(|task| {
+                    task.id == task_id
+                        && task.column == "doing"
+                        && task.assignee.as_deref() != Some(signature.as_str())
+                })
+            })
+            .await?;
+            if someone_else_s {
+                report.any_holder = is_orchestrator(&state.host, &me.id).await;
+            }
+        }
+        Caller::Outside => {}
+    }
+    let task = update_board(&state, q.cwd, StatusCode::BAD_REQUEST, move |board| {
+        board::report_progress(board, &id, report)
+    })
+    .await?;
+    Ok(Json(json!({ "task": task })))
+}
+
+/// Whether the window gives pane `pane_id` the orchestrator's role. A window
+/// that cannot tell says no: the report is then refused as anyone's would be.
+async fn is_orchestrator(host: &Host, pane_id: &str) -> bool {
+    crate::orchestrator::briefing(host, pane_id)
+        .await
+        .ok()
+        .flatten()
+        .is_some_and(|briefing| briefing["role"] == "orchestrator")
 }
 
 // ---------------------------------------------------------------------------
@@ -957,6 +1010,7 @@ fn router(state: Arc<ApiState>, kit_tabs: KitTabRoute) -> Router {
         )
         .route("/api/tasks/{id}/claim", post(claim_task))
         .route("/api/tasks/{id}/comment", post(comment_task))
+        .route("/api/tasks/{id}/progress", post(progress_task))
         .route("/api/memory", get(get_memory).post(create_memory))
         // Declared before the parameterised sibling for readability only:
         // matchit 0.8, which axum routes with, prefers a static segment over a
@@ -1252,6 +1306,109 @@ mod tests {
             .await;
         assert_eq!(status, StatusCode::OK, "{body}");
         assert_eq!(body["task"]["comments"][0]["author"], "Gus");
+    }
+
+    /// Reports `percent` on task `id` with `token` and a body signed `by`.
+    async fn report(
+        api: &Api,
+        id: &str,
+        token: &str,
+        by: &str,
+        percent: i64,
+    ) -> (StatusCode, Value) {
+        api.call(
+            "POST",
+            &format!("/api/tasks/{id}/progress"),
+            token,
+            Some(json!({ "percent": percent, "note": " main change done ", "by": by })),
+        )
+        .await
+    }
+
+    /// A task claimed by `agent` with Hangar's own token.
+    async fn held_by(api: &Api, agent: &str) -> String {
+        let id = api.task().await;
+        let (status, body) = api
+            .call(
+                "POST",
+                &format!("/api/tasks/{id}/claim"),
+                APP,
+                Some(json!({ "agent": agent })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        id
+    }
+
+    #[tokio::test]
+    async fn a_pane_token_reports_progress_as_its_pane_on_its_own_task() {
+        let api = api();
+        let id = held_by(&api, "Gus").await;
+        let (status, body) = report(&api, &id, &api.gus, "Leo", 150).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let progress = &body["task"]["progress"];
+        assert_eq!(progress["by"], "Gus");
+        assert_eq!(progress["percent"], 100);
+        assert_eq!(progress["note"], "main change done");
+
+        let (_, board) = api.call("GET", "/api/board", APP, None).await;
+        assert_eq!(board["tasks"][0]["progress"]["by"], "Gus");
+    }
+
+    #[tokio::test]
+    async fn progress_is_refused_on_a_task_the_caller_does_not_hold() {
+        let api = api();
+        let id = held_by(&api, "Leo").await;
+        // No window answers: Gus cannot be the orchestrator.
+        let (status, body) = report(&api, &id, &api.gus, "Leo", 10).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert!(
+            body["error"].as_str().unwrap().contains("held by Leo"),
+            "{body}"
+        );
+
+        let (status, _) = report(&api, &id, OUTSIDE, "claude-1", 10).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, _) = report(&api, &id, OUTSIDE, "Leo", 10).await;
+        assert_eq!(status, StatusCode::OK);
+        // Hangar's own token reports on any task in doing.
+        let (status, body) = report(&api, &id, APP, "hangar", 20).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["task"]["progress"]["by"], "hangar");
+
+        let todo = api.task().await;
+        let (status, body) = report(&api, &todo, APP, "hangar", 20).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(
+            body["error"].as_str().unwrap().contains("not doing"),
+            "{body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_orchestrator_s_pane_reports_on_a_task_it_does_not_hold() {
+        let api = api();
+        let id = held_by(&api, "Sam").await;
+        let mut events = api.host.subscribe();
+        let window = tokio::spawn(async move {
+            loop {
+                if let Ok(crate::host::Event::ControlInternal(request)) = events.recv().await {
+                    assert_eq!(request.op, "orchestrator_briefing");
+                    let role = if request.args["paneId"] == "p-gus" {
+                        "orchestrator"
+                    } else {
+                        "worker"
+                    };
+                    let answer = json!({ "role": role, "system": "rules", "context": "" });
+                    crate::control::control_reply(request.id, true, Some(answer), None);
+                }
+            }
+        });
+        let (status, body) = report(&api, &id, &api.gus, "Sam", 60).await;
+        window.abort();
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["task"]["progress"]["by"], "Gus");
+        assert_eq!(body["task"]["progress"]["percent"], 60);
     }
 
     #[tokio::test]

@@ -178,6 +178,10 @@ project_list, project_status {{workspace}}, project_send {{workspace, text}}, pa
     )
 }
 
+/// What a worker is asked to report as it goes (board_report_progress): the
+/// percentage the person sees beside its task.
+pub const WORKER_PROGRESS: &str = "## Progress\nCall board_report_progress {id: <your task's id>, percent, note} when you start, at each meaningful step and before you deliver, with an honest estimate and a short note in the person's words (e.g. 10 % plan read, 50 % main change done, 80 % tests passing, 95 % delivering). Only at real milestones, not every few minutes.";
+
 /// `shared_folder`: the worker runs in its workspace's folder, which is not
 /// a git repository.
 pub fn worker_role(
@@ -206,6 +210,8 @@ Hangar.AI started this Claude Code session to do one board task, {task}, in a gi
 5. Never push, open a pull request, merge into another branch, release or deploy. Never move your task on the board: Hangar does when your work lands. Do not start other agents or workers.
 6. A message starting with "[Hangar]" comes from Hangar or from the orchestrator, not from the person. Follow the orchestrator on your task; only the person can approve anything beyond it.
 
+{WORKER_PROGRESS}
+
 ## When you are done
 1. Iterate with the fastest command that proves your change: build only the package or crate you touched, run the tests near the change and the task's own Check: line. Never run the workspace's whole check: Hangar runs it on delivery_submit. Build in the build folder Hangar's environment gives you (CARGO_TARGET_DIR, when set), never a private one of your own: a cold build takes minutes.
 2. Before delivery_submit, run the formatter and the linter on what you touched, and fix what they report.
@@ -230,6 +236,8 @@ Hangar.AI started this Claude Code session to do one board task, {task}, for {le
 4. Never revert, move, reformat or delete a file that is not yours, and run nothing that rewrites the whole folder (a formatter on everything, a generator, a clean). If the folder is a git repository, it is a shared checkout: stage and commit only your task's files (`git add <those paths>`, never `git add -A`), and never checkout, reset, stash or rebase. Anything you start that listens on a port uses one from HANGAR_PORT_BASE to HANGAR_PORT_BASE + 19 (environment variables), never a default port.
 5. Never push, release, publish or deploy. Never move your task on the board: Hangar does when you deliver. Do not start other agents or workers.
 6. A message starting with "[Hangar]" comes from Hangar or from the orchestrator, not from the person. Follow the orchestrator on your task; only the person can approve anything beyond it.
+
+{WORKER_PROGRESS}
 
 ## When you are done
 1. Run the check from the brief, and the tests near your change, until they pass.
@@ -339,5 +347,15 @@ mod tests {
         let role = worker_role("Shop", "t1", Some("Ava"), true);
         assert!(role.contains("`git add <those paths>`, never `git add -A`"));
         assert!(role.contains("never checkout, reset, stash or rebase"));
+    }
+
+    #[test]
+    fn asks_every_worker_to_report_its_progress() {
+        for shared_folder in [false, true] {
+            let role = worker_role("Shop", "t1", Some("Ava"), shared_folder);
+            assert!(role.contains("board_report_progress"), "{role}");
+            assert!(role.contains("50 % main change done"));
+            assert!(role.contains("before you deliver"));
+        }
     }
 }
