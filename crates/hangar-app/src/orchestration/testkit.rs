@@ -58,6 +58,7 @@ pub fn task(id: &str) -> Task {
         owns: Vec::new(),
         attempts: 0,
         blocked: None,
+        progress: None,
     }
 }
 

@@ -231,6 +231,7 @@ mod tests {
             owns: Vec::new(),
             attempts: 0,
             blocked: None,
+            progress: None,
         };
         let card = TaskCard::of(&task);
         assert_eq!(card.doing_since, Some(1_700_000_000_000));

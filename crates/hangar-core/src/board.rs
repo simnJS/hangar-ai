@@ -75,6 +75,48 @@ pub struct Task {
     /// existed, which read as not blocked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blocked: Option<Blocked>,
+    /// How far along the task is, as the agent working on it estimates it
+    /// (`report_progress`). Cleared when the task goes back to `todo`; set to
+    /// 100 when it reaches `done`. Absent from boards written before it
+    /// existed, which read as no estimate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<Progress>,
+}
+
+/// An agent's own estimate of how far along its task is: reported, never
+/// computed, so the board shows what the agent believes, with its words.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Progress {
+    /// 0 to 100.
+    pub percent: u8,
+    /// What was reached, in a few words. May be empty.
+    #[serde(default)]
+    pub note: String,
+    /// When it was reported, in ms since the epoch.
+    #[serde(default)]
+    pub at: u64,
+    /// Who reported it: the pane's name for a pane, else what the caller gave.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub by: Option<String>,
+}
+
+/// The longest progress note kept, in characters; the rest is cut.
+pub const MAX_PROGRESS_NOTE: usize = 200;
+
+/// A progress report, as `report_progress` takes it.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ProgressReport {
+    /// Clamped to 0..=100; a fraction is rounded.
+    pub percent: f64,
+    #[serde(default)]
+    pub note: Option<String>,
+    /// Who reports. The API replaces it with the pane a token was issued to.
+    #[serde(default)]
+    pub by: Option<String>,
+    /// Hangar itself or a workspace's orchestrator: may report on a task it
+    /// does not hold. Never read from a request body (the API sets it).
+    #[serde(skip)]
+    pub any_holder: bool,
 }
 
 /// A task that cannot go on because of something outside the board: a package
@@ -157,6 +199,15 @@ impl Task {
             self.doing_since = None;
         } else if self.column != "doing" {
             self.doing_since = Some(stamp);
+        }
+        if column == "todo" {
+            // Back to the start: whatever was estimated no longer holds.
+            self.progress = None;
+        } else if column == "done" {
+            if let Some(progress) = self.progress.as_mut() {
+                progress.percent = 100;
+                progress.at = stamp;
+            }
         }
         self.column = column;
     }
@@ -455,6 +506,7 @@ pub fn create_task(board: &mut Board, input: NewTask) -> Result<Task, String> {
         owns: input.owns,
         attempts: 0,
         blocked: None,
+        progress: None,
     };
     board.tasks.push(task.clone());
     Ok(task)
@@ -1093,6 +1145,68 @@ pub fn add_comment(board: &mut Board, id: &str, author: &str, text: &str) -> Res
     });
     task.updated_at = now_ms();
     Ok(task.clone())
+}
+
+/// Records `report`'s estimate on task `id`. Only a task in `doing` takes
+/// one, and only from whoever holds it, unless `report.any_holder`: each
+/// refusal says why, for the agent that reads it.
+pub fn report_progress(
+    board: &mut Board,
+    id: &str,
+    report: ProgressReport,
+) -> Result<Task, String> {
+    let task = board.find_mut(id).ok_or_else(|| {
+        format!("No task {id} on this board. board_list_tasks lists them with their ids.")
+    })?;
+    if task.column != "doing" {
+        return Err(format!(
+            "\"{}\" is in {}, not doing: progress is reported on a task being worked on.",
+            task.title, task.column
+        ));
+    }
+    let by = report
+        .by
+        .as_deref()
+        .map(str::trim)
+        .filter(|by| !by.is_empty())
+        .map(str::to_string);
+    if !report.any_holder {
+        let holder = task.assignee.as_deref();
+        if holder.is_none() || holder != by.as_deref() {
+            return Err(format!(
+                "\"{}\" is {}, not by {}: only whoever works on a task reports its progress.",
+                task.title,
+                holder.map_or("held by nobody".to_string(), |h| format!("held by {h}")),
+                by.as_deref().unwrap_or("an unnamed caller"),
+            ));
+        }
+    }
+    let stamp = now_ms();
+    task.progress = Some(Progress {
+        percent: clamp_percent(report.percent),
+        note: bounded_note(report.note.as_deref().unwrap_or("")),
+        at: stamp,
+        by,
+    });
+    task.updated_at = stamp;
+    Ok(task.clone())
+}
+
+/// 0 to 100, rounded; not a number reads as 0.
+fn clamp_percent(percent: f64) -> u8 {
+    if percent.is_nan() {
+        return 0;
+    }
+    percent.round().clamp(0.0, 100.0) as u8
+}
+
+/// Trimmed, on one line, and at most `MAX_PROGRESS_NOTE` characters.
+fn bounded_note(note: &str) -> String {
+    let line = note.split_whitespace().collect::<Vec<_>>().join(" ");
+    match line.char_indices().nth(MAX_PROGRESS_NOTE) {
+        Some((end, _)) => line[..end].trim_end().to_string(),
+        None => line,
+    }
 }
 
 /// The coordination primitive: highest-priority unassigned task in `todo`
@@ -2002,5 +2116,134 @@ mod tests {
 
         assert!(read_board(&cwd).unwrap().tasks.is_empty());
         fs::remove_dir_all(&dir).ok();
+    }
+
+    fn report(percent: f64, note: &str, by: &str) -> ProgressReport {
+        ProgressReport {
+            percent,
+            note: Some(note.into()),
+            by: Some(by.into()),
+            any_holder: false,
+        }
+    }
+
+    #[test]
+    fn a_board_without_progress_reads_and_writes_as_before() {
+        let board: Board = serde_json::from_str(
+            r#"{"tasks":[{"id":"a","title":"x","column":"doing","created_at":1,"updated_at":1}]}"#,
+        )
+        .unwrap();
+        assert_eq!(board.tasks[0].progress, None);
+        assert!(!serde_json::to_string(&board).unwrap().contains("progress"));
+    }
+
+    #[test]
+    fn progress_goes_through_serde_unchanged() {
+        let mut board = Board::default();
+        let id = todo_task(&mut board);
+        claim_task(&mut board, &id, "Sam").unwrap();
+        report_progress(&mut board, &id, report(50.0, "main change done", "Sam")).unwrap();
+
+        let written = serde_json::to_string(&board).unwrap();
+        let back: Board = serde_json::from_str(&written).unwrap();
+        let progress = back.tasks[0].progress.clone().unwrap();
+        assert_eq!(progress.percent, 50);
+        assert_eq!(progress.note, "main change done");
+        assert_eq!(progress.by.as_deref(), Some("Sam"));
+        assert_eq!(back.tasks[0].progress, board.tasks[0].progress);
+    }
+
+    #[test]
+    fn progress_is_clamped_and_its_note_trimmed_and_bounded() {
+        let mut board = Board::default();
+        let id = todo_task(&mut board);
+        claim_task(&mut board, &id, "Sam").unwrap();
+        let percent = |board: &mut Board, value: f64| {
+            report_progress(board, &id, report(value, "", "Sam"))
+                .unwrap()
+                .progress
+                .unwrap()
+                .percent
+        };
+        assert_eq!(percent(&mut board, 150.0), 100);
+        assert_eq!(percent(&mut board, -3.0), 0);
+        assert_eq!(percent(&mut board, 42.6), 43);
+        assert_eq!(percent(&mut board, f64::NAN), 0);
+
+        let note = |board: &mut Board, text: &str| {
+            report_progress(board, &id, report(10.0, text, "Sam"))
+                .unwrap()
+                .progress
+                .unwrap()
+                .note
+        };
+        assert_eq!(note(&mut board, "  plan\n  read  "), "plan read");
+        let long = "é".repeat(MAX_PROGRESS_NOTE + 50);
+        assert_eq!(note(&mut board, &long).chars().count(), MAX_PROGRESS_NOTE);
+    }
+
+    #[test]
+    fn progress_is_refused_off_doing_and_from_whoever_does_not_hold_the_task() {
+        let mut board = Board::default();
+        let id = todo_task(&mut board);
+        let err = report_progress(&mut board, &id, report(10.0, "", "Sam")).unwrap_err();
+        assert!(err.contains("not doing"), "{err}");
+
+        claim_task(&mut board, &id, "Sam").unwrap();
+        let err = report_progress(&mut board, &id, report(10.0, "", "Eli")).unwrap_err();
+        assert!(err.contains("held by Sam"), "{err}");
+        let anonymous = ProgressReport {
+            percent: 10.0,
+            ..Default::default()
+        };
+        assert!(report_progress(&mut board, &id, anonymous).is_err());
+        assert!(report_progress(&mut board, "nope", report(10.0, "", "Sam")).is_err());
+
+        // Hangar, or the orchestrator, may report on a task held by another.
+        let orchestrator = ProgressReport {
+            any_holder: true,
+            ..report(30.0, "", "Leo")
+        };
+        let task = report_progress(&mut board, &id, orchestrator).unwrap();
+        assert_eq!(task.progress.unwrap().by.as_deref(), Some("Leo"));
+
+        // Even they need the task in doing.
+        move_to(&mut board, &id, "review");
+        let late = ProgressReport {
+            any_holder: true,
+            ..report(30.0, "", "Leo")
+        };
+        assert!(report_progress(&mut board, &id, late).is_err());
+    }
+
+    #[test]
+    fn done_sets_the_progress_to_100_and_todo_clears_it() {
+        let mut board = Board::default();
+        let id = todo_task(&mut board);
+        claim_task(&mut board, &id, "Sam").unwrap();
+        report_progress(&mut board, &id, report(80.0, "tests passing", "Sam")).unwrap();
+        move_to(&mut board, &id, "review");
+        let done = move_to(&mut board, &id, "done").progress.unwrap();
+        assert_eq!(done.percent, 100);
+        assert_eq!(done.note, "tests passing");
+
+        // A task done without any estimate stays without one.
+        let other = todo_task(&mut board);
+        assert_eq!(move_to(&mut board, &other, "done").progress, None);
+
+        let again = todo_task(&mut board);
+        claim_task(&mut board, &again, "Sam").unwrap();
+        report_progress(&mut board, &again, report(40.0, "", "Sam")).unwrap();
+        assert_eq!(move_to(&mut board, &again, "todo").progress, None);
+
+        // Released by its worker, or blocked: back in todo, cleared too.
+        claim_task(&mut board, &again, "Sam").unwrap();
+        report_progress(&mut board, &again, report(40.0, "", "Sam")).unwrap();
+        assert_eq!(
+            release_worker(&mut board, &again, "Sam", false)
+                .unwrap()
+                .progress,
+            None
+        );
     }
 }
