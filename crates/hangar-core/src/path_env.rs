@@ -140,63 +140,146 @@ fn script_for(shell: &Path) -> Option<String> {
 /// a login shell reads, while version managers like nvm and rbenv initialise
 /// from `~/.zshrc`, which only an interactive one does. Asking for both is what
 /// makes the answer match the terminal the user would have typed in.
+///
+/// The shell started by [`start_early`], when there is one, is the one asked:
+/// it has been running since the top of `main`.
 #[cfg(unix)]
 fn login_shell_path() -> Option<std::ffi::OsString> {
-    use std::io::Read;
-    use std::process::{Command, Stdio};
-    use std::sync::{mpsc, Arc, Mutex};
+    let probe = take_early().or_else(Probe::spawn)?;
+    probe.collect()
+}
 
-    let shell = PathBuf::from(std::env::var_os("SHELL")?);
-    let script = script_for(&shell)?;
+/// The login shell, started at once, its answer collected later.
+///
+/// The window spends its first quarter second on the GPU probe and iced's
+/// instance before core asks for the PATH, and the pane shells wait on that
+/// answer. Starting the shell first thing lets its rc files run meanwhile.
+///
+/// Only a child process is started, never a thread: the GPU probe that runs
+/// next may `set_var`, which is sound only while the process has one thread.
+/// The child gets the environment as it is now, which is the one it would
+/// have got later anyway — nothing it reads is changed before then.
+#[cfg(unix)]
+pub fn start_early() {
+    let Some(probe) = Probe::spawn() else {
+        return;
+    };
+    park(early(), probe);
+}
 
-    // The child is parked where the timeout below can reach it. Reading its
-    // output happens on a cloned handle, so the shell can be killed while the
-    // worker is still blocked on a read that will never finish.
-    let child = Arc::new(Mutex::new(None::<std::process::Child>));
-    let worker_child = child.clone();
-    let (tx, rx) = mpsc::channel();
+#[cfg(not(unix))]
+pub fn start_early() {}
 
-    std::thread::spawn(move || {
-        let spawned = Command::new(&shell)
-            .args(["-l", "-i", "-c", &script])
+/// Where [`start_early`] parks its shell until [`ensure`] collects it.
+#[cfg(unix)]
+fn early() -> &'static std::sync::Mutex<Option<Probe>> {
+    static EARLY: std::sync::Mutex<Option<Probe>> = std::sync::Mutex::new(None);
+    &EARLY
+}
+
+#[cfg(unix)]
+fn take_early() -> Option<Probe> {
+    early().lock().unwrap().take()
+}
+
+/// Puts `probe` in `slot`, ending any shell already parked there.
+#[cfg(unix)]
+fn park(slot: &std::sync::Mutex<Option<Probe>>, probe: Probe) {
+    let stale = slot.lock().unwrap().replace(probe);
+    if let Some(stale) = stale {
+        stale.abandon();
+    }
+}
+
+/// A login shell asked for its PATH, running.
+#[cfg(unix)]
+struct Probe {
+    child: std::process::Child,
+    stdout: std::process::ChildStdout,
+    /// When it was started: the timeout counts from here, so a shell started
+    /// early has already used part of its time by the time it is collected.
+    started: std::time::Instant,
+}
+
+#[cfg(unix)]
+impl Probe {
+    /// Starts `$SHELL`, or `None` when there is no shell we know how to ask.
+    fn spawn() -> Option<Self> {
+        let shell = PathBuf::from(std::env::var_os("SHELL")?);
+        Self::spawn_with(&shell, &["-l", "-i"])
+    }
+
+    fn spawn_with(shell: &Path, flags: &[&str]) -> Option<Self> {
+        use std::process::{Command, Stdio};
+
+        let script = script_for(shell)?;
+        let mut child = Command::new(shell)
+            .args(flags)
+            .args(["-c", &script])
             // A shell that reads from stdin on startup gets EOF rather than
             // waiting on a terminal that is not there.
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
-            .spawn();
-
-        let Ok(mut spawned) = spawned else {
-            let _ = tx.send(None);
-            return;
-        };
-        let Some(mut stdout) = spawned.stdout.take() else {
-            let _ = tx.send(None);
-            return;
-        };
-        *worker_child.lock().unwrap() = Some(spawned);
-
-        let mut output = String::new();
-        let read = stdout.read_to_string(&mut output).is_ok();
-
-        // Taken back out before waiting, so a slow exit does not hold the lock
-        // the timeout path needs to kill it.
-        if let Some(mut spawned) = worker_child.lock().unwrap().take() {
-            let _ = spawned.wait();
-        }
-        let _ = tx.send(read.then_some(output));
-    });
-
-    let answer = rx.recv_timeout(PROBE_TIMEOUT).ok().flatten();
-    if answer.is_none() {
-        if let Some(spawned) = child.lock().unwrap().as_mut() {
-            let _ = spawned.kill();
-        }
+            .spawn()
+            .ok()?;
+        let stdout = child.stdout.take()?;
+        Some(Self {
+            child,
+            stdout,
+            started: std::time::Instant::now(),
+        })
     }
 
-    let output = answer?;
-    let value = between_markers(&output)?;
-    Some(std::ffi::OsString::from(value))
+    /// Waits for the answer, up to [`PROBE_TIMEOUT`] after the start, and
+    /// kills the shell when it has not given one by then.
+    fn collect(self) -> Option<std::ffi::OsString> {
+        use std::io::Read;
+        use std::sync::{mpsc, Arc, Mutex};
+
+        let Self {
+            child,
+            mut stdout,
+            started,
+        } = self;
+        // The child is parked where the timeout below can reach it. Reading
+        // its output happens on the worker, so the shell can be killed while
+        // the worker is still blocked on a read that will never finish.
+        let child = Arc::new(Mutex::new(Some(child)));
+        let worker_child = child.clone();
+        let (tx, rx) = mpsc::channel();
+
+        std::thread::spawn(move || {
+            let mut output = String::new();
+            let read = stdout.read_to_string(&mut output).is_ok();
+
+            // Taken back out before waiting, so a slow exit does not hold the
+            // lock the timeout path needs to kill it.
+            let taken = worker_child.lock().unwrap().take();
+            if let Some(mut spawned) = taken {
+                let _ = spawned.wait();
+            }
+            let _ = tx.send(read.then_some(output));
+        });
+
+        let left = PROBE_TIMEOUT.saturating_sub(started.elapsed());
+        let answer = rx.recv_timeout(left).ok().flatten();
+        if answer.is_none() {
+            if let Some(spawned) = child.lock().unwrap().as_mut() {
+                let _ = spawned.kill();
+            }
+        }
+
+        let output = answer?;
+        let value = between_markers(&output)?;
+        Some(std::ffi::OsString::from(value))
+    }
+
+    /// Kills and reaps a shell whose answer is no longer wanted.
+    fn abandon(mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 
 /// The text between the two markers, or `None` when the shell printed neither.
@@ -240,6 +323,71 @@ mod tests {
 
         let text = String::from_utf8_lossy(&output.stdout);
         assert_eq!(between_markers(&text), Some("/somewhere/bin:/else/bin"));
+    }
+
+    /// The PATH the shells in these tests answer with: the test process's
+    /// own, which `bash -c` hands back unchanged.
+    fn own_path() -> String {
+        std::env::var("PATH").expect("the tests run with a PATH")
+    }
+
+    /// A bash whose rc file takes `delay` seconds, the way nvm makes a real
+    /// one slow, asked the way the probe asks.
+    fn slow_bash(dir: &Path, delay: &str) -> Probe {
+        let rc = dir.join("bashrc");
+        std::fs::write(&rc, format!("sleep {delay}\n")).unwrap();
+        let rc = rc.to_str().unwrap().to_owned();
+        Probe::spawn_with(Path::new("/bin/bash"), &["--rcfile", &rc, "-i"])
+            .expect("/bin/bash starts")
+    }
+
+    /// The answer of a shell started early and collected later is the one
+    /// a shell started and collected at once gives.
+    #[test]
+    fn an_early_probe_answers_what_a_late_one_does() {
+        let dir = tempfile::tempdir().unwrap();
+        let early = slow_bash(dir.path(), "0");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let late = slow_bash(dir.path(), "0").collect();
+
+        assert_eq!(early.collect(), late);
+        assert_eq!(late, Some(std::ffi::OsString::from(own_path())));
+    }
+
+    /// Started before the window, parked, collected once the window is up:
+    /// the rc file's time is spent while the window gets ready, not after.
+    #[test]
+    fn a_parked_probe_runs_while_the_window_starts() {
+        let dir = tempfile::tempdir().unwrap();
+        let slot = std::sync::Mutex::new(None);
+
+        park(&slot, slow_bash(dir.path(), "0.3"));
+        // The GPU probe and iced's instance, which take longer than the rc.
+        std::thread::sleep(std::time::Duration::from_millis(600));
+
+        let probe = slot.lock().unwrap().take().expect("the probe was parked");
+        assert!(slot.lock().unwrap().is_none(), "collected once");
+        let waited = std::time::Instant::now();
+        let answer = probe.collect();
+        assert!(
+            waited.elapsed() < std::time::Duration::from_millis(250),
+            "the shell had finished by the time it was collected ({:?})",
+            waited.elapsed()
+        );
+        assert_eq!(answer, Some(std::ffi::OsString::from(own_path())));
+    }
+
+    /// A second early start ends the shell already parked instead of
+    /// leaving it running unread, and its own answer is the one collected.
+    #[test]
+    fn a_parked_probe_is_ended_when_another_takes_its_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let slot = std::sync::Mutex::new(None);
+        park(&slot, slow_bash(dir.path(), "30"));
+        park(&slot, slow_bash(dir.path(), "0"));
+
+        let probe = slot.lock().unwrap().take().unwrap();
+        assert_eq!(probe.collect(), Some(std::ffi::OsString::from(own_path())));
     }
 
     #[test]

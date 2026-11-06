@@ -143,6 +143,11 @@ packages!(define_packages);
 
 /// Runs the app until its main window closes.
 pub fn run() -> iced::Result {
+    // The login shell's PATH, which the pane shells wait on, asked now so its
+    // rc files run beside the GPU probe and iced's instance instead of after
+    // them; core collects the answer (path_env.rs). A child process, not a
+    // thread: the GPU probe below relies on there being only one.
+    hangar_core::path_env::start_early();
     gpu::prefer_vulkan();
     iced::daemon(App::boot, App::update, App::view)
         .title(App::title)

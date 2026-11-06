@@ -115,7 +115,8 @@ impl Core {
     pub fn start(host: Host, runtime: &tokio::runtime::Handle) -> Self {
         // Warmed here rather than on the first detection call: asking the
         // login shell for its PATH takes a moment, and doing it now means
-        // the window is never the thing waiting on it.
+        // the window is never the thing waiting on it. The app has started
+        // the shell already (`path_env::start_early`); this collects it.
         std::thread::spawn(path_env::ensure);
         // Written before the first pane asks for it, for the same reason.
         std::thread::spawn(|| {
