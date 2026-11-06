@@ -1,0 +1,3 @@
+# Recorded terminal output, byte for byte: its \r\n line ends are what a PTY
+# hands the terminal.
+*.txt -text

@@ -697,7 +697,11 @@ pub fn pty_spawn_with(
     let mut output = output;
     let reader_id = id.clone();
     let reader_live = live;
-    std::thread::spawn(move || {
+    // Named after the pane, so a profile or `top -H` tells the panes apart
+    // (the kernel keeps the first 15 bytes): unnamed, it would carry the name
+    // of the thread that spawned it, a worker of tokio's blocking pool.
+    let reader_thread = std::thread::Builder::new().name(format!("pty-{id}"));
+    let spawned = reader_thread.spawn(move || {
         let mut pending: Vec<u8> = Vec::new();
         let mut buf = [0u8; 8192];
         loop {
@@ -735,6 +739,9 @@ pub fn pty_spawn_with(
             }));
         }
     });
+    // As `std::thread::spawn` would: a process that cannot start a thread
+    // any more has bigger problems than this pane.
+    spawned.expect("a thread to read the pane's output");
 
     Ok(Spawned {
         kit_issues,
@@ -1533,9 +1540,12 @@ mod tests {
             program: "/bin/sh".into(),
             args: args(&["-c", "printf hangar"]),
         };
+        let reader_name = Arc::new(Mutex::new(None));
+        let named = reader_name.clone();
         pty_spawn(
             &manager,
             Box::new(move |event| {
+                *named.lock().unwrap() = std::thread::current().name().map(str::to_owned);
                 let _ = sent.send(event);
             }),
             "p-sink".into(),
@@ -1571,6 +1581,8 @@ mod tests {
             }
         }
         assert!(printed.contains("hangar"), "{printed:?}");
+        // On a thread named after the pane, for profiles and `top -H`.
+        assert_eq!(reader_name.lock().unwrap().as_deref(), Some("pty-p-sink"));
         assert_eq!(
             pty_history(&manager, "p-sink".into()).unwrap().end,
             printed.len() as u64
