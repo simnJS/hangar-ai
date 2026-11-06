@@ -1,0 +1,2026 @@
+total 1426608
+drwxr-xr-x    2 root root        69632 Nov  6 04:14 [0m[01;34m.[0m
+drwxr-xr-x   15 root root         4096 Nov  6 04:14 [01;34m..[0m
+-rwxr-xr-x    1 root root       709512 Feb  5  2026 [01;32m3cpio[0m
+lrwxrwxrwx    1 root root           28 Mar 18  2026 [01;36mFileCheck-21[0m -> [01;32m../lib/llvm-21/bin/FileCheck[0m
+lrwxrwxrwx    1 root root           11 May 22 17:38 [01;36mGET[0m -> [01;32mlwp-request[0m
+lrwxrwxrwx    1 root root           11 May 22 17:38 [01;36mHEAD[0m -> [01;32mlwp-request[0m
+lrwxrwxrwx    1 root root           11 May 22 17:38 [01;36mPOST[0m -> [01;32mlwp-request[0m
+lrwxrwxrwx    1 root root           46 Mar 18  2026 [01;36mUnicodeNameMappingGenerator-21[0m -> [01;32m../lib/llvm-21/bin/UnicodeNameMappingGenerator[0m
+lrwxrwxrwx    1 root root            4 Jul 15 02:18 [01;36mX[0m -> [01;32mXorg[0m
+lrwxrwxrwx    1 root root            1 Feb 27  2026 [01;36mX11[0m -> [01;34m.[0m
+-rwxr-xr-x    1 root root          274 Jul 15 02:18 [01;32mXorg[0m
+-rwxr-xr-x    1 root root      2410256 Apr 14  2026 [01;32mXwayland[0m
+lrwxrwxrwx    1 root root           28 Mar 30  2026 [01;36m[[0m -> [01;32m../lib/cargo/bin/coreutils/[[0m
+-rwxr-xr-x    1 root root        14720 Jul 13 19:43 [01;32maa-enabled[0m
+-rwxr-xr-x    1 root root        14720 Jul 13 19:43 [01;32maa-exec[0m
+-rwxr-xr-x    1 root root        14720 Jul 13 19:43 [01;32maa-features-abi[0m
+-rwxr-xr-x    1 root root        35688 Mar 15  2026 [01;32maarch64-linux-gnu-addr2line[0m
+-rwxr-xr-x    1 root root        72264 Mar 15  2026 [01;32maarch64-linux-gnu-ar[0m
+-rwxr-xr-x    1 root root      1300192 Mar 15  2026 [01;32maarch64-linux-gnu-as[0m
+-rwxr-xr-x    1 root root        31072 Mar 15  2026 [01;32maarch64-linux-gnu-c++filt[0m
+lrwxrwxrwx    1 root root           24 Feb 23  2026 [01;36maarch64-linux-gnu-cpp[0m -> [01;32maarch64-linux-gnu-cpp-15[0m
+-rwxr-xr-x    1 root root      2137240 Mar 23  2026 [01;32maarch64-linux-gnu-cpp-15[0m
+-rwxr-xr-x    1 root root        43832 Mar 15  2026 [01;32maarch64-linux-gnu-elfedit[0m
+lrwxrwxrwx    1 root root           24 Feb 23  2026 [01;36maarch64-linux-gnu-gcc[0m -> [01;32maarch64-linux-gnu-gcc-15[0m
+-rwxr-xr-x    1 root root      2137240 Mar 23  2026 [01;32maarch64-linux-gnu-gcc-15[0m
+lrwxrwxrwx    1 root root           27 Feb 23  2026 [01;36maarch64-linux-gnu-gcc-ar[0m -> [01;32maarch64-linux-gnu-gcc-ar-15[0m
+-rwxr-xr-x    1 root root        39696 Mar 23  2026 [01;32maarch64-linux-gnu-gcc-ar-15[0m
+lrwxrwxrwx    1 root root           27 Feb 23  2026 [01;36maarch64-linux-gnu-gcc-nm[0m -> [01;32maarch64-linux-gnu-gcc-nm-15[0m
+-rwxr-xr-x    1 root root        39696 Mar 23  2026 [01;32maarch64-linux-gnu-gcc-nm-15[0m
+lrwxrwxrwx    1 root root           31 Feb 23  2026 [01;36maarch64-linux-gnu-gcc-ranlib[0m -> [01;32maarch64-linux-gnu-gcc-ranlib-15[0m
+-rwxr-xr-x    1 root root        39696 Mar 23  2026 [01;32maarch64-linux-gnu-gcc-ranlib-15[0m
+lrwxrwxrwx    1 root root           25 Feb 23  2026 [01;36maarch64-linux-gnu-gcov[0m -> [01;32maarch64-linux-gnu-gcov-15[0m
+-rwxr-xr-x    1 root root      1454168 Mar 23  2026 [01;32maarch64-linux-gnu-gcov-15[0m
+lrwxrwxrwx    1 root root           30 Feb 23  2026 [01;36maarch64-linux-gnu-gcov-dump[0m -> [01;32maarch64-linux-gnu-gcov-dump-15[0m
+-rwxr-xr-x    1 root root      1265656 Mar 23  2026 [01;32maarch64-linux-gnu-gcov-dump-15[0m
+lrwxrwxrwx    1 root root           30 Feb 23  2026 [01;36maarch64-linux-gnu-gcov-tool[0m -> [01;32maarch64-linux-gnu-gcov-tool-15[0m
+-rwxr-xr-x    1 root root      1290304 Mar 23  2026 [01;32maarch64-linux-gnu-gcov-tool-15[0m
+-rwxr-xr-x    1 root root       106416 Mar 15  2026 [01;32maarch64-linux-gnu-gprof[0m
+lrwxrwxrwx    1 root root           24 Mar 15  2026 [01;36maarch64-linux-gnu-ld[0m -> [01;32maarch64-linux-gnu-ld.bfd[0m
+-rwxr-xr-x    1 root root      2418536 Mar 15  2026 [01;32maarch64-linux-gnu-ld.bfd[0m
+lrwxrwxrwx    1 root root           29 Feb 23  2026 [01;36maarch64-linux-gnu-lto-dump[0m -> [01;32maarch64-linux-gnu-lto-dump-15[0m
+-rwxr-xr-x    1 root root     38796408 Mar 23  2026 [01;32maarch64-linux-gnu-lto-dump-15[0m
+-rwxr-xr-x    1 root root        60976 Mar 15  2026 [01;32maarch64-linux-gnu-nm[0m
+-rwxr-xr-x    1 root root       194232 Mar 15  2026 [01;32maarch64-linux-gnu-objcopy[0m
+-rwxr-xr-x    1 root root       476984 Mar 15  2026 [01;32maarch64-linux-gnu-objdump[0m
+-rwxr-xr-x    1 root root        59976 Mar 15  2026 [01;32maarch64-linux-gnu-ranlib[0m
+-rwxr-xr-x    1 root root       875624 Mar 15  2026 [01;32maarch64-linux-gnu-readelf[0m
+-rwxr-xr-x    1 root root        35360 Mar 15  2026 [01;32maarch64-linux-gnu-size[0m
+-rwxr-xr-x    1 root root        39688 Mar 15  2026 [01;32maarch64-linux-gnu-strings[0m
+-rwxr-xr-x    1 root root       163248 Mar 15  2026 [01;32maarch64-linux-gnu-strip[0m
+-rwxr-xr-x    1 root root        22992 Feb 18  2026 [01;32maconnect[0m
+-rwxr-xr-x    1 root root         1622 Oct 15 08:48 [01;32macpidbg[0m
+-rwxr-xr-x    1 root root          254 Nov 10  2025 [01;32mactivate-global-python-argcomplete[0m
+-rwxr-xr-x    1 root root        25004 Apr 24  2026 [01;32madd-apt-repository[0m
+lrwxrwxrwx    1 root root           26 Mar 15  2026 [01;36maddr2line[0m -> [01;32mx86_64-linux-gnu-addr2line[0m
+-rwxr-xr-x    1 root root       158624 Mar  3  2026 [01;32mairscan-discover[0m
+-rwxr-xr-x    1 root root        51728 Feb 18  2026 [01;32malsabat[0m
+-rwxr-xr-x    1 root root        84432 Feb 18  2026 [01;32malsaloop[0m
+-rwxr-xr-x    1 root root        90488 Feb 18  2026 [01;32malsamixer[0m
+-rwxr-xr-x    1 root root        84432 Feb 18  2026 [01;32malsatplg[0m
+-rwxr-xr-x    1 root root        31656 Feb 18  2026 [01;32malsaucm[0m
+lrwxrwxrwx    1 root root           30 Mar 18  2026 [01;36mamdgpu-arch-21[0m -> [01;32m../lib/llvm-21/bin/amdgpu-arch[0m
+-rwxr-xr-x    1 root root        31192 Feb 18  2026 [01;32mamidi[0m
+-rwxr-xr-x    1 root root        64032 Feb 18  2026 [01;32mamixer[0m
+lrwxrwxrwx    1 root root           32 Mar 18  2026 [01;36manalyze-build-21[0m -> [01;32m../lib/llvm-21/bin/analyze-build[0m
+-rwxr-xr-x    1 root root        84480 Feb 18  2026 [01;32maplay[0m
+-rwxr-xr-x    1 root root        27096 Feb 18  2026 [01;32maplaymidi[0m
+-rwxr-xr-x    1 root root        23008 Feb 18  2026 [01;32maplaymidi2[0m
+-rwxr-xr-x    1 root root         2322 Jul  2 22:13 [01;32mapport-bug[0m
+-rwxr-xr-x    1 root root        13936 Jul  3 13:16 [01;32mapport-cli[0m
+lrwxrwxrwx    1 root root           10 Jul  3 13:16 [01;36mapport-collect[0m -> [01;32mapport-bug[0m
+-rwxr-xr-x    1 root root         3798 Jul  3 13:16 [01;32mapport-unpack[0m
+-rwxr-xr-x    1 root root        14720 Dec  6  2025 [01;32mappres[0m
+-rwxr-xr-x    1 root root       141616 Jan 28  2026 [01;32mappstreamcli[0m
+lrwxrwxrwx    1 root root            6 Feb  2  2026 [01;36mapropos[0m -> [01;32mwhatis[0m
+-rwxr-xr-x    1 root root        23072 Apr  7  2026 [01;32mapt[0m
+lrwxrwxrwx    1 root root           18 Apr 24  2026 [01;36mapt-add-repository[0m -> [01;32madd-apt-repository[0m
+-rwxr-xr-x    1 root root       100904 Apr  7  2026 [01;32mapt-cache[0m
+-rwxr-xr-x    1 root root        27176 Apr  7  2026 [01;32mapt-cdrom[0m
+-rwxr-xr-x    1 root root        31200 Apr  7  2026 [01;32mapt-config[0m
+-rwxr-xr-x    1 root root        59944 Apr  7  2026 [01;32mapt-get[0m
+-rwxr-xr-x    1 root root        72232 Apr  7  2026 [01;32mapt-mark[0m
+-rwxr-xr-x    1 root root         5823 Aug 20 13:55 [01;32mapt_hook_ubuntu_virt[0m
+-rwxr-xr-x    1 root root         1040 Dec  6  2025 [01;32maptdcon[0m
+lrwxrwxrwx    1 root root           19 Mar 15  2026 [01;36mar[0m -> [01;32mx86_64-linux-gnu-ar[0m
+lrwxrwxrwx    1 root root           31 Mar 30  2026 [01;36march[0m -> [01;32m../lib/cargo/bin/coreutils/arch[0m
+lrwxrwxrwx    1 root root            5 Feb 18  2026 [01;36marecord[0m -> [01;32maplay[0m
+-rwxr-xr-x    1 root root        31200 Feb 18  2026 [01;32marecordmidi[0m
+-rwxr-xr-x    1 root root        27112 Feb 18  2026 [01;32marecordmidi2[0m
+-rwxr-xr-x    1 root root        14736 Dec  4  2025 [01;32marm2hpdl[0m
+lrwxrwxrwx    1 root root           19 Mar 15  2026 [01;36mas[0m -> [01;32mx86_64-linux-gnu-as[0m
+lrwxrwxrwx    1 root root           33 Mar 18  2026 [01;36masan_symbolize-21[0m -> [01;32m../lib/llvm-21/bin/asan_symbolize[0m
+-rwxr-xr-x    1 root root        35280 Feb 18  2026 [01;32maseqdump[0m
+-rwxr-xr-x    1 root root        27144 Feb 18  2026 [01;32maseqnet[0m
+-rwxr-xr-x    1 root root        23000 Feb 18  2026 [01;32maseqsend[0m
+-rwxr-xr-x    1 root root       158264 Feb  3  2026 [01;32maspell[0m
+-rwxr-xr-x    1 root root         2044 Feb  3  2026 [01;32maspell-import[0m
+lrwxrwxrwx    1 root root           21 Feb  3  2026 [01;36mawk[0m -> [01;32m/etc/alternatives/awk[0m
+-rwxr-xr-x    1 root root        88528 Feb 18  2026 [01;32maxfer[0m
+lrwxrwxrwx    1 root root           32 Mar 30  2026 [01;36mb2sum[0m -> [01;32m../lib/cargo/bin/coreutils/b2sum[0m
+-rwxr-xr-x    1 root root       277008 Dec  6  2025 [01;32mbaobab[0m
+lrwxrwxrwx    1 root root           33 Mar 30  2026 [01;36mbase32[0m -> [01;32m../lib/cargo/bin/coreutils/base32[0m
+lrwxrwxrwx    1 root root           33 Mar 30  2026 [01;36mbase64[0m -> [01;32m../lib/cargo/bin/coreutils/base64[0m
+lrwxrwxrwx    1 root root           35 Mar 30  2026 [01;36mbasename[0m -> [01;32m../lib/cargo/bin/coreutils/basename[0m
+lrwxrwxrwx    1 root root           33 Mar 30  2026 [01;36mbasenc[0m -> [01;32m../lib/cargo/bin/coreutils/basenc[0m
+-rwxr-xr-x    1 root root      1540520 Feb 13  2026 [01;32mbash[0m
+-rwxr-xr-x    1 root root         7075 Feb 13  2026 [01;32mbashbug[0m
+-rwxr-xr-x    1 root root      4830720 Mar 23  2026 [01;32mbatcat[0m
+-rwxr-xr-x    1 root root        93080 Dec  6  2025 [01;32mbc[0m
+-rwxr-xr-x    1 root root        43584 Dec  6  2025 [01;32mbdftopcf[0m
+-rwxr-xr-x    1 root root        14720 Dec  6  2025 [01;32mbdftruncate[0m
+-rwxr-xr-x    1 root root     96928784 Mar 13  2026 [01;32mblender[0m
+-rwxr-xr-x    1 root root        35456 Mar 13  2026 [01;32mblender-thumbnailer[0m
+-rwxr-xr-x    1 root root         1390 Jan 22  2026 [01;32mblueman-adapters[0m
+-rwxr-xr-x    1 root root         1158 Jan 22  2026 [01;32mblueman-applet[0m
+-rwxr-xr-x    1 root root         1148 Jan 22  2026 [01;32mblueman-manager[0m
+-rwxr-xr-x    1 root root         5167 Jan 22  2026 [01;32mblueman-sendto[0m
+-rwxr-xr-x    1 root root         1240 Jan 22  2026 [01;32mblueman-services[0m
+-rwxr-xr-x    1 root root         1031 Jan 22  2026 [01;32mblueman-tray[0m
+-rwxr-xr-x    1 root root        43464 Oct 13 12:27 [01;32mbluemoon[0m
+-rwxr-xr-x    1 root root        31208 Feb 13  2026 [01;32mbluetooth-sendto[0m
+-rwxr-xr-x    1 root root       593040 Oct 13 12:27 [01;32mbluetoothctl[0m
+-rwxr-xr-x    1 root root       125944 Sep  5  2025 [01;32mboltctl[0m
+-rwxr-xr-x    1 root root      8452656 Mar 15  2026 [01;32mbpftrace[0m
+-rwxr-xr-x    1 root root      4114632 Mar 15  2026 [01;32mbpftrace-aotrt[0m
+-rwxr-xr-x    1 root root        26936 Dec 10  2025 [01;32mbrightnessctl[0m
+-rwxr-xr-x    1 root root      1081384 Mar 20  2026 [01;32mbrltty[0m
+-rwxr-xr-x    1 root root       199304 Mar 20  2026 [01;32mbrltty-atb[0m
+-rwxr-xr-x    1 root root       199240 Mar 20  2026 [01;32mbrltty-clip[0m
+-rwxr-xr-x    1 root root       301864 Mar 20  2026 [01;32mbrltty-ctb[0m
+-rwxr-xr-x    1 root root       256864 Mar 20  2026 [01;32mbrltty-hid[0m
+-rwxr-xr-x    1 root root       564544 Mar 20  2026 [01;32mbrltty-ktb[0m
+-rwxr-xr-x    1 root root       232008 Mar 20  2026 [01;32mbrltty-lscmds[0m
+-rwxr-xr-x    1 root root       264848 Mar 20  2026 [01;32mbrltty-morse[0m
+-rwxr-xr-x    1 root root       260776 Mar 20  2026 [01;32mbrltty-trtxt[0m
+-rwxr-xr-x    1 root root       297864 Mar 20  2026 [01;32mbrltty-ttb[0m
+-rwxr-xr-x    1 root root       273104 Mar 20  2026 [01;32mbrltty-tune[0m
+-rwxr-xr-x    1 root root       125400 Mar 23  2026 [01;32mbroadwayd[0m
+lrwxrwxrwx    1 root root            8 Dec  6  2025 [01;36mbrowse[0m -> [01;32mxdg-open[0m
+-rwxr-xr-x    1 root root        31176 Oct 13 12:27 [01;32mbtattach[0m
+-rwxr-xr-x    1 root root       178752 Oct 13 12:27 [01;32mbtmgmt[0m
+-rwxr-xr-x    1 root root      1163984 Oct 13 12:27 [01;32mbtmon[0m
+-rwxr-xr-x    1 root root      1654432 Feb 12  2026 [01;32mbtop[0m
+lrwxrwxrwx    1 root root           27 Mar 18  2026 [01;36mbugpoint-21[0m -> [01;32m../lib/llvm-21/bin/bugpoint[0m
+lrwxrwxrwx    1 root root            5 Aug 27 06:04 [01;36mbunzip2[0m -> [01;32mbzip2[0m
+-rwxr-xr-x    1 root root        92776 Sep 16 16:55 [01;32mbusctl[0m
+-rwxr-xr-x    1 root root      2190672 Jan 14  2026 [01;32mbusybox[0m
+-rwxr-xr-x    1 root root        80424 Sep 17 22:12 [01;32mbwrap[0m
+lrwxrwxrwx    1 root root            5 Aug 27 06:04 [01;36mbzcat[0m -> [01;32mbzip2[0m
+lrwxrwxrwx    1 root root            6 Aug 27 06:04 [01;36mbzcmp[0m -> [01;32mbzdiff[0m
+-rwxr-xr-x    1 root root         2225 Aug 27 06:04 [01;32mbzdiff[0m
+lrwxrwxrwx    1 root root            6 Aug 27 06:04 [01;36mbzegrep[0m -> [01;32mbzgrep[0m
+-rwxr-xr-x    1 root root         4893 Aug 18  2024 [01;32mbzexe[0m
+lrwxrwxrwx    1 root root            6 Aug 27 06:04 [01;36mbzfgrep[0m -> [01;32mbzgrep[0m
+-rwxr-xr-x    1 root root         3775 Aug 27 06:04 [01;32mbzgrep[0m
+-rwxr-xr-x    1 root root        39376 Aug 27 06:04 [01;32mbzip2[0m
+-rwxr-xr-x    1 root root        18816 Aug 27 06:04 [01;32mbzip2recover[0m
+lrwxrwxrwx    1 root root            6 Aug 27 06:04 [01;36mbzless[0m -> [01;32mbzmore[0m
+-rwxr-xr-x    1 root root         1297 Aug 27 06:04 [01;32mbzmore[0m
+lrwxrwxrwx    1 root root           21 Mar 19  2026 [01;36mc++[0m -> [01;32m/etc/alternatives/c++[0m
+lrwxrwxrwx    1 root root           24 Mar 15  2026 [01;36mc++filt[0m -> [01;32mx86_64-linux-gnu-c++filt[0m
+lrwxrwxrwx    1 root root           31 Mar 18  2026 [01;36mc-index-test-21[0m -> [01;32m../lib/llvm-21/bin/c-index-test[0m
+lrwxrwxrwx    1 root root           21 Feb 23  2026 [01;36mc89[0m -> [01;32m/etc/alternatives/c89[0m
+-rwxr-xr-x    1 root root          428 Feb 23  2026 [01;32mc89-gcc[0m
+lrwxrwxrwx    1 root root           21 Feb 23  2026 [01;36mc99[0m -> [01;32m/etc/alternatives/c99[0m
+-rwxr-xr-x    1 root root          454 Feb 23  2026 [01;32mc99-gcc[0m
+-rwxr-xr-x    1 root root         6919 Sep 30 20:46 [01;32mc_rehash[0m
+-rwxr-xr-x    1 root root        27264 Feb  4  2026 [01;32mcalibrate_ppa[0m
+-rwxr-xr-x    1 root root        18736 Feb  2  2026 [01;32mcanberra-gtk-play[0m
+-rwxr-xr-x    1 root root        14720 Jun 11 16:46 [01;32mcancel[0m
+lrwxrwxrwx    1 root root            3 Jan  3  2026 [01;36mcaptoinfo[0m -> [01;32mtic[0m
+lrwxrwxrwx    1 root root           30 Mar 30  2026 [01;36mcat[0m -> [01;32m../lib/cargo/bin/coreutils/cat[0m
+-rwxr-xr-x    1 root root        35760 Feb  2  2026 [01;32mcatman[0m
+lrwxrwxrwx    1 root root           20 Feb 23  2026 [01;36mcc[0m -> [01;32m/etc/alternatives/cc[0m
+-rwxr-xr-x    1 root root        35368 Dec  1  2025 [01;32mcct[0m
+-rwxr-xr-x    1 root root        27008 Feb 16  2026 [01;32mcd-create-profile[0m
+-rwxr-xr-x    1 root root        31104 Feb 16  2026 [01;32mcd-fix-profile[0m
+-rwxr-xr-x    1 root root        14720 Feb 16  2026 [01;32mcd-iccdump[0m
+-rwxr-xr-x    1 root root        27008 Feb 16  2026 [01;32mcd-it8[0m
+-rwxr-xr-x    1 root root        18736 May  2  2024 [01;32mchacl[0m
+-rwxr-sr-x    1 root shadow      85256 Feb  2  2026 [30;43mchage[0m
+lrwxrwxrwx    1 root root           10 Dec  6  2025 [01;36mchardet[0m -> [01;32mchardetect[0m
+-rwxr-xr-x    1 root root          222 Dec  6  2025 [01;32mchardetect[0m
+-rwxr-xr-x    1 root root        14728 Feb 13  2026 [01;32mchattr[0m
+lrwxrwxrwx    1 root root           32 Mar 30  2026 [01;36mchcon[0m -> [01;32m../lib/cargo/bin/coreutils/chcon[0m
+-rwxr-xr-x    1 root root         2771 Feb  2  2026 [01;32mcheck-language-support[0m
+-rwsr-xr-x    1 root root        72840 Feb  2  2026 [37;41mchfn[0m
+lrwxrwxrwx    1 root root           32 Mar 30  2026 [01;36mchgrp[0m -> [01;32m../lib/cargo/bin/coreutils/chgrp[0m
+lrwxrwxrwx    1 root root           32 Mar 30  2026 [01;36mchmod[0m -> [01;32m../lib/cargo/bin/coreutils/chmod[0m
+-rwxr-xr-x    1 root root        22992 Aug 19 16:23 [01;32mchoom[0m
+lrwxrwxrwx    1 root root           32 Mar 30  2026 [01;36mchown[0m -> [01;32m../lib/cargo/bin/coreutils/chown[0m
+-rwxr-xr-x    1 root root        97568 Feb 13  2026 [01;32mchronyc[0m
+lrwxrwxrwx    1 root root           33 Mar 30  2026 [01;36mchroot[0m -> [01;32m../lib/cargo/bin/coreutils/chroot[0m
+-rwxr-xr-x    1 root root        31184 Aug 19 16:23 [01;32mchrt[0m
+-rwsr-xr-x    1 root root        48936 Feb  2  2026 [37;41mchsh[0m
+-rwxr-xr-x    1 root root        14792 Dec  1  2025 [01;32mchvt[0m
+-rwxr-xr-x    1 root root        27184 Jan 11  2026 [01;32mcifsiostat[0m
+-rwxr-xr-x    1 root root        39488 Oct 13 12:27 [01;32mciptool[0m
+-rwxr-xr-x    1 root root       150927 Jun 25 11:51 [01;32mckbcomp[0m
+lrwxrwxrwx    1 root root           32 Mar 30  2026 [01;36mcksum[0m -> [01;32m../lib/cargo/bin/coreutils/cksum[0m
+lrwxrwxrwx    1 root root            8 Mar 19  2026 [01;36mclang[0m -> [01;32mclang-21[0m
+lrwxrwxrwx    1 root root           10 Mar 19  2026 [01;36mclang++[0m -> [01;32mclang++-21[0m
+lrwxrwxrwx    1 root root           26 Mar 18  2026 [01;36mclang++-21[0m -> [01;32m../lib/llvm-21/bin/clang++[0m
+lrwxrwxrwx    1 root root           24 Mar 18  2026 [01;36mclang-21[0m -> [01;32m../lib/llvm-21/bin/clang[0m
+lrwxrwxrwx    1 root root           43 Mar 18  2026 [01;36mclang-apply-replacements-21[0m -> [01;32m../lib/llvm-21/bin/clang-apply-replacements[0m
+lrwxrwxrwx    1 root root           41 Mar 18  2026 [01;36mclang-change-namespace-21[0m -> [01;32m../lib/llvm-21/bin/clang-change-namespace[0m
+lrwxrwxrwx    1 root root           30 Mar 18  2026 [01;36mclang-check-21[0m -> [01;32m../lib/llvm-21/bin/clang-check[0m
+lrwxrwxrwx    1 root root           11 Mar 19  2026 [01;36mclang-cl[0m -> [01;32mclang-cl-21[0m
+lrwxrwxrwx    1 root root           27 Mar 18  2026 [01;36mclang-cl-21[0m -> [01;32m../lib/llvm-21/bin/clang-cl[0m
+lrwxrwxrwx    1 root root           12 Mar 19  2026 [01;36mclang-cpp[0m -> [01;32mclang-cpp-21[0m
+lrwxrwxrwx    1 root root           28 Mar 18  2026 [01;36mclang-cpp-21[0m -> [01;32m../lib/llvm-21/bin/clang-cpp[0m
+lrwxrwxrwx    1 root root           28 Mar 18  2026 [01;36mclang-doc-21[0m -> [01;32m../lib/llvm-21/bin/clang-doc[0m
+lrwxrwxrwx    1 root root           39 Mar 18  2026 [01;36mclang-extdef-mapping-21[0m -> [01;32m../lib/llvm-21/bin/clang-extdef-mapping[0m
+lrwxrwxrwx    1 root root           40 Mar 18  2026 [01;36mclang-include-cleaner-21[0m -> [01;32m../lib/llvm-21/bin/clang-include-cleaner[0m
+lrwxrwxrwx    1 root root           38 Mar 18  2026 [01;36mclang-include-fixer-21[0m -> [01;32m../lib/llvm-21/bin/clang-include-fixer[0m
+lrwxrwxrwx    1 root root           35 Mar 18  2026 [01;36mclang-installapi-21[0m -> [01;32m../lib/llvm-21/bin/clang-installapi[0m
+lrwxrwxrwx    1 root root           39 Mar 18  2026 [01;36mclang-linker-wrapper-21[0m -> [01;32m../lib/llvm-21/bin/clang-linker-wrapper[0m
+lrwxrwxrwx    1 root root           29 Mar 18  2026 [01;36mclang-move-21[0m -> [01;32m../lib/llvm-21/bin/clang-move[0m
+lrwxrwxrwx    1 root root           39 Mar 18  2026 [01;36mclang-nvlink-wrapper-21[0m -> [01;32m../lib/llvm-21/bin/clang-nvlink-wrapper[0m
+lrwxrwxrwx    1 root root           40 Mar 18  2026 [01;36mclang-offload-bundler-21[0m -> [01;32m../lib/llvm-21/bin/clang-offload-bundler[0m
+lrwxrwxrwx    1 root root           41 Mar 18  2026 [01;36mclang-offload-packager-21[0m -> [01;32m../lib/llvm-21/bin/clang-offload-packager[0m
+lrwxrwxrwx    1 root root           30 Mar 18  2026 [01;36mclang-query-21[0m -> [01;32m../lib/llvm-21/bin/clang-query[0m
+lrwxrwxrwx    1 root root           33 Mar 18  2026 [01;36mclang-refactor-21[0m -> [01;32m../lib/llvm-21/bin/clang-refactor[0m
+lrwxrwxrwx    1 root root           39 Mar 18  2026 [01;36mclang-reorder-fields-21[0m -> [01;32m../lib/llvm-21/bin/clang-reorder-fields[0m
+lrwxrwxrwx    1 root root           29 Mar 18  2026 [01;36mclang-repl-21[0m -> [01;32m../lib/llvm-21/bin/clang-repl[0m
+lrwxrwxrwx    1 root root           18 Mar 19  2026 [01;36mclang-scan-deps[0m -> [01;32mclang-scan-deps-21[0m
+lrwxrwxrwx    1 root root           34 Mar 18  2026 [01;36mclang-scan-deps-21[0m -> [01;32m../lib/llvm-21/bin/clang-scan-deps[0m
+lrwxrwxrwx    1 root root           36 Mar 18  2026 [01;36mclang-sycl-linker-21[0m -> [01;32m../lib/llvm-21/bin/clang-sycl-linker[0m
+lrwxrwxrwx    1 root root           31 Mar 18  2026 [01;36mclang-tblgen-21[0m -> [01;32m../lib/llvm-21/bin/clang-tblgen[0m
+lrwxrwxrwx    1 root root           36 Oct 29 07:08 [01;36mclaude-desktop[0m -> [01;32m../lib/claude-desktop/claude-desktop[0m
+-rwxr-xr-x    1 root root        14728 Jan  3  2026 [01;32mclear[0m
+-rwxr-xr-x    1 root root        14640 Feb 13  2026 [01;32mclear_console[0m
+-rwxr-xr-x    1 root root      2292952 Jan 14  2026 [01;32mcliphist[0m
+-rwxr-xr-x    1 root root          134 Aug 20 22:59 [01;32mcloud-id[0m
+-rwxr-xr-x    1 root root          124 Aug 20 22:59 [01;32mcloud-init[0m
+-rwxr-xr-x    1 root root         2176 Jul 27 16:56 [01;32mcloud-init-per[0m
+-rwxr-xr-x    1 root root     14253272 Mar  9  2026 [01;32mcmake[0m
+-rwxr-xr-x    1 root root        43592 Aug 26 20:14 [01;32mcmp[0m
+lrwxrwxrwx    1 root root           24 Nov  3 02:25 [01;36mcode[0m -> [01;32m/usr/share/code/bin/code[0m
+-rwxr-xr-x    1 root root        14712 Dec  1  2025 [01;32mcodepage[0m
+-rwxr-xr-x    1 root root        23000 Aug 19 16:23 [01;32mcol[0m
+-rwxr-xr-x    1 root root        14808 Aug 19 16:23 [01;32mcolcrt[0m
+-rwxr-xr-x    1 root root        59856 Feb 16  2026 [01;32mcolormgr[0m
+-rwxr-xr-x    1 root root        14808 Aug 19 16:23 [01;32mcolrm[0m
+-rwxr-xr-x    1 root root        39384 Aug 19 16:23 [01;32mcolumn[0m
+lrwxrwxrwx    1 root root           31 Mar 30  2026 [01;36mcomm[0m -> [01;32m../lib/cargo/bin/coreutils/comm[0m
+-rwxr-xr-x    1 root root         1350 Feb 13  2026 [01;32mcompile_et[0m
+-rwxr-xr-x    1 root root     44299096 Oct 20 21:40 [01;32mcontainerd[0m
+-rwxr-xr-x    1 root root      8483416 Oct 20 21:40 [01;32mcontainerd-shim-runc-v2[0m
+lrwxrwxrwx    1 root root           40 Nov  3 02:25 [01;36mcopilot[0m -> [01;32m/usr/share/code/bin/copilot-shim/copilot[0m
+-rwxr-xr-x    1 root root        15375 Sep  8 20:17 [01;32mcorelist[0m
+-rwxr-xr-x  116 root root     11807104 Sep  3 10:01 [01;32mcoreutils[0m
+lrwxrwxrwx    1 root root           24 Mar 18  2026 [01;36mcount-21[0m -> [01;32m../lib/llvm-21/bin/count[0m
+lrwxrwxrwx    1 root root            5 Mar 30  2026 [01;36mcp[0m -> [01;32mgnucp[0m
+-rwxr-xr-x    1 root root     14736664 Mar  9  2026 [01;32mcpack[0m
+-rwxr-xr-x    1 root root         8360 Sep  8 20:17 [01;32mcpan[0m
+-rwxr-xr-x    1 root root         8381 Sep  8 20:17 [01;32mcpan5.40-x86_64-linux-gnu[0m
+-rwxr-xr-x    1 root root       153608 Aug 17 22:31 [01;32mcpio[0m
+lrwxrwxrwx    1 root root            6 Feb 23  2026 [01;36mcpp[0m -> [01;32mcpp-15[0m
+lrwxrwxrwx    1 root root           23 Mar 22  2026 [01;36mcpp-15[0m -> [01;32mx86_64-linux-gnu-cpp-15[0m
+-rwxr-xr-x    1 root root         1622 Oct 15 08:48 [01;32mcpupower[0m
+-rwxr-xr-x    1 root root     14830064 Apr  2  2026 [01;32mcrash[0m
+-rwxr-sr-x    1 root crontab     39744 Nov  5  2025 [30;43mcrontab[0m
+-rwxr-xr-x    1 root root        51776 Dec  1  2025 [01;32mcs2cs[0m
+lrwxrwxrwx    1 root root           33 Mar 30  2026 [01;36mcsplit[0m -> [01;32m../lib/cargo/bin/coreutils/csplit[0m
+-rwxr-xr-x    1 root root     15926040 Mar  9  2026 [01;32mctest[0m
+-rwxr-xr-x    1 root root     26477664 Oct 20 21:40 [01;32mctr[0m
+lrwxrwxrwx    1 root root            6 Apr  9  2026 [01;36mctstat[0m -> [01;32mlnstat[0m
+-rwxr-xr-x    1 root root        68048 Jun 11 16:46 [01;32mcupstestppd[0m
+-rwxr-xr-x    1 root root       334360 Oct 13 14:01 [01;32mcurl[0m
+lrwxrwxrwx    1 root root           30 Mar 30  2026 [01;36mcut[0m -> [01;32m../lib/cargo/bin/coreutils/cut[0m
+-rwxr-xr-x    1 root root           45 Jan  2  2026 [01;32mcvlc[0m
+-rwxr-xr-x    1 root root        14568 Dec  6  2025 [01;32mcvt[0m
+-rwxr-xr-x    1 root root       341328 Oct  6 15:13 [01;32mcvtsudoers.ws[0m
+-rwxr-xr-x    1 root root       129856 Feb  2  2026 [01;32mdash[0m
+lrwxrwxrwx    1 root root           31 Mar 30  2026 [01;36mdate[0m -> [01;32m../lib/cargo/bin/coreutils/date[0m
+-rwxr-xr-x    1 root root        14712 Mar  3  2026 [01;32mdbus-cleanup-sockets[0m
+-rwxr-xr-x    1 root root       236256 Mar  3  2026 [01;32mdbus-daemon[0m
+-rwxr-xr-x    1 root root        27000 Mar  3  2026 [01;32mdbus-monitor[0m
+-rwxr-xr-x    1 root root        14712 Mar  3  2026 [01;32mdbus-run-session[0m
+-rwxr-xr-x    1 root root        35192 Mar  3  2026 [01;32mdbus-send[0m
+-rwxr-xr-x    1 root root        14712 Mar  3  2026 [01;32mdbus-update-activation-environment[0m
+-rwxr-xr-x    1 root root        14712 Mar  3  2026 [01;32mdbus-uuidgen[0m
+-rwxr-xr-x    1 root root        22992 Jun 18 16:01 [01;32mdbxtool[0m
+-rwxr-xr-x    1 root root        55616 Dec  6  2025 [01;32mdc[0m
+-rwxr-xr-x    1 root root        63792 Dec 11  2025 [01;32mdconf[0m
+lrwxrwxrwx    1 root root           29 Mar 30  2026 [01;36mdd[0m -> [01;32m../lib/cargo/bin/coreutils/dd[0m
+-rwxr-xr-x    1 root root        13060 Mar 20  2026 [01;32mddcmon[0m
+-rwxr-xr-x    1 root root        18832 Dec  4  2025 [01;32mddstdecode[0m
+-rwxr-xr-x    1 root root        14792 Dec  1  2025 [01;32mdeallocvt[0m
+-rwxr-xr-x    1 root root        24358 Jul 13  2022 [01;32mdeb-systemd-helper[0m
+-rwxr-xr-x    1 root root         7135 Nov 26  2023 [01;32mdeb-systemd-invoke[0m
+-rwxr-xr-x    1 root root         2870 Feb 16  2026 [01;32mdebconf[0m
+-rwxr-xr-x    1 root root        11846 Feb 16  2026 [01;32mdebconf-apt-progress[0m
+-rwxr-xr-x    1 root root          623 Feb 16  2026 [01;32mdebconf-communicate[0m
+-rwxr-xr-x    1 root root         1718 Feb 16  2026 [01;32mdebconf-copydb[0m
+-rwxr-xr-x    1 root root          668 Feb 16  2026 [01;32mdebconf-escape[0m
+-rwxr-xr-x    1 root root         3216 Feb 16  2026 [01;32mdebconf-set-selections[0m
+-rwxr-xr-x    1 root root         1825 Feb 16  2026 [01;32mdebconf-show[0m
+-rwxr-xr-x    1 root root        27088 Feb 16  2026 [01;32mdebian-distro-info[0m
+-rwxr-xr-x    1 root root       109348 Mar 20  2026 [01;32mdecode-dimms[0m
+-rwxr-xr-x    1 root root         5368 Mar 20  2026 [01;32mdecode-edid[0m
+-rwxr-xr-x    1 root root         6302 Mar 20  2026 [01;32mdecode-vaio[0m
+-rwxr-xr-x    1 root root      6027408 Feb 15  2026 [01;32mdelta[0m
+-rwxr-xr-x    1 root root        62952 Oct 30 16:53 [01;32mdelv[0m
+-rwxr-xr-x    1 root root        27608 Mar  2  2026 [01;32mderb[0m
+lrwxrwxrwx    1 root root           20 Dec  6  2025 [01;36mdesktop-file-edit[0m -> [01;32mdesktop-file-install[0m
+-rwxr-xr-x    1 root root        98888 Dec  6  2025 [01;32mdesktop-file-install[0m
+-rwxr-xr-x    1 root root        82792 Dec  6  2025 [01;32mdesktop-file-validate[0m
+lrwxrwxrwx    1 root root            5 Mar 30  2026 [01;36mdf[0m -> [01;32mgnudf[0m
+-rwxr-xr-x    1 root root         4527 Sep 29  2025 [01;32mdh_bash-completion[0m
+-rwxr-xr-x    1 root root         9444 Dec  1  2025 [01;32mdh_installxmlcatalogs[0m
+-rwxr-xr-x    1 root root         7642 Mar 16  2025 [01;32mdh_mkdocs[0m
+-rwxr-xr-x    1 root root         3709 Dec 29  2025 [01;32mdh_numpy3[0m
+-rwxr-xr-x    1 root root         1567 May  1  2022 [01;32mdh_perl_openssl[0m
+lrwxrwxrwx    1 root root           27 Mar 18  2026 [01;36mdiagtool-21[0m -> [01;32m../lib/llvm-21/bin/diagtool[0m
+-rwxr-xr-x    1 root root       137960 Aug 26 20:14 [01;32mdiff[0m
+-rwxr-xr-x    1 root root        51808 Aug 26 20:14 [01;32mdiff3[0m
+-rwxr-xr-x    1 root root       150480 Oct 30 16:53 [01;32mdig[0m
+lrwxrwxrwx    1 root root           30 Mar 30  2026 [01;36mdir[0m -> [01;32m../lib/cargo/bin/coreutils/dir[0m
+lrwxrwxrwx    1 root root           36 Mar 30  2026 [01;36mdircolors[0m -> [01;32m../lib/cargo/bin/coreutils/dircolors[0m
+-rwxr-xr-x    1 root root       493408 Sep  2 21:38 [01;32mdirmngr[0m
+-rwxr-xr-x    1 root root        56320 Sep  2 21:38 [01;32mdirmngr-client[0m
+lrwxrwxrwx    1 root root           34 Mar 30  2026 [01;36mdirname[0m -> [01;32m../lib/cargo/bin/coreutils/dirname[0m
+lrwxrwxrwx    1 root root           18 Feb 16  2026 [01;36mdistro-info[0m -> [01;32mubuntu-distro-info[0m
+-rwxr-xr-x    1 root root        74528 Aug 19 16:23 [01;32mdmesg[0m
+lrwxrwxrwx    1 root root            8 Dec  6  2025 [01;36mdnsdomainname[0m -> [01;32mhostname[0m
+-rwxr-xr-x    1 root root         9268 Sep 28 16:32 [01;32mdo-release-upgrade[0m
+-rwxr-xr-x    1 root root     47353935 Oct 20 20:45 [01;32mdocker[0m
+-rwxr-xr-x    1 root root      3020644 Oct 20 20:45 [01;32mdocker-proxy[0m
+-rwxr-xr-x    1 root root    112566096 Oct 20 20:45 [01;32mdockerd[0m
+-rwxr-xr-x    1 root root        16631 Oct 20 20:43 [01;32mdockerd-rootless-setuptool.sh[0m
+-rwxr-xr-x    1 root root        10704 Oct 20 20:43 [01;32mdockerd-rootless.sh[0m
+lrwxrwxrwx    1 root root            8 Dec  6  2025 [01;36mdomainname[0m -> [01;32mhostname[0m
+-rwxr-xr-x    1 root root       322728 Mar 31  2026 [01;32mdpkg[0m
+-rwxr-xr-x    1 root root        16151 Mar 31  2026 [01;32mdpkg-architecture[0m
+-rwxr-xr-x    1 root root         1812 Mar 31  2026 [01;32mdpkg-buildapi[0m
+-rwxr-xr-x    1 root root         8538 Mar 31  2026 [01;32mdpkg-buildflags[0m
+-rwxr-xr-x    1 root root        33444 Mar 31  2026 [01;32mdpkg-buildpackage[0m
+-rwxr-xr-x    1 root root         2153 Mar 31  2026 [01;32mdpkg-buildtree[0m
+-rwxr-xr-x    1 root root         7702 Mar 31  2026 [01;32mdpkg-checkbuilddeps[0m
+-rwxr-xr-x    1 root root       150176 Mar 31  2026 [01;32mdpkg-deb[0m
+-rwxr-xr-x    1 root root         2748 Mar 31  2026 [01;32mdpkg-distaddfile[0m
+-rwxr-xr-x    1 root root       125768 Mar 31  2026 [01;32mdpkg-divert[0m
+-rwxr-xr-x    1 root root        19296 Mar 31  2026 [01;32mdpkg-genbuildinfo[0m
+-rwxr-xr-x    1 root root        18806 Mar 31  2026 [01;32mdpkg-genchanges[0m
+-rwxr-xr-x    1 root root        15878 Mar 31  2026 [01;32mdpkg-gencontrol[0m
+-rwxr-xr-x    1 root root        11722 Mar 31  2026 [01;32mdpkg-gensymbols[0m
+-rwxr-xr-x    1 root root        21123 Mar 31  2026 [01;32mdpkg-maintscript-helper[0m
+-rwxr-xr-x    1 root root         9302 Mar 31  2026 [01;32mdpkg-mergechangelogs[0m
+-rwxr-xr-x    1 root root         6750 Mar 31  2026 [01;32mdpkg-name[0m
+-rwxr-xr-x    1 root root         4982 Mar 31  2026 [01;32mdpkg-parsechangelog[0m
+-rwxr-xr-x    1 root root       142160 Mar 31  2026 [01;32mdpkg-query[0m
+-rwxr-xr-x    1 root root        35280 Mar 31  2026 [01;32mdpkg-realpath[0m
+-rwxr-xr-x    1 root root         9407 Mar 31  2026 [01;32mdpkg-scanpackages[0m
+-rwxr-xr-x    1 root root         9850 Mar 31  2026 [01;32mdpkg-scansources[0m
+-rwxr-xr-x    1 root root        37045 Mar 31  2026 [01;32mdpkg-shlibdeps[0m
+-rwxr-xr-x    1 root root        25777 Mar 31  2026 [01;32mdpkg-source[0m
+-rwxr-xr-x    1 root root       100976 Mar 31  2026 [01;32mdpkg-split[0m
+-rwxr-xr-x    1 root root        55936 Mar 31  2026 [01;32mdpkg-statoverride[0m
+-rwxr-xr-x    1 root root        47728 Mar 31  2026 [01;32mdpkg-trigger[0m
+-rwxr-xr-x    1 root root         3243 Mar 31  2026 [01;32mdpkg-vendor[0m
+-rwxr-xr-x    1 root root       130102 Sep  9 15:09 [01;32mdracut[0m
+-rwxr-xr-x    1 root root         3650 Sep  9 15:09 [01;32mdracut-catimages[0m
+lrwxrwxrwx    1 root root           29 Jun 10 11:36 [01;36mdriverless[0m -> [01;32m../lib/cups/driver/driverless[0m
+lrwxrwxrwx    1 root root           33 Jun 10 11:36 [01;36mdriverless-fax[0m -> [01;32m../lib/cups/driver/driverless-fax[0m
+lrwxrwxrwx    1 root root           27 Mar 18  2026 [01;36mdsymutil-21[0m -> [01;32m../lib/llvm-21/bin/dsymutil[0m
+lrwxrwxrwx    1 root root           29 Mar 30  2026 [01;36mdu[0m -> [01;32m../lib/cargo/bin/coreutils/du[0m
+-rwxr-xr-x    1 root root       166344 Dec  1  2025 [01;32mdumpkeys[0m
+-rwxr-xr-x    1 root root         1007 Oct 20 18:40 [01;32mdvipdf[0m
+-rwxr-xr-x    1 root root         2806 Apr 17  2021 [01;32meatmydata[0m
+-rwxr-xr-x    1 root root         8584 Dec  1  2025 [01;32mec2metadata[0m
+lrwxrwxrwx    1 root root           31 Mar 30  2026 [01;36mecho[0m -> [01;32m../lib/cargo/bin/coreutils/echo[0m
+-rwxr-xr-x    1 root root        63792 Jan  5  2026 [01;32med[0m
+lrwxrwxrwx    1 root root           24 Apr 14  2026 [01;36meditor[0m -> [01;32m/etc/alternatives/editor[0m
+-rwxr-xr-x    1 root root        78608 Dec  6  2025 [01;32meditres[0m
+-rwxr-xr-x    1 root root        22912 Dec  4  2025 [01;32mefibootdump[0m
+-rwxr-xr-x    1 root root        48912 Dec  4  2025 [01;32mefibootmgr[0m
+-rwxr-xr-x    1 root root           41 Sep 27  2025 [01;32megrep[0m
+-rwxr-xr-x    1 root root        43312 Aug 19 16:23 [01;32meject[0m
+lrwxrwxrwx    1 root root           24 Mar 15  2026 [01;36melfedit[0m -> [01;32mx86_64-linux-gnu-elfedit[0m
+-rwxr-xr-x    1 root root        41953 Sep  8 20:17 [01;32menc2xs[0m
+-rwxr-xr-x    1 root root         3065 Sep  8 20:17 [01;32mencguess[0m
+-rwxr-xr-x    1 root root        22992 Dec  6  2025 [01;32menchant-2[0m
+-rwxr-xr-x    1 root root        14720 Dec  6  2025 [01;32menchant-lsmod-2[0m
+lrwxrwxrwx    1 root root           30 Mar 30  2026 [01;36menv[0m -> [01;32m../lib/cargo/bin/coreutils/env[0m
+-rwxr-xr-x    1 root root        39456 Nov 13  2025 [01;32menvsubst[0m
+-rwxr-xr-x    1 root root          639 Oct 20 18:40 [01;32meps2eps[0m
+-rwxr-xr-x    1 root root       197136 Dec  2  2025 [01;32meqn[0m
+-rwxr-xr-x    1 root root        14576 Dec  1  2025 [01;32mesc-m[0m
+-rwxr-xr-x    1 root root        26864 Mar 20  2026 [01;32meutp[0m
+lrwxrwxrwx    1 root root           20 Apr 14  2026 [01;36mex[0m -> [01;32m/etc/alternatives/ex[0m
+lrwxrwxrwx    1 root root            3 Jan 14  2026 [01;36mexa[0m -> [01;32meza[0m
+lrwxrwxrwx    1 root root           33 Mar 30  2026 [01;36mexpand[0m -> [01;32m../lib/cargo/bin/coreutils/expand[0m
+-rwxr-sr-x    1 root shadow      23168 Feb  2  2026 [30;43mexpiry[0m
+lrwxrwxrwx    1 root root           31 Mar 30  2026 [01;36mexpr[0m -> [01;32m../lib/cargo/bin/coreutils/expr[0m
+-rwxr-xr-x    1 root root       420280 Oct 10  2025 [01;32mextension-manager[0m
+-rwxr-xr-x    1 root root      1588344 Jan 14  2026 [01;32meza[0m
+-rwxr-xr-x    1 root root          217 Apr  1  2026 [01;32mf2py[0m
+-rwxr-xr-x    1 root root          217 Apr  1  2026 [01;32mf2py3[0m
+-rwxr-xr-x    1 root root          249 Apr  1  2026 [01;32mf2py3.14[0m
+lrwxrwxrwx    1 root root           33 Mar 30  2026 [01;36mfactor[0m -> [01;32m../lib/cargo/bin/coreutils/factor[0m
+-rwxr-xr-x    1 root root        31200 Jan 17  2026 [01;32mfaked-sysv[0m
+-rwxr-xr-x    1 root root        35288 Jan 17  2026 [01;32mfaked-tcp[0m
+lrwxrwxrwx    1 root root           26 Jan 17  2026 [01;36mfakeroot[0m -> [01;32m/etc/alternatives/fakeroot[0m
+-rwxr-xr-x    1 root root         3997 Jan 17  2026 [01;32mfakeroot-sysv[0m
+-rwxr-xr-x    1 root root         3992 Jan 17  2026 [01;32mfakeroot-tcp[0m
+-rwxr-xr-x    1 root root        27088 Aug 19 16:23 [01;32mfallocate[0m
+lrwxrwxrwx    1 root root           32 Mar 30  2026 [01;36mfalse[0m -> [01;32m../lib/cargo/bin/coreutils/false[0m
+-rwxr-xr-x    1 root root      1654312 Mar 28  2026 [01;32mfastfetch[0m
+-rwxr-xr-x    1 root root        22992 Jan 21  2026 [01;32mfc-cache[0m
+-rwxr-xr-x    1 root root        18896 Jan 21  2026 [01;32mfc-cat[0m
+-rwxr-xr-x    1 root root        14800 Jan 21  2026 [01;32mfc-conflist[0m
+-rwxr-xr-x    1 root root        14800 Jan 21  2026 [01;32mfc-list[0m
+-rwxr-xr-x    1 root root        14800 Jan 21  2026 [01;32mfc-match[0m
+-rwxr-xr-x    1 root root        14800 Jan 21  2026 [01;32mfc-pattern[0m
+-rwxr-xr-x    1 root root        14800 Jan 21  2026 [01;32mfc-query[0m
+-rwxr-xr-x    1 root root        14800 Jan 21  2026 [01;32mfc-scan[0m
+-rwxr-xr-x    1 root root        14800 Jan 21  2026 [01;32mfc-validate[0m
+lrwxrwxrwx    1 root root           19 Jan 14  2026 [01;36mfdfind[0m -> [01;32m../lib/cargo/bin/fd[0m
+-rwxr-xr-x    1 root root       453104 Feb 17  2026 [01;32mffmpeg[0m
+-rwxr-xr-x    1 root root       187096 Feb 17  2026 [01;32mffplay[0m
+-rwxr-xr-x    1 root root       216864 Feb 17  2026 [01;32mffprobe[0m
+-rwxr-xr-x    1 root root        14792 Dec  1  2025 [01;32mfgconsole[0m
+-rwxr-xr-x    1 root root           41 Sep 27  2025 [01;32mfgrep[0m
+-rwxr-xr-x    1 root root        55872 Jul  3 14:41 [01;32mfilan[0m
+-rwxr-xr-x    1 root root        27352 Feb  2  2026 [01;32mfile[0m
+-rwxr-xr-x    1 root root        26928 Feb  2  2026 [01;32mfile2brl[0m
+-rwxr-xr-x    1 root root       216632 Feb  2  2026 [01;32mfind[0m
+lrwxrwxrwx    1 root root           35 Mar 18  2026 [01;36mfind-all-symbols-21[0m -> [01;32m../lib/llvm-21/bin/find-all-symbols[0m
+-rwxr-xr-x    1 root root        81888 Aug 19 16:23 [01;32mfindmnt[0m
+-rwxr-xr-x    1 root root         2377 Jun 11  2024 [01;32mfirefox[0m
+-rwxr-xr-x    1 root root        27200 Aug 19 16:23 [01;32mflock[0m
+lrwxrwxrwx    1 root root           30 Mar 30  2026 [01;36mfmt[0m -> [01;32m../lib/cargo/bin/coreutils/fmt[0m
+lrwxrwxrwx    1 root root           31 Mar 30  2026 [01;36mfold[0m -> [01;32m../lib/cargo/bin/coreutils/fold[0m
+-rwxr-xr-x    1 root root        47592 Dec  6  2025 [01;32mfonttosfnt[0m
+-rwxr-xr-x    1 root root        35960 Dec  4  2025 [01;32mfoo2ddst[0m
+-rwxr-xr-x    1 root root        17268 Dec  4  2025 [01;32mfoo2ddst-wrapper[0m
+-rwxr-xr-x    1 root root        31808 Dec  4  2025 [01;32mfoo2hbpl2[0m
+-rwxr-xr-x    1 root root        18343 Dec  4  2025 [01;32mfoo2hbpl2-wrapper[0m
+-rwxr-xr-x    1 root root        44208 Dec  4  2025 [01;32mfoo2hiperc[0m
+-rwxr-xr-x    1 root root        18541 Dec  4  2025 [01;32mfoo2hiperc-wrapper[0m
+-rwxr-xr-x    1 root root        44064 Dec  4  2025 [01;32mfoo2hp[0m
+-rwxr-xr-x    1 root root        19204 Dec  4  2025 [01;32mfoo2hp2600-wrapper[0m
+-rwxr-xr-x    1 root root        44056 Dec  4  2025 [01;32mfoo2lava[0m
+-rwxr-xr-x    1 root root        20083 Dec  4  2025 [01;32mfoo2lava-wrapper[0m
+-rwxr-xr-x    1 root root        35808 Dec  4  2025 [01;32mfoo2oak[0m
+-rwxr-xr-x    1 root root        17871 Dec  4  2025 [01;32mfoo2oak-wrapper[0m
+-rwxr-xr-x    1 root root        44248 Dec  4  2025 [01;32mfoo2qpdl[0m
+-rwxr-xr-x    1 root root        19514 Dec  4  2025 [01;32mfoo2qpdl-wrapper[0m
+-rwxr-xr-x    1 root root        31752 Dec  4  2025 [01;32mfoo2slx[0m
+-rwxr-xr-x    1 root root        17603 Dec  4  2025 [01;32mfoo2slx-wrapper[0m
+-rwxr-xr-x    1 root root        35880 Dec  4  2025 [01;32mfoo2xqx[0m
+-rwxr-xr-x    1 root root        17572 Dec  4  2025 [01;32mfoo2xqx-wrapper[0m
+-rwxr-xr-x    1 root root        44120 Dec  4  2025 [01;32mfoo2zjs[0m
+lrwxrwxrwx    1 root root            5 Dec  4  2025 [01;36mfoo2zjs-icc2ps[0m -> [01;32mpsicc[0m
+-rwxr-xr-x    1 root root         2997 Dec  4  2025 [01;32mfoo2zjs-pstops[0m
+-rwxr-xr-x    1 root root        25952 Dec  4  2025 [01;32mfoo2zjs-wrapper[0m
+lrwxrwxrwx    1 root root           31 Jun 10 11:36 [01;36mfoomatic-rip[0m -> [01;32m../lib/cups/filter/foomatic-rip[0m
+-rwxr-xr-x    1 root root        88528 Feb 10  2026 [01;32mfprintd-delete[0m
+-rwxr-xr-x    1 root root        93120 Feb 10  2026 [01;32mfprintd-enroll[0m
+-rwxr-xr-x    1 root root        80336 Feb 10  2026 [01;32mfprintd-list[0m
+-rwxr-xr-x    1 root root        88528 Feb 10  2026 [01;32mfprintd-verify[0m
+-rwxr-xr-x    1 root root        27160 Dec  1  2025 [01;32mfree[0m
+lrwxrwxrwx    1 root root           21 Feb 11  2026 [01;36mftp[0m -> [01;32m/etc/alternatives/ftp[0m
+-rwxr-xr-x    1 root root        27088 Nov  7  2025 [01;32mfunzip[0m
+-rwxr-xr-x    1 root root        44000 Feb  2  2026 [01;32mfuser[0m
+lrwxrwxrwx    1 root root           11 Mar 21  2026 [01;36mfusermount[0m -> [37;41mfusermount3[0m
+-rwsr-xr-x    1 root root        39376 Mar 21  2026 [37;41mfusermount3[0m
+-rwxr-xr-x    1 root root       273792 Feb  3  2026 [01;32mfuzzel[0m
+-rwxr-xr-x    1 root root       129408 Jun 18 16:01 [01;32mfwupdmgr[0m
+-rwxr-xr-x    1 root root       141696 Jun 18 16:01 [01;32mfwupdtool[0m
+-rwxr-xr-x    1 root root      4638464 Nov 22  2025 [01;32mfzf[0m
+-rwxr-xr-x    1 root root         7340 Nov 22  2025 [01;32mfzf-tmux[0m
+lrwxrwxrwx    1 root root            6 Feb 23  2026 [01;36mg++[0m -> [01;32mg++-15[0m
+lrwxrwxrwx    1 root root           23 Mar 22  2026 [01;36mg++-15[0m -> [01;32mx86_64-linux-gnu-g++-15[0m
+-rwxr-xr-x    1 root root       170800 Dec  6  2025 [01;32mgamemoded[0m
+-rwxr-xr-x    1 root root        14720 Apr  1  2026 [01;32mgamma4scanimage[0m
+-rwxr-xr-x    1 root root        23000 Sep  8 19:07 [01;32mgapplication[0m
+-rwxr-xr-x    1 root root       117368 Oct 13 12:27 [01;32mgatttool[0m
+-rwxr-xr-x    1 root root       289240 Mar 30  2026 [01;32mgcalccmd[0m
+lrwxrwxrwx    1 root root            6 Feb 23  2026 [01;36mgcc[0m -> [01;32mgcc-15[0m
+lrwxrwxrwx    1 root root           23 Mar 22  2026 [01;36mgcc-15[0m -> [01;32mx86_64-linux-gnu-gcc-15[0m
+lrwxrwxrwx    1 root root            9 Feb 23  2026 [01;36mgcc-ar[0m -> [01;32mgcc-ar-15[0m
+lrwxrwxrwx    1 root root           26 Mar 22  2026 [01;36mgcc-ar-15[0m -> [01;32mx86_64-linux-gnu-gcc-ar-15[0m
+lrwxrwxrwx    1 root root            9 Feb 23  2026 [01;36mgcc-nm[0m -> [01;32mgcc-nm-15[0m
+lrwxrwxrwx    1 root root           26 Mar 22  2026 [01;36mgcc-nm-15[0m -> [01;32mx86_64-linux-gnu-gcc-nm-15[0m
+lrwxrwxrwx    1 root root           13 Feb 23  2026 [01;36mgcc-ranlib[0m -> [01;32mgcc-ranlib-15[0m
+lrwxrwxrwx    1 root root           30 Mar 22  2026 [01;36mgcc-ranlib-15[0m -> [01;32mx86_64-linux-gnu-gcc-ranlib-15[0m
+-rwxr-xr-x    1 root root         5120 Jan 30  2026 [01;32mgcore[0m
+lrwxrwxrwx    1 root root            7 Feb 23  2026 [01;36mgcov[0m -> [01;32mgcov-15[0m
+lrwxrwxrwx    1 root root           24 Mar 22  2026 [01;36mgcov-15[0m -> [01;32mx86_64-linux-gnu-gcov-15[0m
+lrwxrwxrwx    1 root root           12 Feb 23  2026 [01;36mgcov-dump[0m -> [01;32mgcov-dump-15[0m
+lrwxrwxrwx    1 root root           29 Mar 22  2026 [01;36mgcov-dump-15[0m -> [01;32mx86_64-linux-gnu-gcov-dump-15[0m
+lrwxrwxrwx    1 root root           12 Feb 23  2026 [01;36mgcov-tool[0m -> [01;32mgcov-tool-15[0m
+lrwxrwxrwx    1 root root           29 Mar 22  2026 [01;36mgcov-tool-15[0m -> [01;32mx86_64-linux-gnu-gcov-tool-15[0m
+-rwxr-xr-x    1 root root        14792 Dec  6  2025 [01;32mgcr-viewer[0m
+-rwxr-xr-x    1 root root        35272 Dec  3  2025 [01;32mgcr-viewer-gtk4[0m
+-rwxr-xr-x    1 root root     10894536 Jan 30  2026 [01;32mgdb[0m
+-rwxr-xr-x    1 root root         5729 Jan 30  2026 [01;32mgdb-add-index[0m
+-rwxr-xr-x    1 root root          126 Jan 30  2026 [01;32mgdbtui[0m
+-rwxr-xr-x    1 root root        55768 Sep  8 19:07 [01;32mgdbus[0m
+-rwxr-xr-x    1 root root         2086 Sep  8 19:07 [01;32mgdbus-codegen[0m
+-rwxr-xr-x    1 root root        52654 Oct  5 22:17 [01;32mgdctl[0m
+-rwxr-xr-x    1 root root        14744 Apr  2  2026 [01;32mgdk-pixbuf-csource[0m
+-rwxr-xr-x    1 root root        14728 Apr  2  2026 [01;32mgdk-pixbuf-pixdata[0m
+-rwxr-xr-x    1 root root        47872 Jun 22 18:05 [01;32mgdm-config[0m
+-rwxr-xr-x    1 root root        19320 Mar  2  2026 [01;32mgenbrk[0m
+-rwxr-xr-x    1 root root        27072 Sep  3 16:09 [01;32mgencat[0m
+-rwxr-xr-x    1 root root        15168 Mar  2  2026 [01;32mgencfu[0m
+-rwxr-xr-x    1 root root        27336 Mar  2  2026 [01;32mgencnval[0m
+-rwxr-xr-x    1 root root        27624 Mar  2  2026 [01;32mgendict[0m
+-rwxr-xr-x    1 root root       167928 Mar  2  2026 [01;32mgenrb[0m
+-rwxr-xr-x    1 root root        31120 Dec  1  2025 [01;32mgeod[0m
+lrwxrwxrwx    1 root root            3 Dec  2  2025 [01;36mgeqn[0m -> [01;32meqn[0m
+-rwxr-xr-x    1 root root        27120 Oct 26  2025 [01;32mget-edid[0m
+-rwxr-xr-x    1 root root        31088 Sep  3 16:09 [01;32mgetconf[0m
+-rwxr-xr-x    1 root root        39648 Sep  3 16:09 [01;32mgetent[0m
+-rwxr-xr-x    1 root root        31112 May  2  2024 [01;32mgetfacl[0m
+-rwxr-xr-x    1 root root        14792 Dec  1  2025 [01;32mgetkeycodes[0m
+-rwxr-xr-x    1 root root        22992 Aug 19 16:23 [01;32mgetopt[0m
+-rwxr-xr-x    1 root root        14720 Feb  2  2026 [01;32mgetsubids[0m
+-rwxr-xr-x    1 root root        39456 Nov 13  2025 [01;32mgettext[0m
+-rwxr-xr-x    1 root root         5167 Nov 13  2025 [01;32mgettext.sh[0m
+-rwxr-xr-x    1 root root     41070752 Oct 26 20:13 [01;32mgh[0m
+lrwxrwxrwx    1 root root            2 Oct 20 18:40 [01;36mghostscript[0m -> [01;32mgs[0m
+-rwxr-xr-x    1 root root     28267528 Jul  3 14:43 [01;32mghostty[0m
+-rwxr-xr-x    1 root root          210 Dec  8  2025 [01;32mghp-import[0m
+lrwxrwxrwx    1 root root           54 Sep  8 19:07 [01;36mgi-compile-repository[0m -> [01;32m../lib/x86_64-linux-gnu/glib-2.0/gi-compile-repository[0m
+lrwxrwxrwx    1 root root           53 Sep  8 19:07 [01;36mgi-decompile-typelib[0m -> [01;32m../lib/x86_64-linux-gnu/glib-2.0/gi-decompile-typelib[0m
+lrwxrwxrwx    1 root root           51 Sep  8 19:07 [01;36mgi-inspect-typelib[0m -> [01;32m../lib/x86_64-linux-gnu/glib-2.0/gi-inspect-typelib[0m
+-rwxr-xr-x    1 root root        39376 Dec  1  2025 [01;32mgie[0m
+lrwxrwxrwx    1 root root           12 Mar 25  2026 [01;36mginstall-info[0m -> [01;32minstall-info[0m
+-rwxr-xr-x    1 root root       104936 Sep  8 19:07 [01;32mgio[0m
+lrwxrwxrwx    1 root root           49 Sep  8 19:07 [01;36mgio-querymodules[0m -> [01;32m../lib/x86_64-linux-gnu/glib-2.0/gio-querymodules[0m
+-rwxr-xr-x    1 root root        18832 Dec  4  2025 [01;32mgipddecode[0m
+-rwxr-xr-x    1 root root      4547768 Oct 16 16:11 [01;32mgit[0m
+lrwxrwxrwx    1 root root            3 Oct 16 16:11 [01;36mgit-receive-pack[0m -> [01;32mgit[0m
+-rwxr-xr-x    1 root root       835904 Oct 16 16:11 [01;32mgit-shell[0m
+lrwxrwxrwx    1 root root            3 Oct 16 16:11 [01;36mgit-upload-archive[0m -> [01;32mgit[0m
+lrwxrwxrwx    1 root root            3 Oct 16 16:11 [01;36mgit-upload-pack[0m -> [01;32mgit[0m
+lrwxrwxrwx    1 root root           11 Mar 19  2026 [01;36mgjs[0m -> [01;32mgjs-console[0m
+-rwxr-xr-x    1 root root        23256 Mar 19  2026 [01;32mgjs-console[0m
+-rwxr-xr-x    1 root root        51672 Sep  8 19:07 [01;32mglib-compile-resources[0m
+lrwxrwxrwx    1 root root           53 Sep  8 19:07 [01;36mglib-compile-schemas[0m -> [01;32m../lib/x86_64-linux-gnu/glib-2.0/glib-compile-schemas[0m
+-rwxr-xr-x    1 root root        41104 Sep  8 19:07 [01;32mglib-genmarshal[0m
+-rwxr-xr-x    1 root root         5433 Sep  8 19:07 [01;32mglib-gettextize[0m
+-rwxr-xr-x    1 root root        32082 Sep  8 19:07 [01;32mglib-mkenums[0m
+-rwxr-xr-x    1 root root       471824 Sep 17 17:08 [01;32mglycin-thumbnailer[0m
+lrwxrwxrwx    1 root root            4 Nov  9  2025 [01;36mgmake[0m -> [01;32mmake[0m
+-rwxr-xr-x    1 root root       948840 Mar 30  2026 [01;32mgnome-calculator[0m
+lrwxrwxrwx    1 root root           50 Mar 20  2026 [01;36mgnome-characters[0m -> [01;32m../share/org.gnome.Characters/org.gnome.Characters[0m
+-rwxr-xr-x    1 root root       416392 Mar 25  2026 [01;32mgnome-clocks[0m
+-rwxr-xr-x    1 root root      4188184 Aug 14 02:20 [01;32mgnome-control-center[0m
+-rwxr-xr-x    1 root root        23000 Feb  2  2026 [01;32mgnome-disk-image-mounter[0m
+-rwxr-xr-x    1 root root       704072 Feb  2  2026 [01;32mgnome-disks[0m
+-rwxr-xr-x    1 root root        88680 Sep 23 11:38 [01;32mgnome-extensions[0m
+-rwxr-xr-x    1 root root        84712 Sep 12  2025 [01;32mgnome-font-viewer[0m
+lrwxrwxrwx    1 root root            4 Jul 22 17:52 [01;36mgnome-help[0m -> [01;32myelp[0m
+lrwxrwxrwx    1 root root           15 Mar 17  2026 [01;36mgnome-keyring[0m -> [01;32mgnome-keyring-3[0m
+-rwxr-xr-x    1 root root        23160 Mar 17  2026 [01;32mgnome-keyring-3[0m
+-rwxr-xr-x    1 root root       963928 Mar 17  2026 [01;32mgnome-keyring-daemon[0m
+-rwxr-xr-x    1 root root         1444 Feb  2  2026 [01;32mgnome-language-selector[0m
+-rwxr-xr-x    1 root root       175056 Sep 12  2025 [01;32mgnome-logs[0m
+-rwxr-xr-x    1 root root         5645 Apr 14  2026 [01;32mgnome-service-client[0m
+-rwxr-xr-x    1 root root        23000 Jun 23 11:32 [01;32mgnome-session[0m
+-rwxr-xr-x    1 root root        23000 Jun 23 11:32 [01;32mgnome-session-inhibit[0m
+-rwxr-xr-x    1 root root        15032 Jun 23 11:32 [01;32mgnome-session-quit[0m
+-rwxr-xr-x    1 root root        31536 Sep 23 11:38 [01;32mgnome-shell[0m
+-rwxr-xr-x    1 root root         1706 Sep 23 11:38 [01;32mgnome-shell-extension-tool[0m
+-rwxr-xr-x    1 root root         9443 Sep 23 11:38 [01;32mgnome-shell-test-tool[0m
+-rwxr-xr-x    1 root root       617152 Jun 22 17:25 [01;32mgnome-text-editor[0m
+-rwxr-xr-x    1 root root        27104 Sep 12  2025 [01;32mgnome-thumbnail-font[0m
+-rwxr-xr-x    1 root root         3110 Sep 12  2025 [01;32mgnome-tweaks[0m
+lrwxrwxrwx    1 root root           35 Jun 11  2024 [01;36mgnome-www-browser[0m -> [01;32m/etc/alternatives/gnome-www-browser[0m
+-rwxr-xr-x    1 root root        47632 Aug 25 17:07 [01;32mgnu[[0m
+-rwxr-xr-x    1 root root        35424 Aug 25 17:07 [01;32mgnuarch[0m
+-rwxr-xr-x    1 root root        55904 Aug 25 17:07 [01;32mgnub2sum[0m
+-rwxr-xr-x    1 root root        39520 Aug 25 17:07 [01;32mgnubase32[0m
+-rwxr-xr-x    1 root root        39520 Aug 25 17:07 [01;32mgnubase64[0m
+-rwxr-xr-x    1 root root        35424 Aug 25 17:07 [01;32mgnubasename[0m
+-rwxr-xr-x    1 root root        51808 Aug 25 17:07 [01;32mgnubasenc[0m
+-rwxr-xr-x    1 root root        39472 Aug 25 17:07 [01;32mgnucat[0m
+-rwxr-xr-x    1 root root        64096 Aug 25 17:07 [01;32mgnuchcon[0m
+-rwxr-xr-x    1 root root        64064 Aug 25 17:07 [01;32mgnuchgrp[0m
+-rwxr-xr-x    1 root root        60000 Aug 25 17:07 [01;32mgnuchmod[0m
+-rwxr-xr-x    1 root root        68160 Aug 25 17:07 [01;32mgnuchown[0m
+-rwxr-xr-x    1 root root       117360 Aug 25 17:07 [01;32mgnucksum[0m
+-rwxr-xr-x    1 root root        39528 Aug 25 17:07 [01;32mgnucomm[0m
+-rwxr-xr-x    1 root root       137840 Aug 25 17:07 [01;32mgnucp[0m
+-rwxr-xr-x    1 root root        51808 Aug 25 17:07 [01;32mgnucsplit[0m
+-rwxr-xr-x    1 root root        43616 Aug 25 17:07 [01;32mgnucut[0m
+-rwxr-xr-x    1 root root        96864 Aug 25 17:07 [01;32mgnudate[0m
+-rwxr-xr-x    1 root root        64128 Aug 25 17:07 [01;32mgnudd[0m
+-rwxr-xr-x    1 root root        93256 Aug 25 17:07 [01;32mgnudf[0m
+-rwxr-xr-x    1 root root       150568 Aug 25 17:07 [01;32mgnudir[0m
+-rwxr-xr-x    1 root root        47720 Aug 25 17:07 [01;32mgnudircolors[0m
+-rwxr-xr-x    1 root root        35288 Aug 25 17:07 [01;32mgnudirname[0m
+-rwxr-xr-x    1 root root       100960 Aug 25 17:07 [01;32mgnudu[0m
+-rwxr-xr-x    1 root root        35288 Aug 25 17:07 [01;32mgnuecho[0m
+-rwxr-xr-x    1 root root        48128 Aug 25 17:07 [01;32mgnuenv[0m
+-rwxr-xr-x    1 root root        39544 Aug 25 17:07 [01;32mgnuexpand[0m
+-rwxr-xr-x    1 root root        43520 Aug 25 17:07 [01;32mgnuexpr[0m
+-rwxr-xr-x    1 root root        64096 Aug 25 17:07 [01;32mgnufactor[0m
+-rwxr-xr-x    1 root root        35288 Aug 25 17:07 [01;32mgnufalse[0m
+-rwxr-xr-x    1 root root        43584 Aug 25 17:07 [01;32mgnufmt[0m
+-rwxr-xr-x    1 root root        39520 Aug 25 17:07 [01;32mgnufold[0m
+-rwxr-xr-x    1 root root        35424 Aug 25 17:07 [01;32mgnugroups[0m
+-rwxr-xr-x    1 root root        43616 Aug 25 17:07 [01;32mgnuhead[0m
+-rwxr-xr-x    1 root root        35424 Aug 25 17:07 [01;32mgnuhostid[0m
+-rwxr-xr-x    1 root root        43616 Aug 25 17:07 [01;32mgnuid[0m
+-rwxr-xr-x    1 root root       141936 Aug 25 17:07 [01;32mgnuinstall[0m
+-rwxr-xr-x    1 root root        51856 Aug 25 17:07 [01;32mgnujoin[0m
+-rwxr-xr-x    1 root root        35424 Aug 25 17:07 [01;32mgnulink[0m
+-rwxr-xr-x    1 root root        60000 Aug 25 17:07 [01;32mgnuln[0m
+-rwxr-xr-x    1 root root        35424 Aug 25 17:07 [01;32mgnulogname[0m
+-rwxr-xr-x    1 root root       150568 Aug 25 17:07 [01;32mgnuls[0m
+-rwxr-xr-x    1 root root        43520 Aug 25 17:07 [01;32mgnumd5sum[0m
+-rwxr-xr-x    1 root root        51808 Aug 25 17:07 [01;32mgnumkdir[0m
+-rwxr-xr-x    1 root root        43616 Aug 25 17:07 [01;32mgnumkfifo[0m
+-rwxr-xr-x    1 root root        47680 Aug 25 17:07 [01;32mgnumknod[0m
+-rwxr-xr-x    1 root root        39488 Aug 25 17:07 [01;32mgnumktemp[0m
+-rwxr-xr-x    1 root root       133744 Aug 25 17:07 [01;32mgnumv[0m
+-rwxr-xr-x    1 root root        35424 Aug 25 17:07 [01;32mgnunice[0m
+-rwxr-xr-x    1 root root        43712 Aug 25 17:07 [01;32mgnunl[0m
+-rwxr-xr-x    1 root root        39424 Aug 25 17:07 [01;32mgnunohup[0m
+-rwxr-xr-x    1 root root        35424 Aug 25 17:07 [01;32mgnunproc[0m
+-rwxr-xr-x    1 root root        60032 Aug 25 17:07 [01;32mgnunumfmt[0m
+-rwxr-xr-x    1 root root        76384 Aug 25 17:07 [01;32mgnuod[0m
+-rwxr-xr-x    1 root root        39424 Aug 25 17:07 [01;32mgnupaste[0m
+-rwxr-xr-x    1 root root        35424 Aug 25 17:07 [01;32mgnupathchk[0m
+-rwxr-xr-x    1 root root        43520 Aug 25 17:07 [01;32mgnupinky[0m
+-rwxr-xr-x    1 root root        72360 Aug 25 17:07 [01;32mgnupr[0m
+-rwxr-xr-x    1 root root        35288 Aug 25 17:07 [01;32mgnuprintenv[0m
+-rwxr-xr-x    1 root root        64064 Aug 25 17:07 [01;32mgnuprintf[0m
+-rwxr-xr-x    1 root root        55936 Aug 25 17:07 [01;32mgnuptx[0m
+-rwxr-xr-x    1 root root        39488 Aug 25 17:07 [01;32mgnupwd[0m
+-rwxr-xr-x    1 root root        43520 Aug 25 17:07 [01;32mgnureadlink[0m
+-rwxr-xr-x    1 root root        43520 Aug 25 17:07 [01;32mgnurealpath[0m
+-rwxr-xr-x    1 root root        64096 Aug 25 17:07 [01;32mgnurm[0m
+-rwxr-xr-x    1 root root        35328 Aug 25 17:07 [01;32mgnurmdir[0m
+-rwxr-xr-x    1 root root        35392 Aug 25 17:07 [01;32mgnuruncon[0m
+-rwxr-xr-x    1 root root        43616 Aug 25 17:07 [01;32mgnuseq[0m
+-rwxr-xr-x    1 root root        43520 Aug 25 17:07 [01;32mgnusha1sum[0m
+-rwxr-xr-x    1 root root        43520 Aug 25 17:07 [01;32mgnusha224sum[0m
+-rwxr-xr-x    1 root root        43520 Aug 25 17:07 [01;32mgnusha256sum[0m
+-rwxr-xr-x    1 root root        43520 Aug 25 17:07 [01;32mgnusha384sum[0m
+-rwxr-xr-x    1 root root        43520 Aug 25 17:07 [01;32mgnusha512sum[0m
+-rwxr-xr-x    1 root root        55904 Aug 25 17:07 [01;32mgnushred[0m
+-rwxr-xr-x    1 root root        51808 Aug 25 17:07 [01;32mgnushuf[0m
+-rwxr-xr-x    1 root root        35424 Aug 25 17:07 [01;32mgnusleep[0m
+-rwxr-xr-x    1 root root       105360 Aug 25 17:07 [01;32mgnusort[0m
+-rwxr-xr-x    1 root root        60440 Aug 25 17:07 [01;32mgnusplit[0m
+-rwxr-xr-x    1 root root        92776 Aug 25 17:07 [01;32mgnustat[0m
+-rwxr-xr-x    1 root root        39488 Aug 25 17:07 [01;32mgnustdbuf[0m
+-rwxr-xr-x    1 root root        72304 Aug 25 17:07 [01;32mgnustty[0m
+-rwxr-xr-x    1 root root        39424 Aug 25 17:07 [01;32mgnusum[0m
+-rwxr-xr-x    1 root root        35328 Aug 25 17:07 [01;32mgnusync[0m
+-rwxr-xr-x    1 root root        39424 Aug 25 17:07 [01;32mgnutac[0m
+-rwxr-xr-x    1 root root        72312 Aug 25 17:07 [01;32mgnutail[0m
+-rwxr-xr-x    1 root root        39520 Aug 25 17:07 [01;32mgnutee[0m
+-rwxr-xr-x    1 root root        39440 Aug 25 17:07 [01;32mgnutest[0m
+-rwxr-xr-x    1 root root        39968 Aug 25 17:07 [01;32mgnutimeout[0m
+-rwxr-xr-x    1 root root        76384 Aug 25 17:07 [01;32mgnutouch[0m
+-rwxr-xr-x    1 root root        51776 Aug 25 17:07 [01;32mgnutr[0m
+-rwxr-xr-x    1 root root        35288 Aug 25 17:07 [01;32mgnutrue[0m
+-rwxr-xr-x    1 root root        39520 Aug 25 17:07 [01;32mgnutruncate[0m
+-rwxr-xr-x    1 root root        51808 Aug 25 17:07 [01;32mgnutsort[0m
+-rwxr-xr-x    1 root root        35424 Aug 25 17:07 [01;32mgnutty[0m
+-rwxr-xr-x    1 root root        35424 Aug 25 17:07 [01;32mgnuuname[0m
+-rwxr-xr-x    1 root root        39544 Aug 25 17:07 [01;32mgnuunexpand[0m
+-rwxr-xr-x    1 root root        47728 Aug 25 17:07 [01;32mgnuuniq[0m
+-rwxr-xr-x    1 root root        35424 Aug 25 17:07 [01;32mgnuunlink[0m
+-rwxr-xr-x    1 root root        43616 Aug 25 17:07 [01;32mgnuusers[0m
+-rwxr-xr-x    1 root root       150568 Aug 25 17:07 [01;32mgnuvdir[0m
+-rwxr-xr-x    1 root root        60016 Aug 25 17:07 [01;32mgnuwc[0m
+-rwxr-xr-x    1 root root        51824 Aug 25 17:07 [01;32mgnuwho[0m
+-rwxr-xr-x    1 root root        35424 Aug 25 17:07 [01;32mgnuwhoami[0m
+-rwxr-xr-x    1 root root        35288 Aug 25 17:07 [01;32mgnuyes[0m
+lrwxrwxrwx    1 root root           21 Feb 22  2026 [01;36mgo[0m -> [01;32m../lib/go-1.26/bin/go[0m
+-rwxr-xr-x    1 root root        14736 Sep  8 19:07 [01;32mgobject-query[0m
+lrwxrwxrwx    1 root root           24 Feb 22  2026 [01;36mgofmt[0m -> [01;32m../lib/go-1.26/bin/gofmt[0m
+lrwxrwxrwx    1 root root           31 Oct 28 21:20 [01;36mgoogle-chrome[0m -> [01;32m/etc/alternatives/google-chrome[0m
+lrwxrwxrwx    1 root root           32 Oct 28 21:20 [01;36mgoogle-chrome-stable[0m -> [01;32m/opt/google/chrome/google-chrome[0m
+lrwxrwxrwx    1 root root           15 Mar 15  2026 [01;36mgp-archive[0m -> [01;32mgprofng-archive[0m
+lrwxrwxrwx    1 root root           19 Mar 15  2026 [01;36mgp-collect-app[0m -> [01;32mgprofng-collect-app[0m
+lrwxrwxrwx    1 root root           20 Mar 15  2026 [01;36mgp-display-html[0m -> [01;32mgprofng-display-html[0m
+lrwxrwxrwx    1 root root           19 Mar 15  2026 [01;36mgp-display-src[0m -> [01;32mgprofng-display-src[0m
+lrwxrwxrwx    1 root root           20 Mar 15  2026 [01;36mgp-display-text[0m -> [01;32mgprofng-display-text[0m
+-rwsr-xr-x    1 root root        76328 Feb  2  2026 [37;41mgpasswd[0m
+-rwxr-xr-x    1 root root      1186456 Sep  2 21:38 [01;32mgpg[0m
+-rwxr-xr-x    1 root root       390752 Sep  2 21:38 [01;32mgpg-agent[0m
+-rwxr-xr-x    1 root root        89480 Sep  2 21:38 [01;32mgpg-connect-agent[0m
+-rwxr-xr-x    1 root root        60384 Sep  2 21:38 [01;32mgpg-mail-tube[0m
+-rwxr-xr-x    1 root root       146912 Sep  2 21:38 [01;32mgpg-wks-client[0m
+-rwxr-xr-x    1 root root       118496 Sep  2 21:38 [01;32mgpgconf[0m
+-rwxr-xr-x    1 root root        35280 Sep  2 21:38 [01;32mgpgparsemail[0m
+-rwxr-xr-x    1 root root       533984 Sep  2 21:38 [01;32mgpgsm[0m
+-rwxr-xr-x    1 root root        27336 Sep  2 21:38 [01;32mgpgsplit[0m
+-rwxr-xr-x    1 root root        73632 Sep  2 21:38 [01;32mgpgtar[0m
+-rwxr-xr-x    1 root root       302296 Sep  2 21:38 [01;32mgpgv[0m
+lrwxrwxrwx    1 root root            3 Dec  2  2025 [01;36mgpic[0m -> [01;32mpic[0m
+lrwxrwxrwx    1 root root           22 Mar 15  2026 [01;36mgprof[0m -> [01;32mx86_64-linux-gnu-gprof[0m
+-rwxr-xr-x    1 root root        22944 Mar 15  2026 [01;32mgprofng[0m
+-rwxr-xr-x    1 root root        39504 Mar 15  2026 [01;32mgprofng-archive[0m
+-rwxr-xr-x    1 root root        59824 Mar 15  2026 [01;32mgprofng-collect-app[0m
+-rwxr-xr-x    1 root root       645479 Mar 15  2026 [01;32mgprofng-display-html[0m
+-rwxr-xr-x    1 root root        31136 Mar 15  2026 [01;32mgprofng-display-src[0m
+-rwxr-xr-x    1 root root       186808 Mar 15  2026 [01;32mgprofng-display-text[0m
+-rwxr-xr-x    1 root root        27040 Mar 15  2026 [01;32mgprofng-gmon[0m
+-rwxr-xr-x    1 root root        68504 Mar 11  2026 [01;32mgpu-manager[0m
+-rwxr-xr-x    1 root root        80344 Jul 21 11:06 [01;32mgrdctl[0m
+-rwxr-xr-x    1 root root       191056 Sep 27  2025 [01;32mgrep[0m
+-rwxr-xr-x    1 root root        27016 Sep  8 19:07 [01;32mgresource[0m
+-rwxr-xr-x    1 root root        39392 Dec 11  2025 [01;32mgrim[0m
+-rwxr-xr-x    1 root root        96848 Dec  2  2025 [01;32mgroff[0m
+-rwxr-xr-x    1 root root        19195 Dec  2  2025 [01;32mgrog[0m
+-rwxr-xr-x    1 root root       170624 Dec  2  2025 [01;32mgrops[0m
+-rwxr-xr-x    1 root root       125520 Dec  2  2025 [01;32mgrotty[0m
+lrwxrwxrwx    1 root root           33 Mar 30  2026 [01;36mgroups[0m -> [01;32m../lib/cargo/bin/coreutils/groups[0m
+-rwxr-xr-x    1 root root        29895 Dec  1  2025 [01;32mgrowpart[0m
+-rwxr-xr-x    1 root root      1368360 Jul  1 11:30 [01;32mgrub-editenv[0m
+-rwxr-xr-x    1 root root       831280 Jul  1 11:30 [01;32mgrub-file[0m
+-rwxr-xr-x    1 root root      1151720 Jul  1 11:30 [01;32mgrub-fstest[0m
+-rwxr-xr-x    1 root root       109528 Jul  1 11:30 [01;32mgrub-glue-efi[0m
+-rwxr-xr-x    1 root root         1681 Jul  1 11:30 [01;32mgrub-kbdcomp[0m
+-rwxr-xr-x    1 root root        89400 Jul  1 11:30 [01;32mgrub-menulst2cfg[0m
+-rwxr-xr-x    1 root root       138776 Jul  1 11:30 [01;32mgrub-mkfont[0m
+-rwxr-xr-x    1 root root       411048 Jul  1 11:30 [01;32mgrub-mkimage[0m
+-rwxr-xr-x    1 root root       109880 Jul  1 11:30 [01;32mgrub-mklayout[0m
+-rwxr-xr-x    1 root root       468936 Jul  1 11:30 [01;32mgrub-mknetdir[0m
+-rwxr-xr-x    1 root root       126472 Jul  1 11:30 [01;32mgrub-mkpasswd-pbkdf2[0m
+-rwxr-xr-x    1 root root       282344 Jul  1 11:30 [01;32mgrub-mkrelpath[0m
+-rwxr-xr-x    1 root root      1128552 Jul  1 11:30 [01;32mgrub-mkrescue[0m
+-rwxr-xr-x    1 root root       555272 Jul  1 11:30 [01;32mgrub-mkstandalone[0m
+-rwxr-xr-x    1 root root       766248 Jul  1 11:30 [01;32mgrub-mount[0m
+-rwxr-xr-x    1 root root       843976 Jul  1 11:30 [01;32mgrub-render-label[0m
+-rwxr-xr-x    1 root root       129880 Jul  1 11:30 [01;32mgrub-script-check[0m
+-rwxr-xr-x    1 root root       787208 Jul  1 11:30 [01;32mgrub-syslinux2cfg[0m
+-rwxr-xr-x    1 root root        14568 Oct 20 18:40 [01;32mgs[0m
+-rwxr-xr-x    1 root root          350 Oct 20 18:40 [01;32mgsbj[0m
+-rwxr-xr-x    1 root root          352 Oct 20 18:40 [01;32mgsdj[0m
+-rwxr-xr-x    1 root root          352 Oct 20 18:40 [01;32mgsdj500[0m
+-rwxr-xr-x    1 root root        31192 Sep  8 19:07 [01;32mgsettings[0m
+-rwxr-xr-x    1 root root          353 Oct 20 18:40 [01;32mgslj[0m
+-rwxr-xr-x    1 root root          350 Oct 20 18:40 [01;32mgslp[0m
+-rwxr-xr-x    1 root root          277 Oct 20 18:40 [01;32mgsnd[0m
+-rwxr-xr-x    1 root root       750376 Mar 19  2026 [01;32mgst-audio-thumbnailer[0m
+-rwxr-xr-x    1 root root        27112 Sep 16 20:25 [01;32mgst-device-monitor-1.0[0m
+-rwxr-xr-x    1 root root        35304 Sep 16 20:25 [01;32mgst-discoverer-1.0[0m
+-rwxr-xr-x    1 root root        68144 Apr  8  2026 [01;32mgst-inspect-1.0[0m
+-rwxr-xr-x    1 root root        39400 Apr  8  2026 [01;32mgst-launch-1.0[0m
+-rwxr-xr-x    1 root root        55784 Sep 16 20:25 [01;32mgst-play-1.0[0m
+-rwxr-xr-x    1 root root        35288 Apr  8  2026 [01;32mgst-stats-1.0[0m
+-rwxr-xr-x    1 root root        18824 Apr  8  2026 [01;32mgst-tester-1.0[0m
+-rwxr-xr-x    1 root root        18904 Apr  8  2026 [01;32mgst-typefind-1.0[0m
+-rwxr-xr-x    1 root root       795440 Mar 19  2026 [01;32mgst-video-thumbnailer[0m
+-rwxr-xr-x    1 root root         3051 Jan 30  2026 [01;32mgstack[0m
+lrwxrwxrwx    1 root root           41 Jul 20 13:28 [01;36mgstreamer-codec-install[0m -> [01;32m/etc/alternatives/gstreamer-codec-install[0m
+lrwxrwxrwx    1 root root            3 Dec  2  2025 [01;36mgtbl[0m -> [01;32mtbl[0m
+lrwxrwxrwx    1 root root           17 Jun 22 17:25 [01;36mgted[0m -> [01;32mgnome-text-editor[0m
+-rwxr-xr-x    1 root root        31128 Sep  8 19:07 [01;32mgtester[0m
+-rwxr-xr-x    1 root root        19091 Sep  8 19:07 [01;32mgtester-report[0m
+-rwxr-xr-x    1 root root        18824 Jul 15 02:18 [01;32mgtf[0m
+-rwxr-xr-x    1 root root        35336 Mar 23  2026 [01;32mgtk-builder-tool[0m
+-rwxr-xr-x    1 root root        18928 Mar 23  2026 [01;32mgtk-encode-symbolic-svg[0m
+-rwxr-xr-x    1 root root        18976 Mar 23  2026 [01;32mgtk-launch[0m
+-rwxr-xr-x    1 root root        14720 Mar 23  2026 [01;32mgtk-query-settings[0m
+lrwxrwxrwx    1 root root           22 May 26 15:07 [01;36mgtk-update-icon-cache[0m -> [01;32mgtk4-update-icon-cache[0m
+-rwxr-xr-x    1 root root       145880 May 26 15:07 [01;32mgtk4-broadwayd[0m
+-rwxr-xr-x    1 root root        80680 May 26 15:07 [01;32mgtk4-builder-tool[0m
+-rwxr-xr-x    1 root root     12192768 May 26 15:07 [01;32mgtk4-encode-symbolic-svg[0m
+-rwxr-xr-x    1 root root        47672 May 26 15:07 [01;32mgtk4-image-tool[0m
+-rwxr-xr-x    1 root root        18976 May 26 15:07 [01;32mgtk4-launch[0m
+-rwxr-xr-x    1 root root        51664 May 26 15:07 [01;32mgtk4-path-tool[0m
+-rwxr-xr-x    1 root root        14720 May 26 15:07 [01;32mgtk4-query-settings[0m
+-rwxr-xr-x    1 root root        68216 May 26 15:07 [01;32mgtk4-rendernode-tool[0m
+-rwxr-xr-x    1 root root        43744 May 26 15:07 [01;32mgtk4-update-icon-cache[0m
+-rwxr-xr-x    1 root root         2266 Jul  3 13:51 [01;32mgunzip[0m
+-rwxr-xr-x    1 root root         6412 Jul  3 13:51 [01;32mgzexe[0m
+-rwxr-xr-x    1 root root        97560 Jul  3 13:51 [01;32mgzip[0m
+-rwxr-xr-x    1 root root        28826 Sep  8 20:17 [01;32mh2ph[0m
+-rwxr-xr-x    1 root root        60934 Sep  8 20:17 [01;32mh2xs[0m
+-rwxr-xr-x    1 root root    113798592 Nov  6 02:26 [01;32mhangar-ai[0m
+-rwxr-xr-x    1 root root      2323840 Nov  6 02:26 [01;32mhangar-webview[0m
+-rwxr-xr-x    1 root root        47664 Aug 19 16:23 [01;32mhardlink[0m
+lrwxrwxrwx    1 root root           34 Mar 30  2026 [01;36mhashsum[0m -> [01;32m../lib/cargo/bin/coreutils/hashsum[0m
+-rwxr-xr-x    1 root root        31200 Dec  4  2025 [01;32mhbpldecode[0m
+-rwxr-xr-x    1 root root        57888 Oct 13 12:27 [01;32mhciattach[0m
+-rwxr-xr-x    1 root root       162368 Oct 13 12:27 [01;32mhciconfig[0m
+-rwxr-xr-x    1 root root       161952 Oct 13 12:27 [01;32mhcitool[0m
+lrwxrwxrwx    1 root root            7 Aug 19 16:23 [01;36mhd[0m -> [01;32mhexdump[0m
+lrwxrwxrwx    1 root root           31 Mar 30  2026 [01;36mhead[0m -> [01;32m../lib/cargo/bin/coreutils/head[0m
+-rwxr-xr-x    1 root root        35224 Sep 24 21:00 [01;32mheif-thumbnailer[0m
+-rwxr-xr-x    1 root root         2514 May 20 21:11 [01;32mhelpztags[0m
+-rwxr-xr-x    1 root root        18888 Oct 13 12:27 [01;32mhex2hcd[0m
+-rwxr-xr-x    1 root root        51680 Aug 19 16:23 [01;32mhexdump[0m
+-rwxr-xr-x    1 root root        18832 Dec  4  2025 [01;32mhipercdecode[0m
+lrwxrwxrwx    1 root root           27 Mar 18  2026 [01;36mhmaptool-21[0m -> [01;32m../lib/llvm-21/bin/hmaptool[0m
+-rwxr-xr-x    1 root root       113632 Oct 30 16:53 [01;32mhost[0m
+lrwxrwxrwx    1 root root           33 Mar 30  2026 [01;36mhostid[0m -> [01;32m../lib/cargo/bin/coreutils/hostid[0m
+-rwxr-xr-x    1 root root        26928 Dec  6  2025 [01;32mhostname[0m
+-rwxr-xr-x    1 root root        39384 Sep 16 16:55 [01;32mhostnamectl[0m
+lrwxrwxrwx    1 root root           23 Jun 15 20:58 [01;36mhp-align[0m -> [01;32m../share/hplip/align.py[0m
+lrwxrwxrwx    1 root root           23 Jun 15 20:58 [01;36mhp-check[0m -> [01;32m../share/hplip/check.py[0m
+lrwxrwxrwx    1 root root           23 Jun 15 20:58 [01;36mhp-clean[0m -> [01;32m../share/hplip/clean.py[0m
+lrwxrwxrwx    1 root root           26 Jun 15 20:58 [01;36mhp-colorcal[0m -> [01;32m../share/hplip/colorcal.py[0m
+lrwxrwxrwx    1 root root           36 Jun 15 20:58 [01;36mhp-config_usb_printer[0m -> [01;32m../share/hplip/config_usb_printer.py[0m
+lrwxrwxrwx    1 root root           24 Jun 15 20:58 [01;36mhp-doctor[0m -> [01;32m../share/hplip/doctor.py[0m
+lrwxrwxrwx    1 root root           26 Jun 15 20:58 [01;36mhp-firmware[0m -> [01;32m../share/hplip/firmware.py[0m
+lrwxrwxrwx    1 root root           22 Jun 15 20:58 [01;36mhp-info[0m -> [01;32m../share/hplip/info.py[0m
+lrwxrwxrwx    1 root root           24 Jun 15 20:58 [01;36mhp-levels[0m -> [01;32m../share/hplip/levels.py[0m
+lrwxrwxrwx    1 root root           28 Jun 15 20:58 [01;36mhp-logcapture[0m -> [01;32m../share/hplip/logcapture.py[0m
+lrwxrwxrwx    1 root root           25 Jun 15 20:58 [01;36mhp-makeuri[0m -> [01;32m../share/hplip/makeuri.py[0m
+lrwxrwxrwx    1 root root           27 Jun 15 20:58 [01;36mhp-pkservice[0m -> [01;32m../share/hplip/pkservice.py[0m
+lrwxrwxrwx    1 root root           24 Jun 15 20:58 [01;36mhp-plugin[0m -> [01;32m../share/hplip/plugin.py[0m
+-rwxr-xr-x    1 root root          719 Jun 15 20:58 [01;32mhp-plugin-ubuntu[0m
+lrwxrwxrwx    1 root root           23 Jun 15 20:58 [01;36mhp-probe[0m -> [01;32m../share/hplip/probe.py[0m
+lrwxrwxrwx    1 root root           23 Jun 15 20:58 [01;36mhp-query[0m -> [01;32m../share/hplip/query.py[0m
+lrwxrwxrwx    1 root root           22 Jun 15 20:58 [01;36mhp-scan[0m -> [01;32m../share/hplip/scan.py[0m
+lrwxrwxrwx    1 root root           23 Jun 15 20:58 [01;36mhp-setup[0m -> [01;32m../share/hplip/setup.py[0m
+lrwxrwxrwx    1 root root           26 Jun 15 20:58 [01;36mhp-testpage[0m -> [01;32m../share/hplip/testpage.py[0m
+lrwxrwxrwx    1 root root           26 Jun 15 20:58 [01;36mhp-timedate[0m -> [01;32m../share/hplip/timedate.py[0m
+-rwxr-xr-x    1 root root       395152 Feb  2  2026 [01;32mhtop[0m
+lrwxrwxrwx    1 root root           48 Mar 18  2026 [01;36mhwasan_symbolize-21[0m -> [01;32m../lib/llvm-21/lib/clang/21/bin/hwasan_symbolize[0m
+-rwxr-xr-x    1 root root      1586152 Dec 17  2025 [01;32mhwctl[0m
+-rwxr-xr-x    1 root root        11512 Apr 16  2026 [01;32mhwe-support-status[0m
+lrwxrwxrwx    1 root root            7 Aug 19 16:23 [01;36mi386[0m -> [01;32msetarch[0m
+-rwxr-xr-x    1 root root        84424 Apr  5  2026 [01;32mibus[0m
+-rwxr-xr-x    1 root root       170496 Apr  5  2026 [01;32mibus-daemon[0m
+-rwxr-xr-x    1 root root         1182 Apr  5  2026 [01;32mibus-setup[0m
+-rwxr-xr-x    1 root root         1141 Dec 18  2025 [01;32mibus-table-createdb[0m
+-rwxr-xr-x    1 root root        43520 Dec  6  2025 [01;32miceauth[0m
+-rwxr-xr-x    1 root root        68104 Sep  3 16:09 [01;32miconv[0m
+-rwxr-xr-x    1 root root        52224 Mar  2  2026 [01;32micuexportdata[0m
+-rwxr-xr-x    1 root root        15056 Mar  2  2026 [01;32micuinfo[0m
+lrwxrwxrwx    1 root root           29 Mar 30  2026 [01;36mid[0m -> [01;32m../lib/cargo/bin/coreutils/id[0m
+-rwxr-xr-x    1 root root        27088 Feb 18  2026 [01;32miecset[0m
+-rwxr-xr-x    1 root root        39608 Dec  1  2025 [01;32mijs_pxljr[0m
+-rwxr-xr-x    1 root root        11806 Mar 19  2026 [01;32mim-config[0m
+-rwxr-xr-x    1 root root         5159 Mar 19  2026 [01;32mim-launch[0m
+-rwxr-xr-x    1 root root       202320 Jun  4 15:22 [01;32minetutils-telnet[0m
+-rwxr-xr-x    1 root root       251736 Mar 25  2026 [01;32minfo[0m
+lrwxrwxrwx    1 root root           29 Mar 25  2026 [01;36minfobrowser[0m -> [01;32m/etc/alternatives/infobrowser[0m
+-rwxr-xr-x    1 root root        68040 Jan  3  2026 [01;32minfocmp[0m
+lrwxrwxrwx    1 root root            3 Jan  3  2026 [01;36minfotocap[0m -> [01;32mtic[0m
+-rwxr-xr-x    1 root root        34640 Dec  1  2025 [01;32minputattach[0m
+lrwxrwxrwx    1 root root           34 Mar 30  2026 [01;36minstall[0m -> [01;32m../lib/cargo/bin/coreutils/install[0m
+-rwxr-xr-x    1 root root        48448 Mar 25  2026 [01;32minstall-info[0m
+-rwxr-xr-x    1 root root         4373 Sep  8 20:17 [01;32minstmodsh[0m
+lrwxrwxrwx    1 root root           34 Mar 18  2026 [01;36mintercept-build-21[0m -> [01;32m../lib/llvm-21/bin/intercept-build[0m
+lrwxrwxrwx    1 root root            4 Dec  1  2025 [01;36minvgeod[0m -> [01;32mgeod[0m
+lrwxrwxrwx    1 root root            4 Dec  1  2025 [01;36minvproj[0m -> [01;32mproj[0m
+-rwxr-xr-x    1 root root        18896 Aug 19 16:23 [01;32mionice[0m
+-rwxr-xr-x    1 root root        59952 Jan 11  2026 [01;32miostat[0m
+-rwxr-xr-x    1 root root       808000 Apr  9  2026 [01;32mip[0m
+-rwxr-xr-x    1 root root        23064 Aug 19 16:23 [01;32mipcmk[0m
+-rwxr-xr-x    1 root root        31184 Aug 19 16:23 [01;32mipcrm[0m
+-rwxr-xr-x    1 root root        39376 Aug 19 16:23 [01;32mipcs[0m
+-rwxr-xr-x    1 root root        43496 Jun 11 16:46 [01;32mippfind[0m
+-rwxr-xr-x    1 root root        96648 Jun 11 16:46 [01;32mipptool[0m
+lrwxrwxrwx    1 root root           28 Feb  2  2026 [01;36miptables-xml[0m -> [01;32m../sbin/xtables-legacy-multi[0m
+-rwxr-xr-x    1 root root        14896 Feb  2  2026 [01;32mischroot[0m
+-rwxr-xr-x    1 root root         7220 Mar 22  2026 [01;32mispell-wrapper[0m
+lrwxrwxrwx    1 root root           31 Mar 30  2026 [01;36mjoin[0m -> [01;32m../lib/cargo/bin/coreutils/join[0m
+-rwxr-xr-x    1 root root        97472 Sep 16 16:55 [01;32mjournalctl[0m
+-rwxr-xr-x    1 root root        35296 May  6  2026 [01;32mjpgicc[0m
+-rwxr-xr-x    1 root root        30952 Apr 20  2026 [01;32mjq[0m
+-rwxr-xr-x    1 root root         1004 Feb 12  2026 [01;32mjson-patch-jsondiff[0m
+-rwxr-xr-x    1 root root         5021 Sep  8 20:17 [01;32mjson_pp[0m
+lrwxrwxrwx    1 root root           26 Feb 12  2026 [01;36mjsondiff[0m -> [01;32m/etc/alternatives/jsondiff[0m
+-rwxr-xr-x    1 root root         3859 Feb 12  2026 [01;32mjsonpatch[0m
+-rwxr-xr-x    1 root root         1838 Feb 10  2026 [01;32mjsonpointer[0m
+-rwxr-xr-x    1 root root          214 Dec  6  2025 [01;32mjsonschema[0m
+-rwxr-xr-x    1 root root        14792 Dec  1  2025 [01;32mkbd_mode[0m
+-rwxr-xr-x    1 root root        14792 Dec  1  2025 [01;32mkbdinfo[0m
+-rwxr-xr-x    1 root root        64416 Sep  2 21:38 [01;32mkbxutil[0m
+-rwxr-xr-x    1 root root        56024 Sep 16 16:55 [01;32mkernel-install[0m
+-rwxr-xr-x    1 root root        22992 Dec  1  2025 [01;32mkill[0m
+-rwxr-xr-x    1 root root        31632 Feb  2  2026 [01;32mkillall[0m
+-rwxr-xr-x    1 root root       174472 Feb  2  2026 [01;32mkmod[0m
+-rwxr-xr-x    1 root root        18960 Mar  5  2026 [01;32mkmodsign[0m
+-rwxr-xr-x    1 root root        22928 Mar 13  2026 [01;32mkquitapp6[0m
+lrwxrwxrwx    1 root root           15 Jul 15 20:22 [01;36mkrb5-config[0m -> [01;32mkrb5-config.mit[0m
+-rwxr-xr-x    1 root root         6817 Jul 15 20:22 [01;32mkrb5-config.mit[0m
+-rwxr-xr-x    1 root root        23088 Mar 13  2026 [01;32mkreadconfig6[0m
+lrwxrwxrwx    1 root root           18 Sep  2 11:18 [01;36mkvm[0m -> [01;32mqemu-system-x86_64[0m
+-rwxr-xr-x    1 root root          401 Aug 20 14:09 [01;32mkvm-spice[0m
+-rwxr-xr-x    1 root root        23088 Mar 13  2026 [01;32mkwriteconfig6[0m
+-rwxr-xr-x    1 root root        18824 Oct 13 12:27 [01;32ml2ping[0m
+-rwxr-xr-x    1 root root        35552 Oct 13 12:27 [01;32ml2test[0m
+-rwxr-xr-x    1 root root         3831 Dec  6  2025 [01;32mlaptop-detect[0m
+-rwxr-xr-x    1 root root        27104 Dec  4  2025 [01;32mlavadecode[0m
+-rwxr-xr-x    1 root root     24620008 Dec  9  2025 [01;32mlazygit[0m
+lrwxrwxrwx    1 root root           19 Mar 15  2026 [01;36mld[0m -> [01;32mx86_64-linux-gnu-ld[0m
+lrwxrwxrwx    1 root root           23 Mar 15  2026 [01;36mld.bfd[0m -> [01;32mx86_64-linux-gnu-ld.bfd[0m
+lrwxrwxrwx    1 root root            4 Dec 29  2025 [01;36mld.mold[0m -> [01;32mmold[0m
+lrwxrwxrwx    1 root root           29 Sep  3 16:09 [01;36mld.so[0m -> [01;32m../lib64/ld-linux-x86-64.so.2[0m
+lrwxrwxrwx    1 root root           10 Nov 24  2025 [01;36mldapadd[0m -> [01;32mldapmodify[0m
+-rwxr-xr-x    1 root root        64032 Nov 24  2025 [01;32mldapcompare[0m
+-rwxr-xr-x    1 root root        68144 Nov 24  2025 [01;32mldapdelete[0m
+-rwxr-xr-x    1 root root        64032 Nov 24  2025 [01;32mldapexop[0m
+-rwxr-xr-x    1 root root        68128 Nov 24  2025 [01;32mldapmodify[0m
+-rwxr-xr-x    1 root root        64032 Nov 24  2025 [01;32mldapmodrdn[0m
+-rwxr-xr-x    1 root root        68128 Nov 24  2025 [01;32mldappasswd[0m
+-rwxr-xr-x    1 root root       100928 Nov 24  2025 [01;32mldapsearch[0m
+-rwxr-xr-x    1 root root        14720 Nov 24  2025 [01;32mldapurl[0m
+-rwxr-xr-x    1 root root        64032 Nov 24  2025 [01;32mldapwhoami[0m
+-rwxr-xr-x    1 root root         5390 Sep  3 16:09 [01;32mldd[0m
+-rwxr-xr-x    1 root root       245256 Feb  2  2026 [01;32mless[0m
+-rwxr-xr-x    1 root root        14728 Feb  2  2026 [01;32mlessecho[0m
+lrwxrwxrwx    1 root root            8 Feb  2  2026 [01;36mlessfile[0m -> [01;32mlesspipe[0m
+-rwxr-xr-x    1 root root        27096 Feb  2  2026 [01;32mlesskey[0m
+-rwxr-xr-x    1 root root         9047 Apr  5  2025 [01;32mlesspipe[0m
+-rwxr-xr-x    1 root root       101976 Feb  2  2026 [01;32mlexgrog[0m
+-rwxr-xr-x    1 root root        15778 Sep  8 20:17 [01;32mlibnetcfg[0m
+lrwxrwxrwx    1 root root           15 Oct  5 23:29 [01;36mlibpng-config[0m -> [01;32mlibpng16-config[0m
+-rwxr-xr-x    1 root root         2456 Oct  5 23:29 [01;32mlibpng16-config[0m
+lrwxrwxrwx    1 root root           31 Mar 30  2026 [01;36mlink[0m -> [01;32m../lib/cargo/bin/coreutils/link[0m
+-rwxr-xr-x    1 root root        27080 May  6  2026 [01;32mlinkicc[0m
+-rwxr-xr-x    1 root root         1577 Dec  8  2025 [01;32mlinux-boot-prober[0m
+-rwxr-xr-x    1 root root         4708 Feb 23  2026 [01;32mlinux-check-removal[0m
+-rwxr-xr-x    1 root root         3604 Feb 23  2026 [01;32mlinux-run-hooks[0m
+-rwxr-xr-x    1 root root         6529 Feb 23  2026 [01;32mlinux-update-symlinks[0m
+-rwxr-xr-x    1 root root         2734 Feb 23  2026 [01;32mlinux-version[0m
+lrwxrwxrwx    1 root root            7 Aug 19 16:23 [01;36mlinux32[0m -> [01;32msetarch[0m
+lrwxrwxrwx    1 root root            7 Aug 19 16:23 [01;36mlinux64[0m -> [01;32msetarch[0m
+-rwxr-xr-x    1 root root        15152 Dec  6  2025 [01;32mlistres[0m
+lrwxrwxrwx    1 root root           22 Mar 18  2026 [01;36mlit-21[0m -> [01;32m../lib/llvm-21/bin/lit[0m
+-rwxr-xr-x    1 root root          973 Jan 18  2025 [01;32mlivereload[0m
+lrwxrwxrwx    1 root root           22 Mar 18  2026 [01;36mllc-21[0m -> [01;32m../lib/llvm-21/bin/llc[0m
+lrwxrwxrwx    1 root root           22 Mar 18  2026 [01;36mlli-21[0m -> [01;32m../lib/llvm-21/bin/lli[0m
+lrwxrwxrwx    1 root root           35 Mar 18  2026 [01;36mlli-child-target-21[0m -> [01;32m../lib/llvm-21/bin/lli-child-target[0m
+lrwxrwxrwx    1 root root           38 Mar 18  2026 [01;36mllvm-PerfectShuffle-21[0m -> [01;32m../lib/llvm-21/bin/llvm-PerfectShuffle[0m
+lrwxrwxrwx    1 root root           33 Mar 18  2026 [01;36mllvm-addr2line-21[0m -> [01;32m../lib/llvm-21/bin/llvm-addr2line[0m
+lrwxrwxrwx    1 root root           26 Mar 18  2026 [01;36mllvm-ar-21[0m -> [01;32m../lib/llvm-21/bin/llvm-ar[0m
+lrwxrwxrwx    1 root root           26 Mar 18  2026 [01;36mllvm-as-21[0m -> [01;32m../lib/llvm-21/bin/llvm-as[0m
+lrwxrwxrwx    1 root root           34 Mar 18  2026 [01;36mllvm-bcanalyzer-21[0m -> [01;32m../lib/llvm-21/bin/llvm-bcanalyzer[0m
+lrwxrwxrwx    1 root root           37 Mar 18  2026 [01;36mllvm-bitcode-strip-21[0m -> [01;32m../lib/llvm-21/bin/llvm-bitcode-strip[0m
+lrwxrwxrwx    1 root root           30 Mar 18  2026 [01;36mllvm-c-test-21[0m -> [01;32m../lib/llvm-21/bin/llvm-c-test[0m
+lrwxrwxrwx    1 root root           27 Mar 18  2026 [01;36mllvm-cat-21[0m -> [01;32m../lib/llvm-21/bin/llvm-cat[0m
+lrwxrwxrwx    1 root root           34 Mar 18  2026 [01;36mllvm-cfi-verify-21[0m -> [01;32m../lib/llvm-21/bin/llvm-cfi-verify[0m
+lrwxrwxrwx    1 root root           30 Mar 18  2026 [01;36mllvm-cgdata-21[0m -> [01;32m../lib/llvm-21/bin/llvm-cgdata[0m
+lrwxrwxrwx    1 root root           30 Mar 18  2026 [01;36mllvm-config-21[0m -> [01;32m../lib/llvm-21/bin/llvm-config[0m
+lrwxrwxrwx    1 root root           27 Mar 18  2026 [01;36mllvm-cov-21[0m -> [01;32m../lib/llvm-21/bin/llvm-cov[0m
+lrwxrwxrwx    1 root root           36 Mar 18  2026 [01;36mllvm-ctxprof-util-21[0m -> [01;32m../lib/llvm-21/bin/llvm-ctxprof-util[0m
+lrwxrwxrwx    1 root root           30 Mar 18  2026 [01;36mllvm-cvtres-21[0m -> [01;32m../lib/llvm-21/bin/llvm-cvtres[0m
+lrwxrwxrwx    1 root root           31 Mar 18  2026 [01;36mllvm-cxxdump-21[0m -> [01;32m../lib/llvm-21/bin/llvm-cxxdump[0m
+lrwxrwxrwx    1 root root           31 Mar 18  2026 [01;36mllvm-cxxfilt-21[0m -> [01;32m../lib/llvm-21/bin/llvm-cxxfilt[0m
+lrwxrwxrwx    1 root root           30 Mar 18  2026 [01;36mllvm-cxxmap-21[0m -> [01;32m../lib/llvm-21/bin/llvm-cxxmap[0m
+lrwxrwxrwx    1 root root           42 Mar 18  2026 [01;36mllvm-debuginfo-analyzer-21[0m -> [01;32m../lib/llvm-21/bin/llvm-debuginfo-analyzer[0m
+lrwxrwxrwx    1 root root           34 Mar 18  2026 [01;36mllvm-debuginfod-21[0m -> [01;32m../lib/llvm-21/bin/llvm-debuginfod[0m
+lrwxrwxrwx    1 root root           39 Mar 18  2026 [01;36mllvm-debuginfod-find-21[0m -> [01;32m../lib/llvm-21/bin/llvm-debuginfod-find[0m
+lrwxrwxrwx    1 root root           28 Mar 18  2026 [01;36mllvm-diff-21[0m -> [01;32m../lib/llvm-21/bin/llvm-diff[0m
+lrwxrwxrwx    1 root root           27 Mar 18  2026 [01;36mllvm-dis-21[0m -> [01;32m../lib/llvm-21/bin/llvm-dis[0m
+lrwxrwxrwx    1 root root           31 Mar 18  2026 [01;36mllvm-dlltool-21[0m -> [01;32m../lib/llvm-21/bin/llvm-dlltool[0m
+lrwxrwxrwx    1 root root           33 Mar 18  2026 [01;36mllvm-dwarfdump-21[0m -> [01;32m../lib/llvm-21/bin/llvm-dwarfdump[0m
+lrwxrwxrwx    1 root root           33 Mar 18  2026 [01;36mllvm-dwarfutil-21[0m -> [01;32m../lib/llvm-21/bin/llvm-dwarfutil[0m
+lrwxrwxrwx    1 root root           27 Mar 18  2026 [01;36mllvm-dwp-21[0m -> [01;32m../lib/llvm-21/bin/llvm-dwp[0m
+lrwxrwxrwx    1 root root           32 Mar 18  2026 [01;36mllvm-exegesis-21[0m -> [01;32m../lib/llvm-21/bin/llvm-exegesis[0m
+lrwxrwxrwx    1 root root           31 Mar 18  2026 [01;36mllvm-extract-21[0m -> [01;32m../lib/llvm-21/bin/llvm-extract[0m
+lrwxrwxrwx    1 root root           32 Mar 18  2026 [01;36mllvm-gsymutil-21[0m -> [01;32m../lib/llvm-21/bin/llvm-gsymutil[0m
+lrwxrwxrwx    1 root root           27 Mar 18  2026 [01;36mllvm-ifs-21[0m -> [01;32m../lib/llvm-21/bin/llvm-ifs[0m
+lrwxrwxrwx    1 root root           41 Mar 18  2026 [01;36mllvm-install-name-tool-21[0m -> [01;32m../lib/llvm-21/bin/llvm-install-name-tool[0m
+lrwxrwxrwx    1 root root           31 Mar 18  2026 [01;36mllvm-jitlink-21[0m -> [01;32m../lib/llvm-21/bin/llvm-jitlink[0m
+lrwxrwxrwx    1 root root           40 Mar 18  2026 [01;36mllvm-jitlink-executor-21[0m -> [01;32m../lib/llvm-21/bin/llvm-jitlink-executor[0m
+lrwxrwxrwx    1 root root           27 Mar 18  2026 [01;36mllvm-lib-21[0m -> [01;32m../lib/llvm-21/bin/llvm-lib[0m
+lrwxrwxrwx    1 root root           38 Mar 18  2026 [01;36mllvm-libtool-darwin-21[0m -> [01;32m../lib/llvm-21/bin/llvm-libtool-darwin[0m
+lrwxrwxrwx    1 root root           28 Mar 18  2026 [01;36mllvm-link-21[0m -> [01;32m../lib/llvm-21/bin/llvm-link[0m
+lrwxrwxrwx    1 root root           28 Mar 18  2026 [01;36mllvm-lipo-21[0m -> [01;32m../lib/llvm-21/bin/llvm-lipo[0m
+lrwxrwxrwx    1 root root           27 Mar 18  2026 [01;36mllvm-lto-21[0m -> [01;32m../lib/llvm-21/bin/llvm-lto[0m
+lrwxrwxrwx    1 root root           28 Mar 18  2026 [01;36mllvm-lto2-21[0m -> [01;32m../lib/llvm-21/bin/llvm-lto2[0m
+lrwxrwxrwx    1 root root           26 Mar 18  2026 [01;36mllvm-mc-21[0m -> [01;32m../lib/llvm-21/bin/llvm-mc[0m
+lrwxrwxrwx    1 root root           27 Mar 18  2026 [01;36mllvm-mca-21[0m -> [01;32m../lib/llvm-21/bin/llvm-mca[0m
+lrwxrwxrwx    1 root root           26 Mar 18  2026 [01;36mllvm-ml-21[0m -> [01;32m../lib/llvm-21/bin/llvm-ml[0m
+lrwxrwxrwx    1 root root           28 Mar 18  2026 [01;36mllvm-ml64-21[0m -> [01;32m../lib/llvm-21/bin/llvm-ml64[0m
+lrwxrwxrwx    1 root root           34 Mar 18  2026 [01;36mllvm-modextract-21[0m -> [01;32m../lib/llvm-21/bin/llvm-modextract[0m
+lrwxrwxrwx    1 root root           26 Mar 18  2026 [01;36mllvm-mt-21[0m -> [01;32m../lib/llvm-21/bin/llvm-mt[0m
+lrwxrwxrwx    1 root root           26 Mar 18  2026 [01;36mllvm-nm-21[0m -> [01;32m../lib/llvm-21/bin/llvm-nm[0m
+lrwxrwxrwx    1 root root           31 Mar 18  2026 [01;36mllvm-objcopy-21[0m -> [01;32m../lib/llvm-21/bin/llvm-objcopy[0m
+lrwxrwxrwx    1 root root           31 Mar 18  2026 [01;36mllvm-objdump-21[0m -> [01;32m../lib/llvm-21/bin/llvm-objdump[0m
+lrwxrwxrwx    1 root root           34 Mar 18  2026 [01;36mllvm-opt-report-21[0m -> [01;32m../lib/llvm-21/bin/llvm-opt-report[0m
+lrwxrwxrwx    1 root root           29 Mar 18  2026 [01;36mllvm-otool-21[0m -> [01;32m../lib/llvm-21/bin/llvm-otool[0m
+lrwxrwxrwx    1 root root           31 Mar 18  2026 [01;36mllvm-pdbutil-21[0m -> [01;32m../lib/llvm-21/bin/llvm-pdbutil[0m
+lrwxrwxrwx    1 root root           32 Mar 18  2026 [01;36mllvm-profdata-21[0m -> [01;32m../lib/llvm-21/bin/llvm-profdata[0m
+lrwxrwxrwx    1 root root           31 Mar 18  2026 [01;36mllvm-profgen-21[0m -> [01;32m../lib/llvm-21/bin/llvm-profgen[0m
+lrwxrwxrwx    1 root root           30 Mar 18  2026 [01;36mllvm-ranlib-21[0m -> [01;32m../lib/llvm-21/bin/llvm-ranlib[0m
+lrwxrwxrwx    1 root root           26 Mar 18  2026 [01;36mllvm-rc-21[0m -> [01;32m../lib/llvm-21/bin/llvm-rc[0m
+lrwxrwxrwx    1 root root           31 Mar 18  2026 [01;36mllvm-readelf-21[0m -> [01;32m../lib/llvm-21/bin/llvm-readelf[0m
+lrwxrwxrwx    1 root root           31 Mar 18  2026 [01;36mllvm-readobj-21[0m -> [01;32m../lib/llvm-21/bin/llvm-readobj[0m
+lrwxrwxrwx    1 root root           32 Mar 18  2026 [01;36mllvm-readtapi-21[0m -> [01;32m../lib/llvm-21/bin/llvm-readtapi[0m
+lrwxrwxrwx    1 root root           30 Mar 18  2026 [01;36mllvm-reduce-21[0m -> [01;32m../lib/llvm-21/bin/llvm-reduce[0m
+lrwxrwxrwx    1 root root           34 Mar 18  2026 [01;36mllvm-remarkutil-21[0m -> [01;32m../lib/llvm-21/bin/llvm-remarkutil[0m
+lrwxrwxrwx    1 root root           30 Mar 18  2026 [01;36mllvm-rtdyld-21[0m -> [01;32m../lib/llvm-21/bin/llvm-rtdyld[0m
+lrwxrwxrwx    1 root root           27 Mar 18  2026 [01;36mllvm-sim-21[0m -> [01;32m../lib/llvm-21/bin/llvm-sim[0m
+lrwxrwxrwx    1 root root           28 Mar 18  2026 [01;36mllvm-size-21[0m -> [01;32m../lib/llvm-21/bin/llvm-size[0m
+lrwxrwxrwx    1 root root           29 Mar 18  2026 [01;36mllvm-split-21[0m -> [01;32m../lib/llvm-21/bin/llvm-split[0m
+lrwxrwxrwx    1 root root           30 Mar 18  2026 [01;36mllvm-stress-21[0m -> [01;32m../lib/llvm-21/bin/llvm-stress[0m
+lrwxrwxrwx    1 root root           31 Mar 18  2026 [01;36mllvm-strings-21[0m -> [01;32m../lib/llvm-21/bin/llvm-strings[0m
+lrwxrwxrwx    1 root root           29 Mar 18  2026 [01;36mllvm-strip-21[0m -> [01;32m../lib/llvm-21/bin/llvm-strip[0m
+lrwxrwxrwx    1 root root           34 Mar 18  2026 [01;36mllvm-symbolizer-21[0m -> [01;32m../lib/llvm-21/bin/llvm-symbolizer[0m
+lrwxrwxrwx    1 root root           30 Mar 18  2026 [01;36mllvm-tblgen-21[0m -> [01;32m../lib/llvm-21/bin/llvm-tblgen[0m
+lrwxrwxrwx    1 root root           42 Mar 18  2026 [01;36mllvm-test-mustache-spec-21[0m -> [01;32m../lib/llvm-21/bin/llvm-test-mustache-spec[0m
+lrwxrwxrwx    1 root root           35 Mar 18  2026 [01;36mllvm-tli-checker-21[0m -> [01;32m../lib/llvm-21/bin/llvm-tli-checker[0m
+lrwxrwxrwx    1 root root           31 Mar 18  2026 [01;36mllvm-undname-21[0m -> [01;32m../lib/llvm-21/bin/llvm-undname[0m
+lrwxrwxrwx    1 root root           31 Mar 18  2026 [01;36mllvm-windres-21[0m -> [01;32m../lib/llvm-21/bin/llvm-windres[0m
+lrwxrwxrwx    1 root root           28 Mar 18  2026 [01;36mllvm-xray-21[0m -> [01;32m../lib/llvm-21/bin/llvm-xray[0m
+lrwxrwxrwx    1 root root           29 Mar 30  2026 [01;36mln[0m -> [01;32m../lib/cargo/bin/coreutils/ln[0m
+-rwxr-xr-x    1 root root        23280 Apr  9  2026 [01;32mlnstat[0m
+-rwxr-xr-x    1 root root       207400 Dec  1  2025 [01;32mloadkeys[0m
+-rwxr-xr-x    1 root root        35368 Dec  1  2025 [01;32mloadunimap[0m
+-rwxr-xr-x    1 root root        50824 Sep  3 16:09 [01;32mlocale[0m
+-rwxr-xr-x    1 root root        14568 Aug 24 12:33 [01;32mlocale-check[0m
+-rwxr-xr-x    1 root root        31176 Sep 16 16:55 [01;32mlocalectl[0m
+-rwxr-xr-x    1 root root       334976 Sep  3 16:09 [01;32mlocaledef[0m
+-rwxr-xr-x    1 root root       115936 May 19 12:39 [01;32mlocalsearch[0m
+-rwxr-xr-x    1 root root        39984 Aug 19 16:23 [01;32mlogger[0m
+-rwxr-xr-x    1 root root        43472 Aug 19 16:23 [01;32mlogin[0m
+-rwxr-xr-x    1 root root        68192 Sep 16 16:55 [01;32mloginctl[0m
+lrwxrwxrwx    1 root root           34 Mar 30  2026 [01;36mlogname[0m -> [01;32m../lib/cargo/bin/coreutils/logname[0m
+-rwxr-xr-x    1 root root        18904 Aug 19 16:23 [01;32mlook[0m
+-rwxr-xr-x    1 root root      6398176 Mar 27  2026 [01;32mloupe[0m
+-rwxr-xr-x    1 root root       121912 Jul 11 17:55 [01;32mlowntfs-3g[0m
+-rwxr-xr-x    1 root root        27008 Jun 11 16:46 [01;32mlp[0m
+-rwxr-xr-x    1 root root        22992 Jun 11 16:46 [01;32mlpoptions[0m
+-rwxr-xr-x    1 root root        22992 Jun 11 16:46 [01;32mlpq[0m
+-rwxr-xr-x    1 root root        18816 Jun 11 16:46 [01;32mlpr[0m
+-rwxr-xr-x    1 root root        14720 Jun 11 16:46 [01;32mlprm[0m
+-rwxr-xr-x    1 root root        39632 Jun 11 16:46 [01;32mlpstat[0m
+lrwxrwxrwx    1 root root           29 Mar 30  2026 [01;36mls[0m -> [01;32m../lib/cargo/bin/coreutils/ls[0m
+-rwxr-xr-x    1 root root        14728 Feb 13  2026 [01;32mlsattr[0m
+-rwxr-xr-x    1 root root         2834 Dec 18  2025 [01;32mlsb_release[0m
+-rwxr-xr-x    1 root root       174552 Aug 19 16:23 [01;32mlsblk[0m
+-rwxr-xr-x    1 root root       117208 Aug 19 16:23 [01;32mlscpu[0m
+-rwxr-xr-x    1 root root       823832 Oct 28  2025 [01;32mlshw[0m
+-rwxr-xr-x    1 root root          735 Jan 28  2025 [01;32mlsinitramfs[0m
+-rwxr-xr-x    1 root root        16837 Sep  9 15:09 [01;32mlsinitrd[0m
+-rwxr-xr-x    1 root root        63952 Aug 19 16:23 [01;32mlsipc[0m
+-rwxr-xr-x    1 root root        43904 Aug 19 16:23 [01;32mlslocks[0m
+lrwxrwxrwx    1 root root            4 Feb  2  2026 [01;36mlsmod[0m -> [01;32mkmod[0m
+-rwxr-xr-x    1 root root        51672 Aug 19 16:23 [01;32mlsns[0m
+-rwxr-xr-x    1 root root       196416 Feb  2  2026 [01;32mlsof[0m
+-rwxr-xr-x    1 root root       118976 Feb  2  2026 [01;32mlspci[0m
+-rwxr-xr-x    1 root root         1081 May 15  2024 [01;32mlspgpot[0m
+-rwxr-xr-x    1 root root         1228 Mar 11  2025 [01;32mlspower[0m
+-rwxr-xr-x    1 root root       231920 Nov 15  2025 [01;32mlsusb[0m
+lrwxrwxrwx    1 root root           11 Feb 23  2026 [01;36mlto-dump[0m -> [01;32mlto-dump-15[0m
+lrwxrwxrwx    1 root root           28 Mar 22  2026 [01;36mlto-dump-15[0m -> [01;32mx86_64-linux-gnu-lto-dump-15[0m
+-rwxr-xr-x    1 root root        95112 Sep 21  2025 [01;32mluit[0m
+-rwxr-xr-x    1 root root        10302 May 22 17:38 [01;32mlwp-download[0m
+-rwxr-xr-x    1 root root         2711 May 22 17:38 [01;32mlwp-dump[0m
+-rwxr-xr-x    1 root root         2413 May 22 17:38 [01;32mlwp-mirror[0m
+-rwxr-xr-x    1 root root        16386 May 22 17:38 [01;32mlwp-request[0m
+lrwxrwxrwx    1 root root           23 Apr  1  2026 [01;36mlzcat[0m -> [01;32m/etc/alternatives/lzcat[0m
+lrwxrwxrwx    1 root root           23 Apr  1  2026 [01;36mlzcmp[0m -> [01;32m/etc/alternatives/lzcmp[0m
+lrwxrwxrwx    1 root root           24 Apr  1  2026 [01;36mlzdiff[0m -> [01;32m/etc/alternatives/lzdiff[0m
+lrwxrwxrwx    1 root root           25 Apr  1  2026 [01;36mlzegrep[0m -> [01;32m/etc/alternatives/lzegrep[0m
+lrwxrwxrwx    1 root root           25 Apr  1  2026 [01;36mlzfgrep[0m -> [01;32m/etc/alternatives/lzfgrep[0m
+lrwxrwxrwx    1 root root           24 Apr  1  2026 [01;36mlzgrep[0m -> [01;32m/etc/alternatives/lzgrep[0m
+lrwxrwxrwx    1 root root           24 Apr  1  2026 [01;36mlzless[0m -> [01;32m/etc/alternatives/lzless[0m
+lrwxrwxrwx    1 root root           22 Apr  1  2026 [01;36mlzma[0m -> [01;32m/etc/alternatives/lzma[0m
+-rwxr-xr-x    1 root root        18896 Oct  9 17:54 [01;32mlzmainfo[0m
+lrwxrwxrwx    1 root root           24 Apr  1  2026 [01;36mlzmore[0m -> [01;32m/etc/alternatives/lzmore[0m
+-rwxr-xr-x    1 root root         3734 Feb  2  2026 [01;32mm17n-db[0m
+-rwxr-xr-x    1 root root        29600 Dec  1  2025 [01;32mm2300w[0m
+-rwxr-xr-x    1 root root        14578 Dec  1  2025 [01;32mm2300w-wrapper[0m
+-rwxr-xr-x    1 root root        29600 Dec  1  2025 [01;32mm2400w[0m
+-rwxr-xr-x    1 root root       295120 Nov  9  2025 [01;32mmake[0m
+-rwxr-xr-x    1 root root         4905 Nov  6  2024 [01;32mmake-first-existing-target[0m
+-rwxr-xr-x    1 root root        52200 Mar  2  2026 [01;32mmakeconv[0m
+-rwxr-xr-x    1 root root       437696 Oct  5  2025 [01;32mmakedumpfile[0m
+-rwxr-xr-x    1 root root         4947 Oct  5  2025 [01;32mmakedumpfile-R.pl[0m
+-rwxr-xr-x    1 root root       113592 Feb 11  2026 [01;32mmako[0m
+-rwxr-xr-x    1 root root        31112 Feb 11  2026 [01;32mmakoctl[0m
+-rwxr-xr-x    1 root root       128496 Feb  2  2026 [01;32mman[0m
+-rwxr-xr-x    1 root root        36408 Feb  2  2026 [01;32mman-recode[0m
+-rwxr-xr-x    1 root root       147200 Feb  2  2026 [01;32mmandb[0m
+-rwxr-xr-x    1 root root        31680 Feb  2  2026 [01;32mmanpath[0m
+-rwxr-xr-x    1 root root        31272 Dec  1  2025 [01;32mmapscrn[0m
+-rwxr-xr-x    1 root root          221 Feb  2  2026 [01;32mmarkdown-it[0m
+-rwxr-xr-x    1 root root          215 Feb 10  2026 [01;32mmarkdown_py[0m
+-rwxr-xr-x    1 root root       183128 Feb  3  2026 [01;32mmawk[0m
+-rwxr-xr-x    1 root root        11342 Dec  1  2025 [01;32mmbim-network[0m
+-rwxr-xr-x    1 root root       230576 Dec  1  2025 [01;32mmbimcli[0m
+-rwxr-xr-x    1 root root        27160 Aug 19 16:23 [01;32mmcookie[0m
+lrwxrwxrwx    1 root root           33 Mar 30  2026 [01;36mmd5sum[0m -> [01;32m../lib/cargo/bin/coreutils/md5sum[0m
+-rwxr-xr-x    1 root root        51688 Oct 30 16:53 [01;32mmdig[0m
+-rwxr-xr-x    1 root root        14848 Feb  2  2026 [01;32mmemhog[0m
+-rwxr-xr-x    1 root root         5725 May 27 19:02 [01;32mmesa-overlay-control.py[0m
+-rwxr-xr-x    1 root root         6120 May 27 19:02 [01;32mmesa-screenshot-control.py[0m
+-rwxr-xr-x    1 root root          960 Jan 26  2026 [01;32mmid3cp[0m
+-rwxr-xr-x    1 root root          966 Jan 26  2026 [01;32mmid3iconv[0m
+-rwxr-xr-x    1 root root          960 Jan 26  2026 [01;32mmid3v2[0m
+-rwxr-xr-x    1 root root         3071 Nov  5  2025 [01;32mmigrate-pubring-from-classic-gpg[0m
+-rwxr-xr-x    1 root root        14800 Feb  2  2026 [01;32mmigratepages[0m
+-rwxr-xr-x    1 root root        14728 Feb  2  2026 [01;32mmigspeed[0m
+-rwxr-xr-x    1 root root         9794 Jan 12  2026 [01;32mmimeopen[0m
+-rwxr-xr-x    1 root root        13248 Jan 12  2026 [01;32mmimetype[0m
+-rwxr-xr-x    1 root root        32288 Dec  1  2025 [01;32mmin12xxw[0m
+-rwxr-xr-x    1 root root        34912 Jan 26  2026 [01;32mminisign[0m
+-rwxr-xr-x    1 root root        16163 Dec  1  2025 [01;32mmk_modmap[0m
+lrwxrwxrwx    1 root root           32 Mar 30  2026 [01;36mmkdir[0m -> [01;32m../lib/cargo/bin/coreutils/mkdir[0m
+-rwxr-xr-x    1 root root           90 Mar 16  2025 [01;32mmkdocs[0m
+-rwxr-xr-x    1 root root          221 Mar 16  2025 [01;32mmkdocs-get-deps[0m
+lrwxrwxrwx    1 root root           33 Mar 30  2026 [01;36mmkfifo[0m -> [01;32m../lib/cargo/bin/coreutils/mkfifo[0m
+-rwxr-xr-x    1 root root           65 Dec  6  2025 [01;32mmkfontdir[0m
+-rwxr-xr-x    1 root root        43928 Dec  6  2025 [01;32mmkfontscale[0m
+lrwxrwxrwx    1 root root           32 Mar 30  2026 [01;36mmknod[0m -> [01;32m../lib/cargo/bin/coreutils/mknod[0m
+-rwxr-xr-x    1 root root       387976 Mar  7  2026 [01;32mmksquashfs[0m
+lrwxrwxrwx    1 root root           33 Mar 30  2026 [01;36mmktemp[0m -> [01;32m../lib/cargo/bin/coreutils/mktemp[0m
+-rwxr-xr-x    1 root root       297328 Mar  9  2026 [01;32mmmcli[0m
+lrwxrwxrwx    1 root root           29 Mar 18  2026 [01;36mmodularize-21[0m -> [01;32m../lib/llvm-21/bin/modularize[0m
+-rwxr-xr-x    1 root root          966 Jan 26  2026 [01;32mmoggsplit[0m
+-rwxr-xr-x    1 root root        65248 Jan  9  2026 [01;32mmokutil[0m
+-rwxr-xr-x    1 root root     23295560 Dec 29  2025 [01;32mmold[0m
+-rwxr-xr-x    1 root root        18824 Oct 28  2025 [01;32mmonitor-sensor[0m
+-rwxr-xr-x    1 root root        47576 Aug 19 16:23 [01;32mmore[0m
+-rwsr-xr-x    1 root root        51664 Aug 19 16:23 [37;41mmount[0m
+-rwxr-xr-x    1 root root        18896 Aug 19 16:23 [01;32mmountpoint[0m
+-rwxr-xr-x    1 root root        96952 Oct 13 12:27 [01;32mmpris-proxy[0m
+-rwxr-xr-x    1 root root        51768 Jan 11  2026 [01;32mmpstat[0m
+-rwxr-xr-x    1 root root        14720 Dec  1  2025 [01;32mmscompress[0m
+-rwxr-xr-x    1 root root        14720 Dec  1  2025 [01;32mmsexpand[0m
+lrwxrwxrwx    1 root root           20 Dec 21  2025 [01;36mmt[0m -> [01;32m/etc/alternatives/mt[0m
+-rwxr-xr-x    1 root root        76888 Aug 17 22:31 [01;32mmt-gnu[0m
+-rwxr-xr-x    1 root root        78232 Dec  6  2025 [01;32mmtr[0m
+-rwxr-xr-x+   1 root root        35280 Dec  6  2025 [01;32mmtr-packet[0m
+-rwxr-xr-x    1 root root          978 Jan 26  2026 [01;32mmutagen-inspect[0m
+-rwxr-xr-x    1 root root          972 Jan 26  2026 [01;32mmutagen-pony[0m
+lrwxrwxrwx    1 root root            5 Mar 30  2026 [01;36mmv[0m -> [01;32mgnumv[0m
+-rwxr-xr-x    1 root root        22992 Aug 19 16:23 [01;32mnamei[0m
+-rwxr-xr-x    1 root root       289616 Jun  4 00:46 [01;32mnano[0m
+-rwxr-xr-x    1 root root      1448800 Sep  9 17:33 [01;32mnautilus[0m
+-rwxr-xr-x    1 root root        18816 Sep  9 17:33 [01;32mnautilus-autorun-software[0m
+-rwxr-xr-x    1 root root        51504 Nov 13  2025 [01;32mnautilus-sendto[0m
+lrwxrwxrwx    1 root root           22 Feb  3  2026 [01;36mnawk[0m -> [01;32m/etc/alternatives/nawk[0m
+lrwxrwxrwx    1 root root           20 Oct 23  2025 [01;36mnc[0m -> [01;32m/etc/alternatives/nc[0m
+-rwxr-xr-x    1 root root        39160 Oct 23  2025 [01;32mnc.openbsd[0m
+-rwxr-xr-x    1 root root       100728 Feb 11  2026 [01;32mncdu[0m
+-rwxr-xr-x    1 root root         9492 Jan  3  2026 [01;32mncurses6-config[0m
+-rwxr-xr-x    1 root root         9495 Jan  3  2026 [01;32mncursesw6-config[0m
+-rwxr-xr-x    1 root root          913 Dec  2  2025 [01;32mneqn[0m
+-rwxr-xr-x    1 root root          211 Dec  6  2025 [01;32mnetaddr[0m
+lrwxrwxrwx    1 root root           24 Oct 23  2025 [01;36mnetcat[0m -> [01;32m/etc/alternatives/netcat[0m
+-rwxr-xr-x    1 root root        35384 Apr  9  2026 [01;32mnetshaper[0m
+-rwxr-xr-x    1 root root       129624 Sep 16 16:55 [01;32mnetworkctl[0m
+-rwxr-xr-x    1 root root        20465 Apr  2  2026 [01;32mnetworkd-dispatcher[0m
+-rwsr-xr-x    1 root root        41944 Feb  2  2026 [37;41mnewgidmap[0m
+-rwsr-xr-x    1 root root        41944 Feb  2  2026 [37;41mnewuidmap[0m
+-rwxr-xr-x    1 root root        39456 Nov 13  2025 [01;32mngettext[0m
+-rwxr-xr-x    1 root root        19000 Feb 18  2026 [01;32mnhlt-dmic-info[0m
+lrwxrwxrwx    1 root root           31 Mar 30  2026 [01;36mnice[0m -> [01;32m../lib/cargo/bin/coreutils/nice[0m
+lrwxrwxrwx    1 root root            8 Dec  6  2025 [01;36mnisdomainname[0m -> [01;32mhostname[0m
+lrwxrwxrwx    1 root root           29 Mar 30  2026 [01;36mnl[0m -> [01;32m../lib/cargo/bin/coreutils/nl[0m
+-rwxr-xr-x    1 root root          944 Feb 14  2026 [01;32mnltk[0m
+lrwxrwxrwx    1 root root           19 Mar 15  2026 [01;36mnm[0m -> [01;32mx86_64-linux-gnu-nm[0m
+-rwxr-xr-x    1 root root       258040 Oct 31  2025 [01;32mnm-applet[0m
+-rwxr-xr-x    1 root root       941136 Oct 31  2025 [01;32mnm-connection-editor[0m
+-rwxr-xr-x    1 root root        22992 Sep 21 12:27 [01;32mnm-online[0m
+-rwxr-xr-x    1 root root      1040288 Sep 21 12:27 [01;32mnmcli[0m
+-rwxr-xr-x    1 root root       843656 Sep 21 12:27 [01;32mnmtui[0m
+lrwxrwxrwx    1 root root            5 Sep 21 12:27 [01;36mnmtui-connect[0m -> [01;32mnmtui[0m
+lrwxrwxrwx    1 root root            5 Sep 21 12:27 [01;36mnmtui-edit[0m -> [01;32mnmtui[0m
+lrwxrwxrwx    1 root root            5 Sep 21 12:27 [01;36mnmtui-hostname[0m -> [01;32mnmtui[0m
+lrwxrwxrwx    1 root root           32 Mar 30  2026 [01;36mnohup[0m -> [01;32m../lib/cargo/bin/coreutils/nohup[0m
+lrwxrwxrwx    1 root root           22 Mar 18  2026 [01;36mnot-21[0m -> [01;32m../lib/llvm-21/bin/not[0m
+-rwxr-xr-x    1 root root        26952 Jan  9  2026 [01;32mnotify-send[0m
+lrwxrwxrwx    1 root root           32 Mar 30  2026 [01;36mnproc[0m -> [01;32m../lib/cargo/bin/coreutils/nproc[0m
+-rwxr-xr-x    1 root root         5718 Dec  2  2025 [01;32mnroff[0m
+-rwxr-xr-x    1 root root        35544 Aug 19 16:23 [01;32mnsenter[0m
+-rwxr-xr-x    1 root root       117736 Oct 30 16:53 [01;32mnslookup[0m
+-rwxr-xr-x    1 root root        31184 Apr  9  2026 [01;32mnstat[0m
+-rwxr-xr-x    1 root root        84680 Oct 30 16:53 [01;32mnsupdate[0m
+-rwsr-xr-x    1 root root       167000 Jul 11 17:55 [37;41mntfs-3g[0m
+-rwxr-xr-x    1 root root        14800 Jul 11 17:55 [01;32mntfs-3g.probe[0m
+-rwxr-xr-x    1 root root        27088 Jul 11 17:55 [01;32mntfscat[0m
+-rwxr-xr-x    1 root root        39384 Jul 11 17:55 [01;32mntfscluster[0m
+-rwxr-xr-x    1 root root        31184 Jul 11 17:55 [01;32mntfscmp[0m
+-rwxr-xr-x    1 root root        43480 Jul 11 17:55 [01;32mntfsdecrypt[0m
+-rwxr-xr-x    1 root root        27096 Jul 11 17:55 [01;32mntfsfallocate[0m
+-rwxr-xr-x    1 root root        35288 Jul 11 17:55 [01;32mntfsfix[0m
+-rwxr-xr-x    1 root root        55768 Jul 11 17:55 [01;32mntfsinfo[0m
+-rwxr-xr-x    1 root root        28192 Jul 11 17:55 [01;32mntfsls[0m
+-rwxr-xr-x    1 root root        31192 Jul 11 17:55 [01;32mntfsmove[0m
+-rwxr-xr-x    1 root root       113104 Jul 11 17:55 [01;32mntfsrecover[0m
+-rwxr-xr-x    1 root root        84928 Jul 11 17:55 [01;32mntfssecaudit[0m
+-rwxr-xr-x    1 root root        27016 Jul 11 17:55 [01;32mntfstruncate[0m
+-rwxr-xr-x    1 root root        18816 Jul 11 17:55 [01;32mntfsusermap[0m
+-rwxr-xr-x    1 root root        44016 Jul 11 17:55 [01;32mntfswipe[0m
+-rwxr-xr-x    1 root root        40288 Feb  2  2026 [01;32mnumactl[0m
+-rwxr-xr-x    1 root root        35360 Feb  2  2026 [01;32mnumastat[0m
+lrwxrwxrwx    1 root root           33 Mar 30  2026 [01;36mnumfmt[0m -> [01;32m../lib/cargo/bin/coreutils/numfmt[0m
+-rwxr-xr-x    1 root root          217 Apr  1  2026 [01;32mnumpy-config[0m
+-rwxr-xr-x    1 root root        80754 Aug 26 08:29 [01;32mnvidia-bug-report.sh[0m
+-rwxr-xr-x    1 root root        83232 Sep 15 04:16 [01;32mnvidia-cuda-mps-control[0m
+-rwxr-xr-x    1 root root        18648 Sep 15 04:16 [01;32mnvidia-cuda-mps-server[0m
+-rwxr-xr-x    1 root root       142136 Sep 15 04:16 [01;32mnvidia-debugdump[0m
+-rwxr-xr-x    1 root root      6154480 Sep 15 04:16 [01;32mnvidia-ngx-updater[0m
+-rwxr-xr-x    1 root root      8979048 Sep 15 04:16 [01;32mnvidia-pcc[0m
+-rwxr-xr-x    1 root root       216608 Sep 15 04:16 [01;32mnvidia-persistenced[0m
+-rwxr-xr-x    1 root root      2465072 Sep 15 04:16 [01;32mnvidia-powerd[0m
+-rwxr-xr-x    1 root root       248264 Jan 26  2026 [01;32mnvidia-settings[0m
+-rwxr-xr-x    1 root root         1609 Aug 24 18:50 [01;32mnvidia-sleep.sh[0m
+-rwxr-xr-x    1 root root      1259616 Sep 15 04:16 [01;32mnvidia-smi[0m
+-rwxr-xr-x    1 root root       207520 Sep 15 04:16 [01;32mnvidia-xconfig[0m
+-rwxr-xr-x    1 root root           47 Jan  2  2026 [01;32mnvlc[0m
+lrwxrwxrwx    1 root root           29 Mar 18  2026 [01;36mnvptx-arch-21[0m -> [01;32m../lib/llvm-21/bin/nvptx-arch[0m
+-rwxr-xr-x    1 root root        18920 Dec  4  2025 [01;32moakdecode[0m
+-rwxr-xr-x    1 root root       104992 Oct 13 12:27 [01;32mobexctl[0m
+lrwxrwxrwx    1 root root           27 Mar 18  2026 [01;36mobj2yaml-21[0m -> [01;32m../lib/llvm-21/bin/obj2yaml[0m
+lrwxrwxrwx    1 root root           24 Mar 15  2026 [01;36mobjcopy[0m -> [01;32mx86_64-linux-gnu-objcopy[0m
+lrwxrwxrwx    1 root root           24 Mar 15  2026 [01;36mobjdump[0m -> [01;32mx86_64-linux-gnu-objdump[0m
+-rwxr-xr-x    1 root root      5450016 Apr 20  2026 [01;32mobs[0m
+-rwxr-xr-x    1 root root        62536 Apr 20  2026 [01;32mobs-nvenc-test[0m
+lrwxrwxrwx    1 root root           29 Mar 30  2026 [01;36mod[0m -> [01;32m../lib/cargo/bin/coreutils/od[0m
+-rwxr-xr-x    1 root root         8504 Jul  3 13:16 [01;32moem-getlogs[0m
+lrwxrwxrwx    1 root root           31 Mar 18  2026 [01;36moffload-arch-21[0m -> [01;32m../lib/llvm-21/bin/offload-arch[0m
+lrwxrwxrwx    1 root root           17 Feb  2  2026 [01;36mon_ac_power[0m -> [01;32m/sbin/on_ac_power[0m
+-rwxr-xr-x    1 root root        14792 Sep 16 16:55 [01;32moomctl[0m
+lrwxrwxrwx    1 root root           22 Dec  6  2025 [01;36mopen[0m -> [01;32m/etc/alternatives/open[0m
+-rwxr-xr-x    1 root root      8077120 Oct 11  2025 [01;32mopenrgb[0m
+-rwxr-xr-x    1 root root      1132128 Sep 30 20:46 [01;32mopenssl[0m
+-rwxr-xr-x    1 root root        22984 Dec  1  2025 [01;32mopenvt[0m
+-rwxr-xr-x    1 root root        18832 Dec  4  2025 [01;32mopldecode[0m
+lrwxrwxrwx    1 root root           22 Mar 18  2026 [01;36mopt-21[0m -> [01;32m../lib/llvm-21/bin/opt[0m
+-rwxr-xr-x    1 root root        13182 Sep 28 17:15 [01;32morca[0m
+-rwxr-xr-x    1 root root           70 Sep 28 17:15 [01;32morca-dm-wrapper[0m
+-rwxr-xr-x    1 root root         4527 Dec  8  2025 [01;32mos-prober[0m
+-rwxr-xr-x    1 root root       269088 Feb 21  2026 [01;32mp11-kit[0m
+lrwxrwxrwx    1 root root           23 Mar 13  2026 [01;36mpager[0m -> [01;32m/etc/alternatives/pager[0m
+-rwxr-xr-x    1 root root        18824 Jan 13  2026 [01;32mpango-list[0m
+-rwxr-xr-x    1 root root        18904 Jan 13  2026 [01;32mpango-segmentation[0m
+-rwxr-xr-x    1 root root        72368 Jan 13  2026 [01;32mpango-view[0m
+-rwxr-xr-x    1 root root        23136 Mar 31  2026 [01;32mpaper[0m
+-rwxr-xr-x    1 root root        14728 Mar 31  2026 [01;32mpaperconf[0m
+-rwxr-xr-x    1 root root      5840216 Jun 23 17:38 [01;32mpapers[0m
+-rwxr-xr-x    1 root root        47712 Jun 23 17:38 [01;32mpapers-previewer[0m
+-rwxr-xr-x    1 root root      1889208 Jun 23 17:38 [01;32mpapers-thumbnailer[0m
+-rwxr-xr-x    1 root root        26640 Oct 26  2025 [01;32mparse-edid[0m
+-rwxr-xr-x    1 root root        63960 Aug 19 16:23 [01;32mpartx[0m
+-rwsr-xr-x    1 root root        93640 Feb  2  2026 [37;41mpasswd[0m
+lrwxrwxrwx    1 root root           32 Mar 30  2026 [01;36mpaste[0m -> [01;32m../lib/cargo/bin/coreutils/paste[0m
+-rwxr-xr-x    1 root root       166712 Feb  2  2026 [01;32mpatch[0m
+-rwxr-xr-x    1 root root       256432 Feb 11  2026 [01;32mpatchelf[0m
+lrwxrwxrwx    1 root root           34 Mar 30  2026 [01;36mpathchk[0m -> [01;32m../lib/cargo/bin/coreutils/pathchk[0m
+-rwxr-xr-x    1 root root       387632 Jan 27  2026 [01;32mpavucontrol[0m
+-rwxr-xr-x    1 root root        47568 Feb  2  2026 [01;32mpcilmr[0m
+-rwxr-xr-x    1 root root         1995 Feb  2  2026 [01;32mpcre2-config[0m
+lrwxrwxrwx    1 root root            7 Mar 21  2026 [01;36mpdb3[0m -> [01;32mpdb3.14[0m
+-rwxr-xr-x    1 root root           38 Aug 20 12:41 [01;32mpdb3.14[0m
+-rwxr-xr-x    1 root root          705 Oct 20 18:40 [01;32mpdf2dsc[0m
+-rwxr-xr-x    1 root root          909 Oct 20 18:40 [01;32mpdf2ps[0m
+-rwxr-xr-x    1 root root        23000 Oct 15 20:25 [01;32mpdfattach[0m
+-rwxr-xr-x    1 root root        31304 Oct 15 20:25 [01;32mpdfdetach[0m
+-rwxr-xr-x    1 root root        23144 Oct 15 20:25 [01;32mpdffonts[0m
+-rwxr-xr-x    1 root root        39528 Oct 15 20:25 [01;32mpdfimages[0m
+-rwxr-xr-x    1 root root        76368 Oct 15 20:25 [01;32mpdfinfo[0m
+-rwxr-xr-x    1 root root        23000 Oct 15 20:25 [01;32mpdfseparate[0m
+-rwxr-xr-x    1 root root        56328 Oct 15 20:25 [01;32mpdfsig[0m
+-rwxr-xr-x    1 root root       178856 Oct 15 20:25 [01;32mpdftocairo[0m
+-rwxr-xr-x    1 root root       117240 Oct 15 20:25 [01;32mpdftohtml[0m
+-rwxr-xr-x    1 root root        39592 Oct 15 20:25 [01;32mpdftoppm[0m
+-rwxr-xr-x    1 root root        31496 Oct 15 20:25 [01;32mpdftops[0m
+-rwxr-xr-x    1 root root        64104 Oct 15 20:25 [01;32mpdftotext[0m
+-rwxr-xr-x    1 root root        35288 Oct 15 20:25 [01;32mpdfunite[0m
+-rwxr-xr-x    1 root root        14720 Feb  2  2026 [01;32mpeekfd[0m
+-rwxr-xr-x    1 root root     25214552 Oct 15 08:48 [01;32mperf[0m
+-rwxr-xr-x    2 root root      4064448 Sep  8 20:17 [01;32mperl[0m
+-rwxr-xr-x    1 root root        14720 Sep  8 20:17 [01;32mperl5.40-x86_64-linux-gnu[0m
+-rwxr-xr-x    2 root root      4064448 Sep  8 20:17 [01;32mperl5.40.1[0m
+-rwxr-xr-x    2 root root        45593 Sep  8 20:17 [01;32mperlbug[0m
+-rwxr-xr-x    1 root root          125 Aug 16  2025 [01;32mperldoc[0m
+-rwxr-xr-x    1 root root        59569 Sep  8  2025 [01;32mperli11ndoc[0m
+-rwxr-xr-x    1 root root        10867 Sep  8 20:17 [01;32mperlivp[0m
+-rwxr-xr-x    2 root root        45593 Sep  8 20:17 [01;32mperlthanks[0m
+-rwxr-xr-x    1 root root          498 Oct 20 18:40 [01;32mpf2afm[0m
+-rwxr-xr-x    1 root root          516 Oct 20 18:40 [01;32mpfbtopfa[0m
+-rwxr-xr-x    1 root root        39544 Dec  1  2025 [01;32mpgrep[0m
+-rwxr-xr-x    1 root root       196744 Dec  2  2025 [01;32mpic[0m
+lrwxrwxrwx    1 root root           22 Jun  4 00:46 [01;36mpico[0m -> [01;32m/etc/alternatives/pico[0m
+-rwxr-xr-x    1 root root         8360 Sep  8 20:17 [01;32mpiconv[0m
+lrwxrwxrwx    1 root root           16 Oct 31  2025 [01;36mpidof[0m -> [01;32m../sbin/killall5[0m
+-rwxr-xr-x    1 root root        55864 Jan 11  2026 [01;32mpidstat[0m
+-rwxr-xr-x    1 root root        39544 Dec  1  2025 [01;32mpidwait[0m
+-rwxr-xr-x    2 root root       141760 Dec 17  2025 [01;32mpigz[0m
+lrwxrwxrwx    1 root root           26 Oct 31  2025 [01;36mpinentry[0m -> [01;32m/etc/alternatives/pinentry[0m
+-rwxr-xr-x    1 root root        68392 Oct 31  2025 [01;32mpinentry-curses[0m
+-rwxr-xr-x    1 root root        84784 Oct 31  2025 [01;32mpinentry-gnome3[0m
+lrwxrwxrwx    1 root root           30 Oct 31  2025 [01;36mpinentry-x11[0m -> [01;32m/etc/alternatives/pinentry-x11[0m
+-rwxr-xr-x+   1 root root       159552 Oct 31  2025 [01;32mping[0m
+lrwxrwxrwx+   1 root root            4 Oct 31  2025 [01;36mping4[0m -> [01;32mping[0m
+lrwxrwxrwx+   1 root root            4 Oct 31  2025 [01;36mping6[0m -> [01;32mping[0m
+lrwxrwxrwx    1 root root           32 Mar 30  2026 [01;36mpinky[0m -> [01;32m../lib/cargo/bin/coreutils/pinky[0m
+-rwxr-xr-x    1 root root        14800 Jul 17 13:09 [01;32mpipewire[0m
+lrwxrwxrwx    1 root root            8 Jul 17 13:09 [01;36mpipewire-aes67[0m -> [01;32mpipewire[0m
+lrwxrwxrwx    1 root root            8 Jul 17 13:09 [01;36mpipewire-avb[0m -> [01;32mpipewire[0m
+lrwxrwxrwx    1 root root            8 Jul 17 13:09 [01;36mpipewire-pulse[0m -> [01;32mpipewire[0m
+-rwxr-xr-x    1 root root          207 Oct  1  2025 [01;32mpipx[0m
+-rwxr-xr-x    1 root root        18896 Sep 11 19:30 [01;32mpkaction[0m
+-rwxr-xr-x    1 root root        27088 Sep 11 19:30 [01;32mpkcheck[0m
+-rwsr-xr-x    1 root root        31024 Sep 11 19:30 [37;41mpkexec[0m
+lrwxrwxrwx    1 root root            7 Feb 13  2026 [01;36mpkg-config[0m -> [01;32mpkgconf[0m
+-rwxr-xr-x    1 root root        88536 Jul 20 13:28 [01;32mpkgcli[0m
+-rwxr-xr-x    1 root root        43336 Feb 13  2026 [01;32mpkgconf[0m
+-rwxr-xr-x    1 root root        44664 Mar  2  2026 [01;32mpkgdata[0m
+lrwxrwxrwx    1 root root            5 Dec  1  2025 [01;36mpkill[0m -> [01;32mpgrep[0m
+-rwxr-xr-x    1 root root        22992 Sep 11 19:30 [01;32mpkttyagent[0m
+-rwxr-xr-x    1 root root         4536 Sep  8 20:17 [01;32mpl2pm[0m
+-rwxr-xr-x    1 root root        43904 Jan 27  2026 [01;32mplayerctl[0m
+-rwxr-xr-x    1 root root        51864 Jan 27  2026 [01;32mplayerctld[0m
+-rwxr-xr-x    1 root root        22976 Sep  3 16:09 [01;32mpldd[0m
+-rwxr-xr-x    1 root root          146 Jan  5  2026 [01;32mplog[0m
+-rwxr-xr-x    1 root root        47488 Mar 12  2026 [01;32mplymouth[0m
+-rwxr-xr-x    1 root root        35376 Dec  1  2025 [01;32mpmap[0m
+-rwxr-xr-x    1 root root        14720 Oct  5 23:29 [01;32mpng-fix-itxt[0m
+-rwxr-xr-x    1 root root        59864 Oct  5 23:29 [01;32mpngfix[0m
+-rwxr-xr-x    1 root root      1654016 Feb  4  2026 [01;32mpnm2ppa[0m
+-rwxr-xr-x    1 root root         4041 Sep  8 20:17 [01;32mpod2html[0m
+-rwxr-xr-x    1 root root        18898 Sep  8 20:17 [01;32mpod2man[0m
+-rwxr-xr-x    1 root root        13112 Sep  8 20:17 [01;32mpod2text[0m
+-rwxr-xr-x    1 root root         4107 Sep  8 20:17 [01;32mpod2usage[0m
+-rwxr-xr-x    1 root root         3730 Sep  8 20:17 [01;32mpodchecker[0m
+-rwxr-xr-x    1 root root         2837 Jan  5  2026 [01;32mpoff[0m
+-rwxr-xr-x    1 root root         1362 Jan  5  2026 [01;32mpon[0m
+-rwxr-xr-x    1 root root        10738 Nov  5  2025 [01;32mpowerprofilesctl[0m
+lrwxrwxrwx    1 root root           27 Mar 18  2026 [01;36mpp-trace-21[0m -> [01;32m../lib/llvm-21/bin/pp-trace[0m
+-rwxr-xr-x    1 root root       105008 Jun 11 16:46 [01;32mppdc[0m
+-rwxr-xr-x    1 root root        76336 Jun 11 16:46 [01;32mppdhtml[0m
+-rwxr-xr-x    1 root root        92720 Jun 11 16:46 [01;32mppdi[0m
+-rwxr-xr-x    1 root root        18896 Jun 11 16:46 [01;32mppdmerge[0m
+-rwxr-xr-x    1 root root        80432 Jun 11 16:46 [01;32mppdpo[0m
+-rwxr-xr-x    1 root root          404 Oct 20 18:40 [01;32mpphs[0m
+lrwxrwxrwx    1 root root           29 Mar 30  2026 [01;36mpr[0m -> [01;32m../lib/cargo/bin/coreutils/pr[0m
+-rwxr-xr-x    1 root root         5656 Feb  3  2026 [01;32mprecat[0m
+-rwxr-xr-x    1 root root        59952 Dec  2  2025 [01;32mpreconv[0m
+-rwxr-xr-x    1 root root         5656 Feb  3  2026 [01;32mpreunzip[0m
+-rwxr-xr-x    1 root root         5656 Feb  3  2026 [01;32mprezip[0m
+-rwxr-xr-x    1 root root        14720 Feb  3  2026 [01;32mprezip-bin[0m
+-rwxr-xr-x    1 root root        15048 Dec  1  2025 [01;32mprime-select[0m
+-rwxr-xr-x    1 root root         1182 Jun 13  2023 [01;32mprime-supported[0m
+-rwxr-xr-x    1 root root          395 Oct 20 18:40 [01;32mprintafm[0m
+lrwxrwxrwx    1 root root           35 Mar 30  2026 [01;36mprintenv[0m -> [01;32m../lib/cargo/bin/coreutils/printenv[0m
+-rwxr-xr-x    1 root root         5640 Dec  4  2025 [01;32mprinter-profile[0m
+lrwxrwxrwx    1 root root           33 Mar 30  2026 [01;36mprintf[0m -> [01;32m../lib/cargo/bin/coreutils/printf[0m
+-rwxr-xr-x    1 root root        27616 Aug 19 16:23 [01;32mprlimit[0m
+lrwxrwxrwx    1 root root           16 Sep  8 22:45 [01;36mpro[0m -> [01;32mubuntu-advantage[0m
+-rwxr-xr-x    1 root root        47600 Jul  3 14:41 [01;32mprocan[0m
+-rwxr-xr-x    1 root root        43576 Dec  1  2025 [01;32mproj[0m
+-rwxr-xr-x    1 root root       129592 Dec  1  2025 [01;32mprojinfo[0m
+-rwxr-xr-x    1 root root       125496 Dec  1  2025 [01;32mprojsync[0m
+-rwxr-xr-x    1 root root        13677 Sep  8 20:17 [01;32mprove[0m
+-rwxr-xr-x    1 root root        14568 Nov 28  2025 [01;32mproxy[0m
+-rwxr-xr-x    1 root root        22992 Feb  2  2026 [01;32mprtstat[0m
+-rwxr-xr-x    1 root root       146576 Dec  1  2025 [01;32mps[0m
+-rwxr-xr-x    1 root root          494 Oct 20 18:40 [01;32mps2ascii[0m
+-rwxr-xr-x    1 root root         1297 Oct 20 18:40 [01;32mps2epsi[0m
+-rwxr-xr-x    1 root root          272 Oct 20 18:40 [01;32mps2pdf[0m
+-rwxr-xr-x    1 root root          257 Oct 20 18:40 [01;32mps2pdf12[0m
+-rwxr-xr-x    1 root root          257 Oct 20 18:40 [01;32mps2pdf13[0m
+-rwxr-xr-x    1 root root          257 Oct 20 18:40 [01;32mps2pdf14[0m
+-rwxr-xr-x    1 root root         1078 Oct 20 18:40 [01;32mps2pdfwr[0m
+-rwxr-xr-x    1 root root          647 Oct 20 18:40 [01;32mps2ps[0m
+-rwxr-xr-x    1 root root          669 Oct 20 18:40 [01;32mps2ps2[0m
+lrwxrwxrwx    1 root root            8 Oct 20 18:40 [01;36mps2txt[0m -> [01;32mps2ascii[0m
+lrwxrwxrwx    1 root root            9 Dec  1  2025 [01;36mpsfaddtable[0m -> [01;32mpsfxtable[0m
+lrwxrwxrwx    1 root root            9 Dec  1  2025 [01;36mpsfgettable[0m -> [01;32mpsfxtable[0m
+lrwxrwxrwx    1 root root            9 Dec  1  2025 [01;36mpsfstriptable[0m -> [01;32mpsfxtable[0m
+-rwxr-xr-x    1 root root        27080 Dec  1  2025 [01;32mpsfxtable[0m
+-rwxr-xr-x    1 root root        18832 May  6  2026 [01;32mpsicc[0m
+-rwxr-xr-x    1 root root        14720 Feb  2  2026 [01;32mpslog[0m
+-rwxr-xr-x    1 root root        35544 Feb  2  2026 [01;32mpstree[0m
+lrwxrwxrwx    1 root root            6 Feb  2  2026 [01;36mpstree.x11[0m -> [01;32mpstree[0m
+-rwxr-xr-x    1 root root         3566 Sep  8 20:17 [01;32mptar[0m
+-rwxr-xr-x    1 root root         2645 Sep  8 20:17 [01;32mptardiff[0m
+-rwxr-xr-x    1 root root         4395 Sep  8 20:17 [01;32mptargrep[0m
+lrwxrwxrwx    1 root root           30 Mar 30  2026 [01;36mptx[0m -> [01;32m../lib/cargo/bin/coreutils/ptx[0m
+-rwxr-xr-x    1 root root       695240 Apr 15  2026 [01;32mptyxis[0m
+-rwxr-xr-x    1 root root       166352 Jul 17 13:09 [01;32mpw-cat[0m
+-rwxr-xr-x    1 root root       150080 Jul 17 13:09 [01;32mpw-cli[0m
+-rwxr-xr-x    1 root root        18896 Jul 17 13:09 [01;32mpw-config[0m
+-rwxr-xr-x    1 root root        22992 Jul 17 13:09 [01;32mpw-container[0m
+-rwxr-xr-x    1 root root        43472 Jul 17 13:09 [01;32mpw-dot[0m
+lrwxrwxrwx    1 root root            6 Jul 17 13:09 [01;36mpw-dsdplay[0m -> [01;32mpw-cat[0m
+-rwxr-xr-x    1 root root       113192 Jul 17 13:09 [01;32mpw-dump[0m
+lrwxrwxrwx    1 root root            6 Jul 17 13:09 [01;36mpw-encplay[0m -> [01;32mpw-cat[0m
+-rwxr-xr-x    1 root root        39376 Jul 17 13:09 [01;32mpw-link[0m
+-rwxr-xr-x    1 root root        22992 Jul 17 13:09 [01;32mpw-loopback[0m
+-rwxr-xr-x    1 root root        14800 Jul 17 13:09 [01;32mpw-metadata[0m
+lrwxrwxrwx    1 root root            6 Jul 17 13:09 [01;36mpw-midi2play[0m -> [01;32mpw-cat[0m
+lrwxrwxrwx    1 root root            6 Jul 17 13:09 [01;36mpw-midi2record[0m -> [01;32mpw-cat[0m
+-rwxr-xr-x    1 root root        43472 Jul 17 13:09 [01;32mpw-mididump[0m
+lrwxrwxrwx    1 root root            6 Jul 17 13:09 [01;36mpw-midiplay[0m -> [01;32mpw-cat[0m
+lrwxrwxrwx    1 root root            6 Jul 17 13:09 [01;36mpw-midirecord[0m -> [01;32mpw-cat[0m
+-rwxr-xr-x    1 root root       109056 Jul 17 13:09 [01;32mpw-mon[0m
+lrwxrwxrwx    1 root root            6 Jul 17 13:09 [01;36mpw-play[0m -> [01;32mpw-cat[0m
+-rwxr-xr-x    1 root root        35280 Jul 17 13:09 [01;32mpw-profiler[0m
+lrwxrwxrwx    1 root root            6 Jul 17 13:09 [01;36mpw-record[0m -> [01;32mpw-cat[0m
+-rwxr-xr-x    1 root root        27088 Jul 17 13:09 [01;32mpw-reserve[0m
+lrwxrwxrwx    1 root root            6 Jul 17 13:09 [01;36mpw-sysex[0m -> [01;32mpw-cat[0m
+-rwxr-xr-x    1 root root        51664 Jul 17 13:09 [01;32mpw-top[0m
+lrwxrwxrwx    1 root root           30 Mar 30  2026 [01;36mpwd[0m -> [01;32m../lib/cargo/bin/coreutils/pwd[0m
+-rwxr-xr-x    1 root root        14872 Dec  1  2025 [01;32mpwdx[0m
+-rwxr-xr-x    1 root root          222 Mar  5  2026 [01;32mpy.test[0m
+lrwxrwxrwx    1 root root            7 Mar  5  2026 [01;36mpy.test-3[0m -> [01;32mpy.test[0m
+-rwxr-xr-x    1 root root         7231 Mar 21  2026 [01;32mpy3clean[0m
+-rwxr-xr-x    1 root root        13312 Mar 21  2026 [01;32mpy3compile[0m
+lrwxrwxrwx    1 root root           31 Mar 21  2026 [01;36mpy3versions[0m -> [01;32m../share/python3/py3versions.py[0m
+lrwxrwxrwx    1 root root           25 Dec  3  2025 [01;36mpybabel[0m -> [01;32m/etc/alternatives/pybabel[0m
+-rwxr-xr-x    1 root root          956 Dec  3  2025 [01;32mpybabel-python3[0m
+lrwxrwxrwx    1 root root            9 Mar 21  2026 [01;36mpydoc3[0m -> [01;32mpydoc3.14[0m
+-rwxr-xr-x    1 root root           80 Aug 20 12:41 [01;32mpydoc3.14[0m
+lrwxrwxrwx    1 root root           13 Mar 21  2026 [01;36mpygettext3[0m -> [01;32mpygettext3.14[0m
+-rwxr-xr-x    1 root root        28593 Aug 20 12:41 [01;32mpygettext3.14[0m
+-rwxr-xr-x    1 root root          216 Dec 31  2025 [01;32mpygmentize[0m
+-rwxr-xr-x    1 root root          976 Dec  1  2025 [01;32mpyserial-miniterm[0m
+-rwxr-xr-x    1 root root          970 Dec  1  2025 [01;32mpyserial-ports[0m
+-rwxr-xr-x    1 root root          222 Mar  5  2026 [01;32mpytest[0m
+lrwxrwxrwx    1 root root            6 Mar  5  2026 [01;36mpytest-3[0m -> [01;32mpytest[0m
+-rwxr-xr-x    1 root root          264 Nov 10  2025 [01;32mpython-argcomplete-check-easy-install-script[0m
+lrwxrwxrwx    1 root root           10 Mar 21  2026 [01;36mpython3[0m -> [01;32mpython3.14[0m
+-rwxr-xr-x    1 root root      7477160 Aug 20 12:41 [01;32mpython3.14[0m
+-rwxr-xr-x    1 root root       743832 Jan  5  2026 [01;32mpzstd[0m
+-rwxr-xr-x    1 root root      7108312 Sep  2 11:18 [01;32mqemu-aarch64[0m
+-rwxr-xr-x    1 root root      7116536 Sep  2 11:18 [01;32mqemu-aarch64_be[0m
+-rwxr-xr-x    1 root root      2988056 Sep  2 11:18 [01;32mqemu-alpha[0m
+lrwxrwxrwx    1 root root           11 Sep  2 11:18 [01;36mqemu-amd64[0m -> [01;32mqemu-x86_64[0m
+-rwxr-xr-x    1 root root      4411192 Sep  2 11:18 [01;32mqemu-arm[0m
+lrwxrwxrwx    1 root root           12 Sep  2 11:18 [01;36mqemu-arm64[0m -> [01;32mqemu-aarch64[0m
+-rwxr-xr-x    1 root root      4427576 Sep  2 11:18 [01;32mqemu-armeb[0m
+lrwxrwxrwx    1 root root            8 Sep  2 11:18 [01;36mqemu-armel[0m -> [01;32mqemu-arm[0m
+lrwxrwxrwx    1 root root            8 Sep  2 11:18 [01;36mqemu-armhf[0m -> [01;32mqemu-arm[0m
+-rwxr-xr-x    1 root root      5096376 Sep  2 11:18 [01;32mqemu-hexagon[0m
+-rwxr-xr-x    1 root root      3077144 Sep  2 11:18 [01;32mqemu-hppa[0m
+-rwxr-xr-x    1 root root      3952408 Sep  2 11:18 [01;32mqemu-i386[0m
+-rwxr-xr-x    1 root root      2554392 Sep  2 11:18 [01;32mqemu-img[0m
+-rwxr-xr-x    1 root root      2476528 Sep  2 11:18 [01;32mqemu-io[0m
+lrwxrwxrwx    1 root root           16 Sep  2 11:18 [01;36mqemu-loong64[0m -> [01;32mqemu-loongarch64[0m
+-rwxr-xr-x    1 root root      3823160 Sep  2 11:18 [01;32mqemu-loongarch64[0m
+-rwxr-xr-x    1 root root      3307992 Sep  2 11:18 [01;32mqemu-m68k[0m
+-rwxr-xr-x    1 root root      2941912 Sep  2 11:18 [01;32mqemu-microblaze[0m
+-rwxr-xr-x    1 root root      2933720 Sep  2 11:18 [01;32mqemu-microblazeel[0m
+-rwxr-xr-x    1 root root      4219608 Sep  2 11:18 [01;32mqemu-mips[0m
+-rwxr-xr-x    1 root root      4248504 Sep  2 11:18 [01;32mqemu-mips64[0m
+-rwxr-xr-x    1 root root      4240344 Sep  2 11:18 [01;32mqemu-mips64el[0m
+-rwxr-xr-x    1 root root      4211448 Sep  2 11:18 [01;32mqemu-mipsel[0m
+-rwxr-xr-x    1 root root      4256696 Sep  2 11:18 [01;32mqemu-mipsn32[0m
+-rwxr-xr-x    1 root root      4248536 Sep  2 11:18 [01;32mqemu-mipsn32el[0m
+-rwxr-xr-x    1 root root      2711952 Sep  2 11:18 [01;32mqemu-nbd[0m
+-rwxr-xr-x    1 root root      2882776 Sep  2 11:18 [01;32mqemu-or1k[0m
+lrwxrwxrwx    1 root root            8 Sep  2 11:18 [01;36mqemu-powerpc[0m -> [01;32mqemu-ppc[0m
+-rwxr-xr-x    1 root root      4389080 Sep  2 11:18 [01;32mqemu-ppc[0m
+-rwxr-xr-x    1 root root      4488472 Sep  2 11:18 [01;32mqemu-ppc64[0m
+lrwxrwxrwx    1 root root           12 Sep  2 11:18 [01;36mqemu-ppc64el[0m -> [01;32mqemu-ppc64le[0m
+-rwxr-xr-x    1 root root      4476184 Sep  2 11:18 [01;32mqemu-ppc64le[0m
+-rwxr-xr-x    1 root root      1081088 Sep  2 11:18 [01;32mqemu-pr-helper[0m
+-rwxr-xr-x    1 root root      4594200 Sep  2 11:18 [01;32mqemu-riscv32[0m
+-rwxr-xr-x    1 root root      4669656 Sep  2 11:18 [01;32mqemu-riscv64[0m
+-rwxr-xr-x    1 root root      3713208 Sep  2 11:18 [01;32mqemu-s390x[0m
+-rwxr-xr-x    1 root root      3011320 Sep  2 11:18 [01;32mqemu-sh4[0m
+-rwxr-xr-x    1 root root      3019512 Sep  2 11:18 [01;32mqemu-sh4eb[0m
+-rwxr-xr-x    1 root root      3261016 Sep  2 11:18 [01;32mqemu-sparc[0m
+-rwxr-xr-x    1 root root      3425624 Sep  2 11:18 [01;32mqemu-sparc32plus[0m
+-rwxr-xr-x    1 root root      3425624 Sep  2 11:18 [01;32mqemu-sparc64[0m
+-rwxr-xr-x    1 root root      3664784 Sep  2 11:18 [01;32mqemu-storage-daemon[0m
+lrwxrwxrwx    1 root root           18 Sep  2 11:18 [01;36mqemu-system-amd64[0m -> [01;32mqemu-system-x86_64[0m
+-rwxr-xr-x    1 root root     31047408 Sep  2 11:18 [01;32mqemu-system-i386[0m
+-rwxr-xr-x    1 root root     31328048 Sep  2 11:18 [01;32mqemu-system-x86_64[0m
+-rwxr-xr-x    1 root root      6809408 Sep  2 11:18 [01;32mqemu-system-x86_64-microvm[0m
+-rwxr-xr-x    1 root root          187 Aug 20 14:09 [01;32mqemu-system-x86_64-spice[0m
+-rwxr-xr-x    1 root root      1060576 Sep  2 11:18 [01;32mqemu-vmsr-helper[0m
+-rwxr-xr-x    1 root root      3940536 Sep  2 11:18 [01;32mqemu-x86_64[0m
+-rwxr-xr-x    1 root root      6543288 Sep  2 11:18 [01;32mqemu-xtensa[0m
+-rwxr-xr-x    1 root root      3673144 Sep  2 11:18 [01;32mqemu-xtensaeb[0m
+-rwxr-xr-x    1 root root       172208 Jan  8  2026 [01;32mqmi-firmware-update[0m
+-rwxr-xr-x    1 root root        16428 Jan  8  2026 [01;32mqmi-network[0m
+-rwxr-xr-x    1 root root       659312 Jan  8  2026 [01;32mqmicli[0m
+-rwxr-xr-x    1 root root        23304 Dec  4  2025 [01;32mqpdldecode[0m
+-rwxr-xr-x    1 root root        18816 Feb 17  2026 [01;32mqt-faststart[0m
+-rwxr-xr-x    1 root root         2453 Mar 11  2026 [01;32mquirks-handler[0m
+-rwxr-xr-x    1 root root           42 Jan  2  2026 [01;32mqvlc[0m
+lrwxrwxrwx    1 root root           23 Mar 15  2026 [01;36mranlib[0m -> [01;32mx86_64-linux-gnu-ranlib[0m
+lrwxrwxrwx    1 root root            4 Feb 13  2026 [01;36mrbash[0m -> [01;32mbash[0m
+-rwxr-xr-x    1 root root        39320 Oct 13 12:27 [01;32mrctest[0m
+-rwxr-xr-x    1 root root       113256 Apr  9  2026 [01;32mrdma[0m
+lrwxrwxrwx    1 root root           24 Mar 15  2026 [01;36mreadelf[0m -> [01;32mx86_64-linux-gnu-readelf[0m
+lrwxrwxrwx    1 root root           35 Mar 30  2026 [01;36mreadlink[0m -> [01;32m../lib/cargo/bin/coreutils/readlink[0m
+lrwxrwxrwx    1 root root           35 Mar 30  2026 [01;36mrealpath[0m -> [01;32m../lib/cargo/bin/coreutils/realpath[0m
+-rwxr-xr-x    1 root root           89 Jan  5  2026 [01;32mred[0m
+lrwxrwxrwx    1 root root           36 Mar 18  2026 [01;36mreduce-chunk-list-21[0m -> [01;32m../lib/llvm-21/bin/reduce-chunk-list[0m
+-rwxr-xr-x    1 root root          247 Nov 10  2025 [01;32mregister-python-argcomplete[0m
+-rwxr-xr-x    1 root root        14800 Aug 19 16:23 [01;32mrenice[0m
+lrwxrwxrwx    1 root root            4 Jan  3  2026 [01;36mreset[0m -> [01;32mtset[0m
+-rwxr-xr-x    1 root root        27176 Dec  1  2025 [01;32mresizecons[0m
+-rwxr-xr-x    1 root root       137912 Sep 16 16:55 [01;32mresolvectl[0m
+-rwxr-xr-x    1 root root      4820480 Jun  4 11:34 [01;32mresources[0m
+-rwxr-xr-x    1 root root        14808 Aug 19 16:23 [01;32mrev[0m
+-rwxr-xr-x    1 root root        31552 Oct 13 12:27 [01;32mrfcomm[0m
+-rwxr-xr-x    1 root root      5216360 Jan 14  2026 [01;32mrg[0m
+-rwxr-xr-x    1 root root           30 Apr 21  2025 [01;32mrgrep[0m
+lrwxrwxrwx    1 root root            5 Mar 30  2026 [01;36mrm[0m -> [01;32mgnurm[0m
+lrwxrwxrwx    1 root root           32 Mar 30  2026 [01;36mrmdir[0m -> [01;32m../lib/cargo/bin/coreutils/rmdir[0m
+lrwxrwxrwx    1 root root            4 Jun  4 00:46 [01;36mrnano[0m -> [01;32mnano[0m
+-rwxr-xr-x    1 root root     26030384 Oct 20 20:45 [01;32mrootlesskit[0m
+-rwxr-xr-x    1 root root         1658 Apr  9  2026 [01;32mroutel[0m
+-rwxr-xr-x    1 root root       101096 Feb  2  2026 [01;32mrpcgen[0m
+-rwxr-xr-x    1 root root        13005 Jun  8 15:58 [01;32mrrsync[0m
+-rwxr-xr-x    1 root root       547008 Jun  8 15:58 [01;32mrsync[0m
+-rwxr-xr-x    1 root root         5128 Jun  8 15:58 [01;32mrsync-ssl[0m
+-rwxr-xr-x    1 root root         1622 Oct 15 08:48 [01;32mrtla[0m
+lrwxrwxrwx    1 root root            6 Apr  9  2026 [01;36mrtstat[0m -> [01;32mlnstat[0m
+-rwxr-xr-x    1 root root        31632 Feb  2  2026 [01;32mrun-parts[0m
+-rwxr-xr-x    1 root root           57 Feb  3  2026 [01;32mrun-with-aspell[0m
+lrwxrwxrwx    1 root root           11 Sep 16 16:55 [01;36mrun0[0m -> [01;32msystemd-run[0m
+-rwxr-xr-x    1 root root      9719320 Oct 20 21:40 [01;32mrunc[0m
+lrwxrwxrwx    1 root root           33 Mar 30  2026 [01;36mruncon[0m -> [01;32m../lib/cargo/bin/coreutils/runcon[0m
+lrwxrwxrwx    1 root root           23 Apr 14  2026 [01;36mrview[0m -> [01;32m/etc/alternatives/rview[0m
+-rwxr-xr-x    1 root root           42 Jan  2  2026 [01;32mrvlc[0m
+-rwxr-xr-x    1 root root        51664 Oct 31  2025 [01;32mrygel[0m
+lrwxrwxrwx    1 root root            3 Feb  2  2026 [01;36mrzsh[0m -> [01;32mzsh[0m
+-rwxr-xr-x    1 root root       405648 Jan 11  2026 [01;32msadf[0m
+lrwxrwxrwx    1 root root           25 Mar 18  2026 [01;36msancov-21[0m -> [01;32m../lib/llvm-21/bin/sancov[0m
+-rwxr-xr-x    1 root root        97536 Apr  1  2026 [01;32msane-find-scanner[0m
+lrwxrwxrwx    1 root root           27 Mar 18  2026 [01;36msanstats-21[0m -> [01;32m../lib/llvm-21/bin/sanstats[0m
+lrwxrwxrwx    1 root root           21 Jan 11  2026 [01;36msar[0m -> [01;32m/etc/alternatives/sar[0m
+-rwxr-xr-x    1 root root       191600 Jan 11  2026 [01;32msar.sysstat[0m
+-rwxr-xr-x    1 root root        10487 Feb  2  2026 [01;32msavelog[0m
+-rwxr-xr-x    1 root root        27248 Mar  5  2026 [01;32msbattach[0m
+-rwxr-xr-x    1 root root        35648 Mar  5  2026 [01;32msbkeysync[0m
+-rwxr-xr-x    1 root root        15024 Mar  5  2026 [01;32msbsiglist[0m
+-rwxr-xr-x    1 root root        35616 Mar  5  2026 [01;32msbsign[0m
+-rwxr-xr-x    1 root root        27456 Mar  5  2026 [01;32msbvarsign[0m
+-rwxr-xr-x    1 root root        31424 Mar  5  2026 [01;32msbverify[0m
+-rwxr-xr-x    1 root root       893472 Oct 16 16:11 [01;32mscalar[0m
+lrwxrwxrwx    1 root root           43 Mar 18  2026 [01;36mscan-build-21[0m -> [01;32m../share/clang/scan-build-21/bin/scan-build[0m
+lrwxrwxrwx    1 root root           32 Mar 18  2026 [01;36mscan-build-py-21[0m -> [01;32m../lib/llvm-21/bin/scan-build-py[0m
+lrwxrwxrwx    1 root root           41 Mar 18  2026 [01;36mscan-view-21[0m -> [01;32m../share/clang/scan-view-21/bin/scan-view[0m
+-rwxr-xr-x    1 root root        68800 Apr  1  2026 [01;32mscanimage[0m
+-rwxr-xr-x    1 root root       137976 Oct  8 18:36 [01;32mscp[0m
+-rwxr-xr-x    1 root root           90 Dec  6  2025 [01;32mscp-dbus-service[0m
+-rwxr-xr-x    1 root root       497936 Feb  9  2026 [01;32mscreen[0m
+-rwxr-xr-x    1 root root        14712 Dec  1  2025 [01;32mscreendump[0m
+-rwxr-xr-x    1 root root        55760 Aug 19 16:23 [01;32mscript[0m
+-rwxr-xr-x    1 root root        43472 Aug 19 16:23 [01;32mscriptlive[0m
+-rwxr-xr-x    1 root root        35280 Aug 19 16:23 [01;32mscriptreplay[0m
+-rwxr-xr-x    1 root root        51808 Aug 26 20:14 [01;32msdiff[0m
+-rwxr-xr-x    1 root root       135552 Oct 13 12:27 [01;32msdptool[0m
+-rwxr-xr-x    1 root root      1141952 Feb 20  2026 [01;32mseahorse[0m
+-rwxr-xr-x    1 root root       117392 Apr 17  2026 [01;32msed[0m
+-rwxr-xr-x    1 root root          474 Mar 22  2026 [01;32mselect-default-iwrap[0m
+-rwxr-xr-x    1 root root         2678 Dec 18  2025 [01;32mselect-editor[0m
+-rwxr-xr-x    1 root root         1085 Dec 18  2025 [01;32msensible-browser[0m
+-rwxr-xr-x    1 root root         1551 Dec 18  2025 [01;32msensible-editor[0m
+-rwxr-xr-x    1 root root          824 Dec 18  2025 [01;32msensible-pager[0m
+-rwxr-xr-x    1 root root         1109 Dec 18  2025 [01;32msensible-terminal[0m
+lrwxrwxrwx    1 root root           30 Mar 30  2026 [01;36mseq[0m -> [01;32m../lib/cargo/bin/coreutils/seq[0m
+-rwxr-xr-x    1 root root        14728 Dec  6  2025 [01;32msessreg[0m
+-rwxr-xr-x    1 root root        27368 Aug 19 16:23 [01;32msetarch[0m
+-rwxr-xr-x    1 root root        39296 May  2  2024 [01;32msetfacl[0m
+-rwxr-xr-x    1 root root        56232 Dec  1  2025 [01;32msetfont[0m
+-rwxr-xr-x    1 root root        14792 Dec  1  2025 [01;32msetkeycodes[0m
+-rwxr-xr-x    1 root root        18952 Dec  1  2025 [01;32msetleds[0m
+-rwxr-xr-x    1 root root        14792 Dec  1  2025 [01;32msetlogcons[0m
+-rwxr-xr-x    1 root root        14824 Dec  1  2025 [01;32msetmetamode[0m
+-rwxr-xr-x    1 root root        35288 Feb  2  2026 [01;32msetpci[0m
+-rwxr-xr-x    1 root root        47576 Aug 19 16:23 [01;32msetpriv[0m
+-rwxr-xr-x    1 root root        14800 Aug 19 16:23 [01;32msetsid[0m
+-rwxr-xr-x    1 root root        35280 Aug 19 16:23 [01;32msetterm[0m
+-rwxr-xr-x    1 root root        37856 Jun 25 11:51 [01;32msetupcon[0m
+-rwxr-xr-x    1 root root        31520 Dec  6  2025 [01;32msetxkbmap[0m
+-rwxr-xr-x    1 root root       154336 Oct  8 18:36 [01;32msftp[0m
+lrwxrwxrwx    1 root root            4 Feb  2  2026 [01;36msh[0m -> [01;32mdash[0m
+lrwxrwxrwx    1 root root           34 Mar 30  2026 [01;36msha1sum[0m -> [01;32m../lib/cargo/bin/coreutils/sha1sum[0m
+lrwxrwxrwx    1 root root           36 Mar 30  2026 [01;36msha224sum[0m -> [01;32m../lib/cargo/bin/coreutils/sha224sum[0m
+lrwxrwxrwx    1 root root           36 Mar 30  2026 [01;36msha256sum[0m -> [01;32m../lib/cargo/bin/coreutils/sha256sum[0m
+lrwxrwxrwx    1 root root           38 Mar 30  2026 [01;36msha3-224sum[0m -> [01;32m../lib/cargo/bin/coreutils/sha3-224sum[0m
+lrwxrwxrwx    1 root root           38 Mar 30  2026 [01;36msha3-256sum[0m -> [01;32m../lib/cargo/bin/coreutils/sha3-256sum[0m
+lrwxrwxrwx    1 root root           38 Mar 30  2026 [01;36msha3-384sum[0m -> [01;32m../lib/cargo/bin/coreutils/sha3-384sum[0m
+lrwxrwxrwx    1 root root           38 Mar 30  2026 [01;36msha3-512sum[0m -> [01;32m../lib/cargo/bin/coreutils/sha3-512sum[0m
+lrwxrwxrwx    1 root root           36 Mar 30  2026 [01;36msha384sum[0m -> [01;32m../lib/cargo/bin/coreutils/sha384sum[0m
+lrwxrwxrwx    1 root root           34 Mar 30  2026 [01;36msha3sum[0m -> [01;32m../lib/cargo/bin/coreutils/sha3sum[0m
+lrwxrwxrwx    1 root root           36 Mar 30  2026 [01;36msha512sum[0m -> [01;32m../lib/cargo/bin/coreutils/sha512sum[0m
+lrwxrwxrwx    1 root root           38 Mar 30  2026 [01;36mshake128sum[0m -> [01;32m../lib/cargo/bin/coreutils/shake128sum[0m
+lrwxrwxrwx    1 root root           38 Mar 30  2026 [01;36mshake256sum[0m -> [01;32m../lib/cargo/bin/coreutils/shake256sum[0m
+-rwxr-xr-x    1 root root         9982 Sep  8 20:17 [01;32mshasum[0m
+-rwxr-xr-x    1 root root        18888 Dec  1  2025 [01;32mshowconsolefont[0m
+-rwxr-xr-x    1 root root        18888 Dec  1  2025 [01;32mshowkey[0m
+-rwxr-xr-x    1 root root        14728 Dec  6  2025 [01;32mshowrgb[0m
+lrwxrwxrwx    1 root root           32 Mar 30  2026 [01;36mshred[0m -> [01;32m../lib/cargo/bin/coreutils/shred[0m
+lrwxrwxrwx    1 root root           31 Mar 30  2026 [01;36mshuf[0m -> [01;32m../lib/cargo/bin/coreutils/shuf[0m
+lrwxrwxrwx    1 root root           21 Mar 15  2026 [01;36msize[0m -> [01;32mx86_64-linux-gnu-size[0m
+-rwxr-xr-x    1 root root        27128 Dec  1  2025 [01;32mskill[0m
+-rwxr-xr-x    1 root root        23128 Dec  1  2025 [01;32mslabtop[0m
+lrwxrwxrwx    1 root root           32 Mar 30  2026 [01;36msleep[0m -> [01;32m../lib/cargo/bin/coreutils/sleep[0m
+-rwxr-xr-x    1 root root        52112 Feb  6  2026 [01;32mslurp[0m
+-rwxr-xr-x    1 root root        18832 Dec  4  2025 [01;32mslxdecode[0m
+lrwxrwxrwx    1 root root           18 Sep  2 14:39 [01;36msnap[0m -> [01;32m../lib/snapd/snapd[0m
+lrwxrwxrwx    1 root root           20 Sep  2 14:39 [01;36msnapctl[0m -> [01;32m../lib/snapd/snapctl[0m
+-rwxr-xr-x    1 root root        43312 Sep  2 14:39 [01;32msnapfuse[0m
+lrwxrwxrwx    1 root root            5 Dec  1  2025 [01;36msnice[0m -> [01;32mskill[0m
+lrwxrwxrwx    1 root root            6 Jul  3 14:41 [01;36msocat[0m -> [01;32msocat1[0m
+-rwxr-xr-x    1 root root         3122 Jul  3 14:41 [01;32msocat-broker.sh[0m
+-rwxr-xr-x    1 root root         8216 Jul  3 14:41 [01;32msocat-chain.sh[0m
+-rwxr-xr-x    1 root root         4508 Jul  3 14:41 [01;32msocat-mux.sh[0m
+-rwxr-xr-x    1 root root       503584 Jul  3 14:41 [01;32msocat1[0m
+-rwxr-xr-x    1 root root        39472 Dec  2  2025 [01;32msoelim[0m
+lrwxrwxrwx    1 root root           31 Mar 30  2026 [01;36msort[0m -> [01;32m../lib/cargo/bin/coreutils/sort[0m
+-rwxr-xr-x    1 root root       319456 Jul 17 13:09 [01;32mspa-acp-tool[0m
+-rwxr-xr-x    1 root root        96824 Jul 17 13:09 [01;32mspa-inspect[0m
+-rwxr-xr-x    1 root root        22992 Jul 17 13:09 [01;32mspa-json-dump[0m
+-rwxr-xr-x    1 root root        14904 Jul 17 13:09 [01;32mspa-monitor[0m
+-rwxr-xr-x    1 root root       388016 Jul 17 13:09 [01;32mspa-resample[0m
+-rwxr-xr-x    1 root root         1003 Oct 30  2025 [01;32mspd-conf[0m
+-rwxr-xr-x    1 root root        32040 Oct 30  2025 [01;32mspd-say[0m
+-rwxr-xr-x    1 root root        14728 Oct 30  2025 [01;32mspdsend[0m
+-rwxr-xr-x    1 root root        39440 Feb 18  2026 [01;32mspeaker-test[0m
+-rwxr-xr-x    1 root root       215536 Oct 30  2025 [01;32mspeech-dispatcher[0m
+-rwxr-xr-x    1 root root       105320 Sep  1 20:26 [01;32mspice-vdagent[0m
+-rwxr-xr-x    1 root root        19459 Sep  8 20:17 [01;32msplain[0m
+lrwxrwxrwx    1 root root           32 Mar 30  2026 [01;36msplit[0m -> [01;32m../lib/cargo/bin/coreutils/split[0m
+lrwxrwxrwx    1 root root           29 Mar 18  2026 [01;36msplit-file-21[0m -> [01;32m../lib/llvm-21/bin/split-file[0m
+-rwxr-xr-x    1 root root        14712 Dec  1  2025 [01;32msplitfont[0m
+lrwxrwxrwx    1 root root           10 Mar  7  2026 [01;36msqfscat[0m -> [01;32munsquashfs[0m
+lrwxrwxrwx    1 root root           10 Mar  7  2026 [01;36msqfstar[0m -> [01;32mmksquashfs[0m
+-rwxr-xr-x    1 root root       136072 Apr  9  2026 [01;32mss[0m
+-rwxr-xr-x    1 root root       924800 Oct  8 18:36 [01;32mssh[0m
+-rwxr-xr-x    1 root root       297472 Oct  8 18:36 [01;32mssh-add[0m
+-rwxr-sr-x    1 root _ssh       313864 Oct  8 18:36 [30;43mssh-agent[0m
+-rwxr-xr-x    1 root root         1455 Sep  7 10:00 [01;32mssh-argv0[0m
+-rwxr-xr-x    1 root root        14421 Oct 10  2025 [01;32mssh-copy-id[0m
+-rwxr-xr-x    1 root root       457232 Oct  8 18:36 [01;32mssh-keygen[0m
+-rwxr-xr-x    1 root root       399888 Oct  8 18:36 [01;32mssh-keyscan[0m
+-rwxr-xr-x    1 root root        31104 Sep 23 21:31 [01;32msss_ssh_authorizedkeys[0m
+-rwxr-xr-x    1 root root        35200 Sep 23 21:31 [01;32msss_ssh_knownhosts[0m
+-rwxr-xr-x    1 root root        27008 Sep 23 21:31 [01;32msss_ssh_knownhostsproxy[0m
+-rwxr-xr-x    1 root root      7058960 Apr 18  2026 [01;32mstarship[0m
+lrwxrwxrwx    1 root root           31 Mar 30  2026 [01;36mstat[0m -> [01;32m../lib/cargo/bin/coreutils/stat[0m
+lrwxrwxrwx    1 root root            7 Jan 14  2026 [01;36mstatic-sh[0m -> [01;32mbusybox[0m
+lrwxrwxrwx    1 root root           33 Mar 30  2026 [01;36mstdbuf[0m -> [01;32m../lib/cargo/bin/coreutils/stdbuf[0m
+-rwxr-xr-x    1 root root      2370264 Apr 15  2026 [01;32mstrace[0m
+-rwxr-xr-x    1 root root         1875 Jul 19  2024 [01;32mstrace-log-merge[0m
+-rwxr-xr-x    1 root root         8061 Sep  8 20:17 [01;32mstreamzip[0m
+lrwxrwxrwx    1 root root           24 Mar 15  2026 [01;36mstrings[0m -> [01;32mx86_64-linux-gnu-strings[0m
+lrwxrwxrwx    1 root root           22 Mar 15  2026 [01;36mstrip[0m -> [01;32mx86_64-linux-gnu-strip[0m
+lrwxrwxrwx    1 root root           31 Mar 30  2026 [01;36mstty[0m -> [01;32m../lib/cargo/bin/coreutils/stty[0m
+-rwsr-xr-x    1 root root        55760 Aug 19 16:23 [37;41msu[0m
+lrwxrwxrwx    1 root root           19 Aug 27 10:15 [01;36msu-rs[0m -> [37;41m../lib/cargo/bin/su[0m
+lrwxrwxrwx    1 root root           22 Mar 13  2026 [01;36msudo[0m -> [37;41m/etc/alternatives/sudo[0m
+lrwxrwxrwx    1 root root           21 Aug 27 10:15 [01;36msudo-rs[0m -> [37;41m../lib/cargo/bin/sudo[0m
+-rwsr-xr-x    1 root root       282080 Oct  6 15:13 [37;41msudo.ws[0m
+lrwxrwxrwx    1 root root           26 Nov  3 02:08 [01;36msudoedit[0m -> [37;41m/etc/alternatives/sudoedit[0m
+lrwxrwxrwx    1 root root           21 Aug 27 10:15 [01;36msudoedit-rs[0m -> [37;41m../lib/cargo/bin/sudo[0m
+-rwxr-xr-x    1 root root        98368 Oct  6 15:13 [01;32msudoreplay.ws[0m
+lrwxrwxrwx    1 root root           30 Mar 30  2026 [01;36msum[0m -> [01;32m../lib/cargo/bin/coreutils/sum[0m
+-rwxr-xr-x    1 root root           46 Jan  2  2026 [01;32msvlc[0m
+-rwxr-xr-x    1 root root         4949 Sep 14  2025 [01;32mswitcherooctl[0m
+lrwxrwxrwx    1 root root           31 Mar 30  2026 [01;36msync[0m -> [01;32m../lib/cargo/bin/coreutils/sync[0m
+-rwxr-xr-x    1 root root      1191240 Mar 25  2026 [01;32msysprof[0m
+-rwxr-xr-x    1 root root       441176 Mar 25  2026 [01;32msysprof-agent[0m
+-rwxr-xr-x    1 root root       293464 Mar 25  2026 [01;32msysprof-cat[0m
+-rwxr-xr-x    1 root root       449368 Mar 25  2026 [01;32msysprof-cli[0m
+-rwxr-xr-x    1 root root       302112 Sep 16 16:55 [01;32msystemctl[0m
+-rwxr-xr-x    1 root root        14792 Sep 16 16:55 [01;32msystemd-ac-power[0m
+-rwxr-xr-x    1 root root       252888 Sep 16 16:55 [01;32msystemd-analyze[0m
+-rwxr-xr-x    1 root root        27248 Sep 16 16:55 [01;32msystemd-ask-password[0m
+-rwxr-xr-x    1 root root        18896 Sep 16 16:55 [01;32msystemd-cat[0m
+-rwxr-xr-x    1 root root        23112 Sep 16 16:55 [01;32msystemd-cgls[0m
+-rwxr-xr-x    1 root root        35392 Sep 16 16:55 [01;32msystemd-cgtop[0m
+lrwxrwxrwx    1 root root           14 Sep 16 16:55 [01;36msystemd-confext[0m -> [01;32msystemd-sysext[0m
+-rwxr-xr-x    1 root root        60256 Sep 16 16:55 [01;32msystemd-creds[0m
+-rwxr-xr-x    1 root root        80888 Sep 16 16:55 [01;32msystemd-cryptenroll[0m
+-rwxr-xr-x    1 root root        85080 Sep 16 16:55 [01;32msystemd-cryptsetup[0m
+-rwxr-xr-x    1 root root        27080 Sep 16 16:55 [01;32msystemd-delta[0m
+-rwxr-xr-x    1 root root        18888 Sep 16 16:55 [01;32msystemd-detect-virt[0m
+-rwxr-xr-x    1 root root        22984 Sep 16 16:55 [01;32msystemd-escape[0m
+-rwxr-xr-x    1 root root        60296 Sep 16 16:55 [01;32msystemd-firstboot[0m
+-rwxr-xr-x    1 root root        14784 Sep 16 16:55 [01;32msystemd-hwdb[0m
+-rwxr-xr-x    1 root root        31184 Sep 16 16:55 [01;32msystemd-id128[0m
+-rwxr-xr-x    1 root root        23008 Sep 16 16:55 [01;32msystemd-inhibit[0m
+-rwxr-xr-x    1 root root        19072 Sep 16 16:55 [01;32msystemd-machine-id-setup[0m
+-rwxr-xr-x    1 root root        56112 Sep 16 16:55 [01;32msystemd-mount[0m
+-rwxr-xr-x    1 root root        27080 Sep 16 16:55 [01;32msystemd-mute-console[0m
+-rwxr-xr-x    1 root root        31464 Sep 16 16:55 [01;32msystemd-notify[0m
+-rwxr-xr-x    1 root root        22984 Sep 16 16:55 [01;32msystemd-path[0m
+-rwxr-xr-x    1 root root        23136 Sep 16 16:55 [01;32msystemd-pty-forward[0m
+-rwxr-xr-x    1 root root        97272 Sep 16 16:55 [01;32msystemd-run[0m
+-rwxr-xr-x    1 root root        31176 Sep 16 16:55 [01;32msystemd-socket-activate[0m
+-rwxr-xr-x    1 root root        22984 Sep 16 16:55 [01;32msystemd-stdio-bridge[0m
+-rwxr-xr-x    1 root root        76440 Sep 16 16:55 [01;32msystemd-sysext[0m
+-rwxr-xr-x    1 root root        68224 Sep 16 16:55 [01;32msystemd-sysusers[0m
+-rwxr-xr-x    1 root root       121544 Sep 16 16:55 [01;32msystemd-tmpfiles[0m
+-rwxr-xr-x    1 root root        39496 Sep 16 16:55 [01;32msystemd-tty-ask-password-agent[0m
+lrwxrwxrwx    1 root root           13 Sep 16 16:55 [01;36msystemd-umount[0m -> [01;32msystemd-mount[0m
+-rwxr-xr-x    1 root root        23248 Sep 16 16:55 [01;32msystemd-vpick[0m
+-rwxr-xr-x    1 root root        18816 Jan  3  2026 [01;32mtabs[0m
+lrwxrwxrwx    1 root root           30 Mar 30  2026 [01;36mtac[0m -> [01;32m../lib/cargo/bin/coreutils/tac[0m
+lrwxrwxrwx    1 root root           31 Mar 30  2026 [01;36mtail[0m -> [01;32m../lib/cargo/bin/coreutils/tail[0m
+-rwxr-xr-x    1 root root     34346635 Nov  3 00:37 [01;32mtailscale[0m
+-rwxr-xr-x    1 root root        31280 Jan 11  2026 [01;32mtapestat[0m
+-rwxr-xr-x    1 root root       452624 Jul 20 15:45 [01;32mtar[0m
+-rwxr-xr-x    1 root root        31184 Aug 19 16:23 [01;32mtaskset[0m
+-rwxr-xr-x    1 root root       133680 Dec  2  2025 [01;32mtbl[0m
+lrwxrwxrwx    1 root root            8 Feb  2  2026 [01;36mtclsh[0m -> [01;32mtclsh8.6[0m
+-rwxr-xr-x    1 root root        14568 Jan 23  2026 [01;32mtclsh8.6[0m
+-rwxr-xr-x    1 root root      1282240 Feb 27  2026 [01;32mtcpdump[0m
+-rwxr-xr-x    1 root root        68120 Dec  6  2025 [01;32mtecla[0m
+lrwxrwxrwx    1 root root           30 Mar 30  2026 [01;36mtee[0m -> [01;32m../lib/cargo/bin/coreutils/tee[0m
+lrwxrwxrwx    1 root root           24 Jun  4 15:22 [01;36mtelnet[0m -> [01;32m/etc/alternatives/telnet[0m
+-rwxr-xr-x    1 root root        14720 Feb  2  2026 [01;32mtempfile[0m
+lrwxrwxrwx    1 root root           31 Mar 30  2026 [01;36mtest[0m -> [01;32m../lib/cargo/bin/coreutils/test[0m
+-rwxr-xr-x    1 root root        92736 Jan  3  2026 [01;32mtic[0m
+-rwxr-xr-x    1 root root        35288 May  6  2026 [01;32mtificc[0m
+-rwxr-xr-x    1 root root        27232 Jan 14  2026 [01;32mtime[0m
+-rwxr-xr-x    1 root root        47560 Sep 16 16:55 [01;32mtimedatectl[0m
+lrwxrwxrwx    1 root root           34 Mar 30  2026 [01;36mtimeout[0m -> [01;32m../lib/cargo/bin/coreutils/timeout[0m
+-rwxr-xr-x    1 root root        62144 Mar 17  2026 [01;32mtinysparql[0m
+-rwxr-xr-x    1 root root      3765304 Feb  1  2026 [01;32mtldr[0m
+-rwxr-xr-x    1 root root        18984 Dec  1  2025 [01;32mtload[0m
+-rwxr-xr-x    1 root root       187392 Feb 11  2026 [01;32mtnftp[0m
+-rwxr-xr-x    1 root root        22912 Jan  3  2026 [01;32mtoe[0m
+-rwxr-xr-x    1 root root       135064 Dec  1  2025 [01;32mtop[0m
+lrwxrwxrwx    1 root root           32 Mar 30  2026 [01;36mtouch[0m -> [01;32m../lib/cargo/bin/coreutils/touch[0m
+-rwxr-xr-x    1 root root        27040 Jan  3  2026 [01;32mtput[0m
+-rwxr-xr-x    1 root root          208 Mar 10  2026 [01;32mtqdm[0m
+lrwxrwxrwx    1 root root           29 Mar 30  2026 [01;36mtr[0m -> [01;32m../lib/cargo/bin/coreutils/tr[0m
+-rwxr-xr-x    1 root root       466992 Jan 22  2026 [01;32mtrace-cmd[0m
+-rwxr-xr-x    1 root root        18736 Oct 31  2025 [01;32mtracepath[0m
+-rwxr-xr-x    1 root root        39312 May  6  2026 [01;32mtransicc[0m
+-rwxr-xr-x    1 root root       748224 Dec  2  2025 [01;32mtroff[0m
+lrwxrwxrwx    1 root root            7 Mar 30  2026 [01;36mtrue[0m -> [01;32mgnutrue[0m
+lrwxrwxrwx    1 root root           35 Mar 30  2026 [01;36mtruncate[0m -> [01;32m../lib/cargo/bin/coreutils/truncate[0m
+-rwxr-xr-x    1 root root       293664 Feb 21  2026 [01;32mtrust[0m
+-rwxr-xr-x    1 root root        31112 Jan  3  2026 [01;32mtset[0m
+lrwxrwxrwx    1 root root           32 Mar 30  2026 [01;36mtsort[0m -> [01;32m../lib/cargo/bin/coreutils/tsort[0m
+lrwxrwxrwx    1 root root           30 Mar 30  2026 [01;36mtty[0m -> [01;32m../lib/cargo/bin/coreutils/tty[0m
+-rwxr-xr-x    1 root root         1622 Oct 15 08:48 [01;32mturbostat[0m
+-rwxr-xr-x    1 root root        21903 Sep  3 16:09 [01;32mtzselect[0m
+lrwxrwxrwx    1 root root           16 Sep  8 22:45 [01;36mua[0m -> [01;32mubuntu-advantage[0m
+-rwxr-xr-x    1 root root         1004 Sep  8 22:45 [01;32mubuntu-advantage[0m
+lrwxrwxrwx    1 root root           10 Jul  3 13:16 [01;36mubuntu-bug[0m -> [01;32mapport-bug[0m
+-rwxr-xr-x    1 root root        22992 Feb 16  2026 [01;32mubuntu-distro-info[0m
+-rwxr-xr-x    1 root root        23473 Mar 11  2026 [01;32mubuntu-drivers[0m
+-rwxr-xr-x    1 root root      9550456 Sep 28 19:43 [01;32mubuntu-insights[0m
+-rwxr-xr-x    1 root root      8331328 Dec  6  2025 [01;32mubuntu-report[0m
+-rwxr-xr-x    1 root root        22784 Apr 16  2026 [01;32mubuntu-security-status[0m
+-rwxr-xr-x    1 root root         7213 Aug 20 13:55 [01;32mubuntu_virt_helper[0m
+-rwxr-xr-x    1 root root        36482 Feb 26  2026 [01;32mucf[0m
+-rwxr-xr-x    1 root root        18915 Feb 26  2026 [01;32mucfq[0m
+-rwxr-xr-x    1 root root        10180 Feb 26  2026 [01;32mucfr[0m
+-rwxr-xr-x    1 root root        31184 Aug 19 16:23 [01;32muclampset[0m
+-rwxr-xr-x    1 root root        56304 Mar  2  2026 [01;32muconv[0m
+-rwxr-xr-x    1 root root        27008 Dec  6  2025 [01;32mucs2any[0m
+-rwxr-xr-x    1 root root       765648 Sep 16 16:55 [01;32mudevadm[0m
+-rwxr-xr-x    1 root root        63952 Aug 17 16:41 [01;32mudisksctl[0m
+-rwxr-xr-x    1 root root        23000 Aug 19 16:23 [01;32mul[0m
+-rwxr-xr-x    1 root root       179744 Apr  1  2026 [01;32mumax_pp[0m
+-rwsr-xr-x    1 root root        39376 Aug 19 16:23 [37;41mumount[0m
+lrwxrwxrwx    1 root root           32 Mar 30  2026 [01;36muname[0m -> [01;32m../lib/cargo/bin/coreutils/uname[0m
+-rwxr-xr-x    1 root root       119817 Mar 27  2026 [01;32munattended-upgrade[0m
+lrwxrwxrwx    1 root root           18 Mar 27  2026 [01;36munattended-upgrades[0m -> [01;32munattended-upgrade[0m
+lrwxrwxrwx    1 root root            6 Jul  3 13:51 [01;36muncompress[0m -> [01;32mgunzip[0m
+lrwxrwxrwx    1 root root           35 Mar 30  2026 [01;36munexpand[0m -> [01;32m../lib/cargo/bin/coreutils/unexpand[0m
+-rwxr-xr-x    1 root root         2772 Dec  1  2025 [01;32municode_start[0m
+-rwxr-xr-x    1 root root          528 Dec  1  2025 [01;32municode_stop[0m
+lrwxrwxrwx    1 root root           31 Mar 30  2026 [01;36muniq[0m -> [01;32m../lib/cargo/bin/coreutils/uniq[0m
+-rwxr-xr-x    1 root root        14800 Feb 16  2026 [01;32munity-scope-loader[0m
+lrwxrwxrwx    1 root root           33 Mar 30  2026 [01;36munlink[0m -> [01;32m../lib/cargo/bin/coreutils/unlink[0m
+lrwxrwxrwx    1 root root           24 Apr  1  2026 [01;36munlzma[0m -> [01;32m/etc/alternatives/unlzma[0m
+-rwxr-xr-x    1 root root        23000 Apr  2  2026 [01;32munmkinitramfs[0m
+-rwxr-xr-x    2 root root       141760 Dec 17  2025 [01;32munpigz[0m
+-rwxr-xr-x    1 root root        47800 Aug 19 16:23 [01;32munshare[0m
+-rwxr-xr-x    1 root root       183656 Mar  7  2026 [01;32munsquashfs[0m
+lrwxrwxrwx    1 root root            2 Oct  9 17:54 [01;36munxz[0m -> [01;32mxz[0m
+-rwxr-xr-x    2 root root       195184 Nov  7  2025 [01;32munzip[0m
+-rwxr-xr-x    1 root root        96896 Nov  7  2025 [01;32munzipsfx[0m
+lrwxrwxrwx    1 root root            4 Jan  5  2026 [01;36munzstd[0m -> [01;32mzstd[0m
+-rwxr-xr-x    1 root root        59864 Mar 31  2026 [01;32mupdate-alternatives[0m
+-rwxr-xr-x    1 root root        27096 Dec  6  2025 [01;32mupdate-desktop-database[0m
+-rwxr-xr-x    1 root root         4947 Apr 16  2026 [01;32mupdate-manager[0m
+-rwxr-xr-x    1 root root        88480 Feb  2  2026 [01;32mupdate-mime-database[0m
+-rwxr-xr-x    1 root root        97416 Jul 23 14:34 [01;32mupdate-notifier[0m
+-rwxr-xr-x    1 root root        18816 Feb 12  2026 [01;32mupower[0m
+-rwxr-xr-x    1 root root        14872 Dec  1  2025 [01;32muptime[0m
+-rwxr-xr-x    1 root root         4979 Oct 22  2025 [01;32musb-devices[0m
+-rwxr-xr-x    1 root root        14736 Dec  4  2025 [01;32musb_printerid[0m
+-rwxr-xr-x    1 root root        31192 Nov 15  2025 [01;32musbhid-dump[0m
+-rwxr-xr-x    1 root root         1622 Oct 15 08:48 [01;32musbip[0m
+-rwxr-xr-x    1 root root         1622 Oct 15 08:48 [01;32musbipd[0m
+-rwxr-xr-x    1 root root        14720 Nov 15  2025 [01;32musbreset[0m
+-rwxr-xr-x    1 root root        22832 Oct 23  2025 [01;32muser-session-migration[0m
+lrwxrwxrwx    1 root root           32 Mar 30  2026 [01;36musers[0m -> [01;32m../lib/cargo/bin/coreutils/users[0m
+-rwxr-xr-x    1 root root        22992 Aug 19 16:23 [01;32muuidgen[0m
+-rwxr-xr-x    1 root root        22992 Aug 19 16:23 [01;32muuidparse[0m
+-rwxr-xr-x    1 root root        47720 Sep 16 16:55 [01;32mvarlinkctl[0m
+-rwxr-xr-x    1 root root         6912 Dec  1  2025 [01;32mvcs-run[0m
+lrwxrwxrwx    1 root root           31 Mar 30  2026 [01;36mvdir[0m -> [01;32m../lib/cargo/bin/coreutils/vdir[0m
+lrwxrwxrwx    1 root root           38 Mar 18  2026 [01;36mverify-uselistorder-21[0m -> [01;32m../lib/llvm-21/bin/verify-uselistorder[0m
+lrwxrwxrwx    1 root root           20 Apr 14  2026 [01;36mvi[0m -> [01;32m/etc/alternatives/vi[0m
+lrwxrwxrwx    1 root root           22 Apr 14  2026 [01;36mview[0m -> [01;32m/etc/alternatives/view[0m
+-rwxr-xr-x    1 root root        32096 Dec  6  2025 [01;32mviewres[0m
+-rwxr-xr-x    1 root root      1906256 Aug 25 00:11 [01;32mvim.tiny[0m
+-rwxr-xr-x    1 root root        52448 Apr 15  2026 [01;32mvirgl_test_server[0m
+lrwxrwxrwx    1 root root           23 Aug 27 10:15 [01;36mvisudo-rs[0m -> [01;32m../lib/cargo/bin/visudo[0m
+-rwxr-xr-x    1 root root        14872 Jan  2  2026 [01;32mvlc[0m
+-rwxr-xr-x    1 root root        14720 Jan  2  2026 [01;32mvlc-wrapper[0m
+-rwxr-xr-x    1 root root        39864 Dec  1  2025 [01;32mvmstat[0m
+-rwxr-xr-x    1 root root        26872 Mar 20  2026 [01;32mvstp[0m
+-rwxr-xr-x    1 root root        35352 Dec  1  2025 [01;32mw[0m
+-rwxr-xr-x    1 root root        27088 Aug 19 16:23 [01;32mwall[0m
+-rwxr-xr-x    1 root root        31736 Dec  1  2025 [01;32mwatch[0m
+-rwxr-xr-x    1 root root        22912 Sep  2 21:38 [01;32mwatchgnupg[0m
+-rwxr-xr-x    1 root root          966 Dec 17  2025 [01;32mwatchmedo[0m
+-rwxr-xr-x    1 root root      2298872 Feb  8  2026 [01;32mwaybar[0m
+-rwxr-xr-x    1 root root        47408 Aug 11  2025 [01;32mwayland-scanner[0m
+lrwxrwxrwx    1 root root           29 Mar 30  2026 [01;36mwc[0m -> [01;32m../lib/cargo/bin/coreutils/wc[0m
+-rwxr-xr-x    1 root root        11581 Oct 13 14:01 [01;32mwcurl[0m
+-rwxr-xr-x    1 root root          977 Mar 20  2026 [01;32mwebsockets[0m
+-rwxr-xr-x    1 root root       531536 Aug 20 01:59 [01;32mwget[0m
+-rwxr-xr-x    1 root root        48576 Feb  2  2026 [01;32mwhatis[0m
+-rwxr-xr-x    1 root root        31184 Aug 19 16:23 [01;32mwhereis[0m
+lrwxrwxrwx    1 root root           23 Feb  2  2026 [01;36mwhich[0m -> [01;32m/etc/alternatives/which[0m
+-rwxr-xr-x    1 root root         1080 Feb  2  2026 [01;32mwhich.debianutils[0m
+-rwxr-xr-x    1 root root        30968 Mar 20  2026 [01;32mwhiptail[0m
+lrwxrwxrwx    1 root root           30 Mar 30  2026 [01;36mwho[0m -> [01;32m../lib/cargo/bin/coreutils/who[0m
+lrwxrwxrwx    1 root root           33 Mar 30  2026 [01;36mwhoami[0m -> [01;32m../lib/cargo/bin/coreutils/whoami[0m
+-rwxr-xr-x    1 root root        52240 Mar 12  2026 [01;32mwhoopsie[0m
+-rwxr-xr-x    1 root root        22832 Dec  1  2025 [01;32mwhoopsie-preferences[0m
+-rwxr-xr-x    1 root root        19088 Sep 11 12:29 [01;32mwireplumber[0m
+-rwxr-xr-x    1 root root        56768 Jan 29  2026 [01;32mwl-copy[0m
+-rwxr-xr-x    1 root root        56736 Jan 29  2026 [01;32mwl-paste[0m
+-rwxr-xr-x    1 root root        14720 Feb  3  2026 [01;32mword-list-compress[0m
+-rwxr-xr-x    1 root root        14808 Dec  2  2025 [01;32mwpa_passphrase[0m
+-rwxr-xr-x    1 root root        64008 Sep 11 12:29 [01;32mwpctl[0m
+-rwxr-xr-x    1 root root        19072 Sep 11 12:29 [01;32mwpexec[0m
+-rwxr-xr-x    1 root root        74666 Oct 29  2025 [01;32mwsdd[0m
+lrwxrwxrwx    1 root root           35 Jun 23 11:32 [01;36mx-session-manager[0m -> [01;32m/etc/alternatives/x-session-manager[0m
+lrwxrwxrwx    1 root root           37 Apr 15  2026 [01;36mx-terminal-emulator[0m -> [01;32m/etc/alternatives/x-terminal-emulator[0m
+lrwxrwxrwx    1 root root           31 Jun 11  2024 [01;36mx-www-browser[0m -> [01;32m/etc/alternatives/x-www-browser[0m
+lrwxrwxrwx    1 root root            7 Aug 19 16:23 [01;36mx86_64[0m -> [01;32msetarch[0m
+-rwxr-xr-x    1 root root        31592 Mar 15  2026 [01;32mx86_64-linux-gnu-addr2line[0m
+-rwxr-xr-x    1 root root        55944 Mar 15  2026 [01;32mx86_64-linux-gnu-ar[0m
+-rwxr-xr-x    1 root root       826608 Mar 15  2026 [01;32mx86_64-linux-gnu-as[0m
+-rwxr-xr-x    1 root root        26976 Mar 15  2026 [01;32mx86_64-linux-gnu-c++filt[0m
+lrwxrwxrwx    1 root root           23 Feb 23  2026 [01;36mx86_64-linux-gnu-cpp[0m -> [01;32mx86_64-linux-gnu-cpp-15[0m
+-rwxr-xr-x    1 root root      1305304 Mar 22  2026 [01;32mx86_64-linux-gnu-cpp-15[0m
+-rwxr-xr-x    1 root root        35624 Mar 15  2026 [01;32mx86_64-linux-gnu-elfedit[0m
+lrwxrwxrwx    1 root root           23 Feb 23  2026 [01;36mx86_64-linux-gnu-g++[0m -> [01;32mx86_64-linux-gnu-g++-15[0m
+-rwxr-xr-x    1 root root      1305304 Mar 22  2026 [01;32mx86_64-linux-gnu-g++-15[0m
+lrwxrwxrwx    1 root root           23 Feb 23  2026 [01;36mx86_64-linux-gnu-gcc[0m -> [01;32mx86_64-linux-gnu-gcc-15[0m
+-rwxr-xr-x    1 root root      1305304 Mar 22  2026 [01;32mx86_64-linux-gnu-gcc-15[0m
+lrwxrwxrwx    1 root root           26 Feb 23  2026 [01;36mx86_64-linux-gnu-gcc-ar[0m -> [01;32mx86_64-linux-gnu-gcc-ar-15[0m
+-rwxr-xr-x    1 root root        31400 Mar 22  2026 [01;32mx86_64-linux-gnu-gcc-ar-15[0m
+lrwxrwxrwx    1 root root           26 Feb 23  2026 [01;36mx86_64-linux-gnu-gcc-nm[0m -> [01;32mx86_64-linux-gnu-gcc-nm-15[0m
+-rwxr-xr-x    1 root root        31400 Mar 22  2026 [01;32mx86_64-linux-gnu-gcc-nm-15[0m
+lrwxrwxrwx    1 root root           30 Feb 23  2026 [01;36mx86_64-linux-gnu-gcc-ranlib[0m -> [01;32mx86_64-linux-gnu-gcc-ranlib-15[0m
+-rwxr-xr-x    1 root root        31400 Mar 22  2026 [01;32mx86_64-linux-gnu-gcc-ranlib-15[0m
+lrwxrwxrwx    1 root root           24 Feb 23  2026 [01;36mx86_64-linux-gnu-gcov[0m -> [01;32mx86_64-linux-gnu-gcov-15[0m
+-rwxr-xr-x    1 root root       569040 Mar 22  2026 [01;32mx86_64-linux-gnu-gcov-15[0m
+lrwxrwxrwx    1 root root           29 Feb 23  2026 [01;36mx86_64-linux-gnu-gcov-dump[0m -> [01;32mx86_64-linux-gnu-gcov-dump-15[0m
+-rwxr-xr-x    1 root root       429696 Mar 22  2026 [01;32mx86_64-linux-gnu-gcov-dump-15[0m
+lrwxrwxrwx    1 root root           29 Feb 23  2026 [01;36mx86_64-linux-gnu-gcov-tool[0m -> [01;32mx86_64-linux-gnu-gcov-tool-15[0m
+-rwxr-xr-x    1 root root       458480 Mar 22  2026 [01;32mx86_64-linux-gnu-gcov-tool-15[0m
+-rwxr-xr-x    1 root root          402 Sep  8 19:07 [01;32mx86_64-linux-gnu-gi-compile-repository[0m
+-rwxr-xr-x    1 root root          401 Sep  8 19:07 [01;32mx86_64-linux-gnu-gi-decompile-typelib[0m
+-rwxr-xr-x    1 root root          399 Sep  8 19:07 [01;32mx86_64-linux-gnu-gi-inspect-typelib[0m
+-rwxr-xr-x    1 root root       106352 Mar 15  2026 [01;32mx86_64-linux-gnu-gprof[0m
+lrwxrwxrwx    1 root root           23 Mar 15  2026 [01;36mx86_64-linux-gnu-ld[0m -> [01;32mx86_64-linux-gnu-ld.bfd[0m
+-rwxr-xr-x    1 root root      1890472 Mar 15  2026 [01;32mx86_64-linux-gnu-ld.bfd[0m
+lrwxrwxrwx    1 root root           28 Feb 23  2026 [01;36mx86_64-linux-gnu-lto-dump[0m -> [01;32mx86_64-linux-gnu-lto-dump-15[0m
+-rwxr-xr-x    1 root root     36196560 Mar 22  2026 [01;32mx86_64-linux-gnu-lto-dump-15[0m
+-rwxr-xr-x    1 root root        48712 Mar 15  2026 [01;32mx86_64-linux-gnu-nm[0m
+-rwxr-xr-x    1 root root       165584 Mar 15  2026 [01;32mx86_64-linux-gnu-objcopy[0m
+-rwxr-xr-x    1 root root       415760 Mar 15  2026 [01;32mx86_64-linux-gnu-objdump[0m
+lrwxrwxrwx    1 root root            7 Feb 13  2026 [01;36mx86_64-linux-gnu-pkg-config[0m -> [01;32mpkgconf[0m
+lrwxrwxrwx    1 root root            7 Feb 13  2026 [01;36mx86_64-linux-gnu-pkgconf[0m -> [01;32mpkgconf[0m
+-rwxr-xr-x    1 root root        31368 Mar 15  2026 [01;32mx86_64-linux-gnu-ranlib[0m
+-rwxr-xr-x    1 root root       818312 Mar 15  2026 [01;32mx86_64-linux-gnu-readelf[0m
+-rwxr-xr-x    1 root root        31336 Mar 15  2026 [01;32mx86_64-linux-gnu-size[0m
+-rwxr-xr-x    1 root root        35592 Mar 15  2026 [01;32mx86_64-linux-gnu-strings[0m
+-rwxr-xr-x    1 root root       130504 Mar 15  2026 [01;32mx86_64-linux-gnu-strip[0m
+-rwxr-xr-x    1 root root      1410736 Jan 26  2026 [01;32mx86_64-w64-mingw32-addr2line[0m
+-rwxr-xr-x    1 root root      1439192 Jan 26  2026 [01;32mx86_64-w64-mingw32-ar[0m
+-rwxr-xr-x    1 root root      2140224 Jan 26  2026 [01;32mx86_64-w64-mingw32-as[0m
+-rwxr-xr-x    1 root root      1410224 Jan 26  2026 [01;32mx86_64-w64-mingw32-c++filt[0m
+lrwxrwxrwx    1 root root           40 Sep 24  2023 [01;36mx86_64-w64-mingw32-cpp[0m -> [01;32m/etc/alternatives/x86_64-w64-mingw32-cpp[0m
+-rwxr-xr-x    1 root root      1598824 Sep 24  2023 [01;32mx86_64-w64-mingw32-cpp-posix[0m
+-rwxr-xr-x    1 root root      1598824 Sep 24  2023 [01;32mx86_64-w64-mingw32-cpp-win32[0m
+-rwxr-xr-x    1 root root      1480792 Jan 26  2026 [01;32mx86_64-w64-mingw32-dlltool[0m
+-rwxr-xr-x    1 root root        51712 Jan 26  2026 [01;32mx86_64-w64-mingw32-dllwrap[0m
+-rwxr-xr-x    1 root root        43968 Jan 26  2026 [01;32mx86_64-w64-mingw32-elfedit[0m
+lrwxrwxrwx    1 root root           40 Sep 24  2023 [01;36mx86_64-w64-mingw32-gcc[0m -> [01;32m/etc/alternatives/x86_64-w64-mingw32-gcc[0m
+lrwxrwxrwx    1 root root           43 Sep 24  2023 [01;36mx86_64-w64-mingw32-gcc-13[0m -> [01;32m/etc/alternatives/x86_64-w64-mingw32-gcc-13[0m
+-rwxr-xr-x    2 root root      1594728 Sep 24  2023 [01;32mx86_64-w64-mingw32-gcc-13-posix[0m
+-rwxr-xr-x    2 root root      1594728 Sep 24  2023 [01;32mx86_64-w64-mingw32-gcc-13-win32[0m
+lrwxrwxrwx    1 root root           43 Sep 24  2023 [01;36mx86_64-w64-mingw32-gcc-ar[0m -> [01;32m/etc/alternatives/x86_64-w64-mingw32-gcc-ar[0m
+-rwxr-xr-x    1 root root        34904 Sep 24  2023 [01;32mx86_64-w64-mingw32-gcc-ar-posix[0m
+-rwxr-xr-x    1 root root        34904 Sep 24  2023 [01;32mx86_64-w64-mingw32-gcc-ar-win32[0m
+lrwxrwxrwx    1 root root           43 Sep 24  2023 [01;36mx86_64-w64-mingw32-gcc-nm[0m -> [01;32m/etc/alternatives/x86_64-w64-mingw32-gcc-nm[0m
+-rwxr-xr-x    1 root root        34904 Sep 24  2023 [01;32mx86_64-w64-mingw32-gcc-nm-posix[0m
+-rwxr-xr-x    1 root root        34904 Sep 24  2023 [01;32mx86_64-w64-mingw32-gcc-nm-win32[0m
+-rwxr-xr-x    2 root root      1594728 Sep 24  2023 [01;32mx86_64-w64-mingw32-gcc-posix[0m
+lrwxrwxrwx    1 root root           47 Sep 24  2023 [01;36mx86_64-w64-mingw32-gcc-ranlib[0m -> [01;32m/etc/alternatives/x86_64-w64-mingw32-gcc-ranlib[0m
+-rwxr-xr-x    1 root root        34904 Sep 24  2023 [01;32mx86_64-w64-mingw32-gcc-ranlib-posix[0m
+-rwxr-xr-x    1 root root        34904 Sep 24  2023 [01;32mx86_64-w64-mingw32-gcc-ranlib-win32[0m
+-rwxr-xr-x    2 root root      1594728 Sep 24  2023 [01;32mx86_64-w64-mingw32-gcc-win32[0m
+lrwxrwxrwx    1 root root           41 Sep 24  2023 [01;36mx86_64-w64-mingw32-gcov[0m -> [01;32m/etc/alternatives/x86_64-w64-mingw32-gcov[0m
+lrwxrwxrwx    1 root root           46 Sep 24  2023 [01;36mx86_64-w64-mingw32-gcov-dump[0m -> [01;32m/etc/alternatives/x86_64-w64-mingw32-gcov-dump[0m
+-rwxr-xr-x    1 root root       858792 Sep 24  2023 [01;32mx86_64-w64-mingw32-gcov-dump-posix[0m
+-rwxr-xr-x    1 root root       858792 Sep 24  2023 [01;32mx86_64-w64-mingw32-gcov-dump-win32[0m
+-rwxr-xr-x    1 root root       948904 Sep 24  2023 [01;32mx86_64-w64-mingw32-gcov-posix[0m
+lrwxrwxrwx    1 root root           46 Sep 24  2023 [01;36mx86_64-w64-mingw32-gcov-tool[0m -> [01;32m/etc/alternatives/x86_64-w64-mingw32-gcov-tool[0m
+-rwxr-xr-x    1 root root       883368 Sep 24  2023 [01;32mx86_64-w64-mingw32-gcov-tool-posix[0m
+-rwxr-xr-x    1 root root       883368 Sep 24  2023 [01;32mx86_64-w64-mingw32-gcov-tool-win32[0m
+-rwxr-xr-x    1 root root       948904 Sep 24  2023 [01;32mx86_64-w64-mingw32-gcov-win32[0m
+-rwxr-xr-x    1 root root      1481456 Jan 26  2026 [01;32mx86_64-w64-mingw32-gprof[0m
+lrwxrwxrwx    1 root root           25 Jan 26  2026 [01;36mx86_64-w64-mingw32-ld[0m -> [01;32mx86_64-w64-mingw32-ld.bfd[0m
+-rwxr-xr-x    1 root root      2109024 Jan 26  2026 [01;32mx86_64-w64-mingw32-ld.bfd[0m
+-rwxr-xr-x    1 root root     32915152 Sep 24  2023 [01;32mx86_64-w64-mingw32-lto-dump-posix[0m
+-rwxr-xr-x    1 root root     32915152 Sep 24  2023 [01;32mx86_64-w64-mingw32-lto-dump-win32[0m
+-rwxr-xr-x    1 root root      1431952 Jan 26  2026 [01;32mx86_64-w64-mingw32-nm[0m
+-rwxr-xr-x    1 root root      1561112 Jan 26  2026 [01;32mx86_64-w64-mingw32-objcopy[0m
+-rwxr-xr-x    1 root root      2978672 Jan 26  2026 [01;32mx86_64-w64-mingw32-objdump[0m
+-rwxr-xr-x    1 root root      1431000 Jan 26  2026 [01;32mx86_64-w64-mingw32-ranlib[0m
+-rwxr-xr-x    1 root root      1060096 Jan 26  2026 [01;32mx86_64-w64-mingw32-readelf[0m
+-rwxr-xr-x    1 root root      1414576 Jan 26  2026 [01;32mx86_64-w64-mingw32-size[0m
+-rwxr-xr-x    1 root root      1418832 Jan 26  2026 [01;32mx86_64-w64-mingw32-strings[0m
+-rwxr-xr-x    1 root root      1530104 Jan 26  2026 [01;32mx86_64-w64-mingw32-strip[0m
+-rwxr-xr-x    1 root root      1451704 Jan 26  2026 [01;32mx86_64-w64-mingw32-windmc[0m
+-rwxr-xr-x    1 root root      1545888 Jan 26  2026 [01;32mx86_64-w64-mingw32-windres[0m
+-rwxr-xr-x    1 root root         1622 Oct 15 08:48 [01;32mx86_energy_perf_policy[0m
+-rwxr-xr-x    1 root root        68088 Feb  2  2026 [01;32mxargs[0m
+-rwxr-xr-x    1 root root        56352 Dec  6  2025 [01;32mxauth[0m
+-rwxr-xr-x    1 root root       219720 Mar 20  2026 [01;32mxbrlapi[0m
+-rwxr-xr-x    1 root root        39384 Dec  6  2025 [01;32mxcmsdb[0m
+-rwxr-xr-x    1 root root        59704 Apr  7  2026 [01;32mxdg-dbus-proxy[0m
+-rwxr-xr-x    1 root root        22827 Dec  6  2025 [01;32mxdg-desktop-icon[0m
+-rwxr-xr-x    1 root root        44207 Dec  6  2025 [01;32mxdg-desktop-menu[0m
+-rwxr-xr-x    1 root root        28919 Dec  6  2025 [01;32mxdg-email[0m
+-rwxr-xr-x    1 root root        32225 Dec  6  2025 [01;32mxdg-icon-resource[0m
+-rwxr-xr-x    1 root root        47735 Dec  6  2025 [01;32mxdg-mime[0m
+-rwxr-xr-x    1 root root        32285 Dec  6  2025 [01;32mxdg-open[0m
+-rwxr-xr-x    1 root root        39478 Dec  6  2025 [01;32mxdg-screensaver[0m
+-rwxr-xr-x    1 root root        44347 Dec  6  2025 [01;32mxdg-settings[0m
+-rwxr-xr-x    1 root root        43979 Jul 27 12:57 [01;32mxdg-terminal-exec[0m
+-rwxr-xr-x    1 root root          234 Sep 20  2025 [01;32mxdg-user-dir[0m
+-rwxr-xr-x    1 root root        22832 Dec 14  2025 [01;32mxdg-user-dirs-gtk-update[0m
+-rwxr-xr-x    1 root root        26936 Sep 26  2025 [01;32mxdg-user-dirs-update[0m
+-rwxr-xr-x    1 root root        40064 Dec  6  2025 [01;32mxdpyinfo[0m
+-rwxr-xr-x    1 root root        14720 Dec  6  2025 [01;32mxdriinfo[0m
+-rwxr-xr-x    1 root root        35208 Dec  6  2025 [01;32mxev[0m
+-rwxr-xr-x    1 root root        41120 Dec  6  2025 [01;32mxfd[0m
+-rwxr-xr-x    1 root root        53248 Dec  6  2025 [01;32mxfontsel[0m
+-rwxr-xr-x    1 root root        14728 Dec  6  2025 [01;32mxgamma[0m
+-rwxr-xr-x    1 root root        18824 Dec  6  2025 [01;32mxhost[0m
+-rwxr-xr-x    1 root root        14736 Dec  6  2025 [01;32mxkbbell[0m
+-rwxr-xr-x    1 root root       217272 Dec  6  2025 [01;32mxkbcomp[0m
+-rwxr-xr-x    1 root root        43480 Dec  6  2025 [01;32mxkbevd[0m
+-rwxr-xr-x    1 root root        96688 Dec  6  2025 [01;32mxkbprint[0m
+-rwxr-xr-x    1 root root        23736 Dec  6  2025 [01;32mxkbvleds[0m
+-rwxr-xr-x    1 root root        23800 Dec  6  2025 [01;32mxkbwatch[0m
+-rwxr-xr-x    1 root root        16982 Dec  6  2025 [01;32mxkeystone[0m
+-rwxr-xr-x    1 root root        14720 Dec  6  2025 [01;32mxkill[0m
+-rwxr-xr-x    1 root root        14720 Dec  6  2025 [01;32mxlsatoms[0m
+-rwxr-xr-x    1 root root        18824 Dec  6  2025 [01;32mxlsclients[0m
+-rwxr-xr-x    1 root root        27112 Dec  6  2025 [01;32mxlsfonts[0m
+-rwxr-xr-x    1 root root        27920 Dec  6  2025 [01;32mxmessage[0m
+-rwxr-xr-x    1 root root         1436 Oct  6 18:41 [01;32mxml2-config[0m
+-rwxr-xr-x    1 root root        43776 Dec  6  2025 [01;32mxmodmap[0m
+-rwxr-xr-x    1 root root        49848 Dec  6  2025 [01;32mxprop[0m
+-rwxr-xr-x    1 root root        18832 Dec  4  2025 [01;32mxqxdecode[0m
+-rwxr-xr-x    1 root root        68080 Dec  6  2025 [01;32mxrandr[0m
+-rwxr-xr-x    1 root root        35304 Dec  6  2025 [01;32mxrdb[0m
+-rwxr-xr-x    1 root root        14808 Dec  6  2025 [01;32mxrefresh[0m
+-rwxr-xr-x    1 root root        35208 Dec  6  2025 [01;32mxset[0m
+-rwxr-xr-x    1 root root        14728 Dec  6  2025 [01;32mxsetmode[0m
+-rwxr-xr-x    1 root root        14728 Dec  6  2025 [01;32mxsetpointer[0m
+-rwxr-xr-x    1 root root        18824 Dec  6  2025 [01;32mxsetroot[0m
+-rwxr-xr-x    1 root root        15320 Dec  6  2025 [01;32mxstdcmap[0m
+-rwxr-xr-x    1 root root         5167 Sep  8 20:17 [01;32mxsubpp[0m
+-rwxr-xr-x    1 root root        48984 Dec  6  2025 [01;32mxvidtune[0m
+-rwxr-xr-x    1 root root        18816 Dec  6  2025 [01;32mxvinfo[0m
+-rwxr-xr-x    1 root root        51672 Dec  6  2025 [01;32mxwininfo[0m
+-rwxr-xr-x    1 root root        22896 Aug 25 00:11 [01;32mxxd[0m
+-rwxr-xr-x    1 root root       101392 Oct  9 17:54 [01;32mxz[0m
+lrwxrwxrwx    1 root root            2 Oct  9 17:54 [01;36mxzcat[0m -> [01;32mxz[0m
+lrwxrwxrwx    1 root root            6 Oct  9 17:54 [01;36mxzcmp[0m -> [01;32mxzdiff[0m
+-rwxr-xr-x    1 root root         7743 Oct  9 17:54 [01;32mxzdiff[0m
+lrwxrwxrwx    1 root root            6 Oct  9 17:54 [01;36mxzegrep[0m -> [01;32mxzgrep[0m
+lrwxrwxrwx    1 root root            6 Oct  9 17:54 [01;36mxzfgrep[0m -> [01;32mxzgrep[0m
+-rwxr-xr-x    1 root root        10458 Oct  9 17:54 [01;32mxzgrep[0m
+-rwxr-xr-x    1 root root         2428 Oct  9 17:54 [01;32mxzless[0m
+-rwxr-xr-x    1 root root         2262 Oct  9 17:54 [01;32mxzmore[0m
+lrwxrwxrwx    1 root root           29 Mar 18  2026 [01;36myaml-bench-21[0m -> [01;32m../lib/llvm-21/bin/yaml-bench[0m
+lrwxrwxrwx    1 root root           27 Mar 18  2026 [01;36myaml2obj-21[0m -> [01;32m../lib/llvm-21/bin/yaml2obj[0m
+-rwxr-xr-x    1 root root       141816 Jul 22 17:52 [01;32myelp[0m
+lrwxrwxrwx    1 root root           30 Mar 30  2026 [01;36myes[0m -> [01;32m../lib/cargo/bin/coreutils/yes[0m
+lrwxrwxrwx    1 root root            8 Dec  6  2025 [01;36mypdomainname[0m -> [01;32mhostname[0m
+-rwxr-xr-x    1 root root          206 Mar 22  2026 [01;32myt-dlp[0m
+-rwxr-xr-x    1 root root         1904 Jul  3 13:51 [01;32mzcat[0m
+-rwxr-xr-x    1 root root         1609 Jul  3 13:51 [01;32mzcmp[0m
+-rwxr-xr-x    1 root root         6373 Jul  3 13:51 [01;32mzdiff[0m
+-rwxr-xr-x    1 root root        31008 Sep  3 16:09 [01;32mzdump[0m
+-rwxr-xr-x    1 root root           29 Jul  3 13:51 [01;32mzegrep[0m
+-rwxr-xr-x    1 root root       148416 Feb 10  2026 [01;32mzenity[0m
+-rwxr-xr-x    1 root root           29 Jul  3 13:51 [01;32mzfgrep[0m
+-rwxr-xr-x    1 root root         2007 Jul  3 13:51 [01;32mzforce[0m
+-rwxr-xr-x    1 root root         8136 Jul  3 13:51 [01;32mzgrep[0m
+-rwxr-xr-x    1 root root       212064 Feb  2  2026 [01;32mzip[0m
+-rwxr-xr-x    1 root root        76264 Feb  2  2026 [01;32mzipcloak[0m
+-rwxr-xr-x    1 root root       236604 Sep  8 20:17 [01;32mzipdetails[0m
+-rwxr-xr-x    1 root root         2830 Nov  7  2025 [01;32mzipgrep[0m
+-rwxr-xr-x    2 root root       195184 Nov  7  2025 [01;32mzipinfo[0m
+-rwxr-xr-x    1 root root        68072 Feb  2  2026 [01;32mzipnote[0m
+-rwxr-xr-x    1 root root        59880 Feb  2  2026 [01;32mzipsplit[0m
+-rwxr-xr-x    1 root root        31200 Dec  4  2025 [01;32mzjsdecode[0m
+-rwxr-xr-x    1 root root         2365 Jul  3 13:51 [01;32mzless[0m
+-rwxr-xr-x    1 root root         1768 Jul  3 13:51 [01;32mzmore[0m
+-rwxr-xr-x    1 root root         4561 Jul  3 13:51 [01;32mznew[0m
+-rwxr-xr-x    1 root root      1209216 Oct 19  2025 [01;32mzoxide[0m
+-rwxr-xr-x    1 root root       976416 Feb  2  2026 [01;32mzsh[0m
+-rwxr-xr-x    1 root root          852 May 16  2025 [01;32mzsh5[0m
+-rwxr-xr-x    1 root root      1103288 Jan  5  2026 [01;32mzstd[0m
+lrwxrwxrwx    1 root root            4 Jan  5  2026 [01;36mzstdcat[0m -> [01;32mzstd[0m
+-rwxr-xr-x    1 root root         3869 Jan  5  2026 [01;32mzstdgrep[0m
+-rwxr-xr-x    1 root root          197 Jan  5  2026 [01;32mzstdless[0m
+lrwxrwxrwx    1 root root            4 Jan  5  2026 [01;36mzstdmt[0m -> [01;32mzstd[0m
