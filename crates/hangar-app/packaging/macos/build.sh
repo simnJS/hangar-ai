@@ -14,7 +14,7 @@
 #     -p hangar-app -p hangar-webview --features hangar-webview/engine
 #   (and the same with --target x86_64-apple-darwin)
 #
-# and cargo-packager and jq. Signing and notarisation happen inside
+# the two Linux hangar-node files in <target dir>/node, and cargo-packager and jq. Signing and notarisation happen inside
 # cargo-packager when the environment asks for them: APPLE_CERTIFICATE and
 # APPLE_CERTIFICATE_PASSWORD, APPLE_ID, APPLE_PASSWORD and APPLE_TEAM_ID, and a
 # `signingIdentity` in the packager's configuration (the release workflow writes
@@ -44,6 +44,10 @@ for binary in hangar-ai hangar-webview; do
   lipo -create "$arm" "$intel" -output "$universal/$binary"
   lipo -info "$universal/$binary"
 done
+
+# hangar-node for Linux x86_64 and arm64, which this Mac uploads to a node:
+# in Contents/MacOS with the rest, through the packager's `binaries`.
+stage_node_binaries "$target_dir" "$universal"
 
 # cargo-packager looks for the binaries in target/<--target>/release, and
 # names the disk image after the target: Hangar.AI_<version>_universal.dmg.

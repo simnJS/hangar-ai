@@ -84,8 +84,100 @@ jobs:
 
           echo "id=$id" >> "$GITHUB_OUTPUT"
 
-  build:
+  # hangar-node, the headless daemon a Hangar node runs (docs/native/nodes.md),
+  # for Linux x86_64 and arm64. The desktop uploads it to a node over SSH, and
+  # looks for it beside its own executable, so every desktop package carries
+  # both - a Mac or a Windows desktop drives Linux nodes too - which is why this
+  # runs before the build jobs and they download what it makes.
+  #
+  # Both on ubuntu-22.04, like the AppImage: the node links the glibc of the
+  # machine that built it, so 22.04 keeps it running on glibc 2.35 and later.
+  # The arm64 one is cross-built there (gcc-aarch64-linux-gnu, with 22.04's own
+  # arm64 glibc) rather than built on an arm64 runner: the arm runners are not
+  # available to every repository or plan, a job waiting for one would hold the
+  # whole release, and the same x86_64 runner and toolchain for both is one
+  # thing less that differs between them. hangar-node's dependencies are
+  # headless (no ALSA, WebKit or whisper), so a C cross-compiler is all it needs.
+  node:
     needs: draft
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            target: x86_64-unknown-linux-gnu
+          - arch: aarch64
+            target: aarch64-unknown-linux-gnu
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_ID: ${{ needs.draft.outputs.release_id }}
+      # Only used when the target is aarch64; cargo and cc read them by target.
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+      CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the arm64 cross compiler
+        if: matrix.arch == 'aarch64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          key: node-${{ matrix.arch }}
+
+      - name: Build hangar-node
+        run: cargo build --release --locked --target "${{ matrix.target }}" -p hangar-node
+
+      # Stripped (the debug symbols are most of the file) and named as the
+      # desktop looks for it. `file` and the glibc check are what stand between
+      # a wrong binary and a release: one for the wrong machine, or one that
+      # wants a newer glibc than 2.35, would only fail on someone's server.
+      - name: Strip and check
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          src="target/${{ matrix.target }}/release/hangar-node"
+          prefix=""
+          [ "${{ matrix.arch }}" = "aarch64" ] && prefix="aarch64-linux-gnu-"
+          strip="${prefix}strip"
+          "$strip" -o "out/hangar-node-${{ matrix.arch }}" "$src"
+          file "out/hangar-node-${{ matrix.arch }}"
+          machine="${{ matrix.arch == 'x86_64' && 'x86-64' || 'ARM aarch64' }}"
+          file "out/hangar-node-${{ matrix.arch }}" | grep -q "$machine"
+          newest=$("${prefix}objdump" -T "out/hangar-node-${{ matrix.arch }}" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
+          echo "newest glibc symbol: $newest"
+          [ "$(printf '%s\nGLIBC_2.35\n' "$newest" | sort -V | tail -1)" = "GLIBC_2.35" ]
+          if [ "${{ matrix.arch }}" = "x86_64" ]; then
+            "out/hangar-node-x86_64" version
+          fi
+
+      # What the build jobs pack into the installers.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hangar-node-${{ matrix.arch }}
+          path: out/hangar-node-${{ matrix.arch }}
+          if-no-files-found: error
+
+      # And on the release as a download of its own, for a node that is set up
+      # by hand: hangar-node-<version>-linux-<arch>.
+      - name: Upload to the draft release
+        run: |
+          set -euo pipefail
+          pkgid="$(cargo pkgid -p hangar-node)"
+          version="${pkgid##*[#@]}"
+          [ -n "$version" ] && [ "$version" != "$pkgid" ]
+          cp "out/hangar-node-${{ matrix.arch }}" "out/hangar-node-${version}-linux-${{ matrix.arch }}"
+          crates/hangar-app/packaging/upload-assets.sh "$RELEASE_ID" "out/hangar-node-${version}-linux-${{ matrix.arch }}"
+
+  build:
+    needs: [draft, node]
     strategy:
       # All three at once. They do not contend for anything — the publish job
       # below is the only writer of `latest.json` — so a release takes as long
@@ -155,6 +247,14 @@ jobs:
             libasound2-dev \
             libclang-dev \
             libssl-dev
+
+      # hangar-node for Linux x86_64 and arm64, from the `node` job, where the
+      # packaging scripts take them from (they refuse to package without).
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: hangar-node-*
+          path: target/node
+          merge-multiple: true
 
       - uses: pnpm/action-setup@v4
         with:

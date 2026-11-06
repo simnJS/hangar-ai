@@ -105,6 +105,20 @@ jobs:
           cargo clippy -p hangar-core --no-default-features --all-targets --locked -- -D warnings
           cargo test -p hangar-core --no-default-features --locked
 
+      # What a release ships to nodes (release.yml, `node`): hangar-node for
+      # Linux arm64, cross-built with the same compiler and linker, so a break
+      # of it shows here and not on the tag. Check only, nothing is packaged.
+      # (The x86_64 one is the host build clippy and the tests already make.)
+      - name: Check hangar-node for Linux arm64
+        if: matrix.os == 'ubuntu-22.04'
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+        run: |
+          sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross
+          rustup target add aarch64-unknown-linux-gnu
+          cargo build -p hangar-node --release --locked --target aarch64-unknown-linux-gnu
+
       # The engine is behind a feature so the main executable never compiles
       # a browser engine; it still has to build on every platform.
       - name: Clippy, webview helper engine
