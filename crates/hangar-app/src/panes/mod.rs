@@ -1019,10 +1019,16 @@ pub(crate) fn zoomed_pane(m: &Model, ws: &Workspace) -> Option<PaneId> {
 
 /// Workspace `ws` is on screen, its grid shown: in its own window, or the
 /// active one of the main window. A workspace shown as the chat view has its
-/// grid off screen: its terminals go on running, but none is visible, takes
-/// the keyboard or resumes ahead of the others.
+/// grid off screen: its terminals go on running, but none is visible or takes
+/// the keyboard (`seen` tells which panes the person does see there).
 fn on_screen(m: &Model, ws: &Workspace) -> bool {
-    if !m.live.hydrated || m.ui.view != View::Terminals || crate::chat_view::shown(m, ws) {
+    placed(m, ws) && !crate::chat_view::shown(m, ws)
+}
+
+/// Workspace `ws` is in a window the person looks at, as its grid or as the
+/// chat view.
+fn placed(m: &Model, ws: &Workspace) -> bool {
+    if !m.live.hydrated || m.ui.view != View::Terminals {
         return false;
     }
     m.live.windows.values().any(|kind| match kind {
@@ -1040,10 +1046,23 @@ fn visible(m: &Model, ws: &Workspace, pane: &str) -> bool {
     on_screen(m, ws) && zoomed_pane(m, ws).is_none_or(|zoomed| zoomed == pane)
 }
 
-/// The pane is on screen in the focused window (the main one before any
+/// The person sees the pane: it is visible in the grid, or the workspace
+/// is the chat view and the pane is its orchestrator (the conversation is
+/// with it) or one of the view panes of the tools area. Unlike `visible`, this
+/// gives no terminal the keyboard.
+fn seen(m: &Model, ws: &Workspace, pane: &str) -> bool {
+    if !crate::chat_view::shown(m, ws) {
+        return visible(m, ws, pane);
+    }
+    placed(m, ws)
+        && (crate::state::roles::orchestrator_of(ws).is_some_and(|o| o.id == pane)
+            || ws.view_panes.iter().any(|v| v.id == pane))
+}
+
+/// The pane is seen in the focused window (the main one before any
 /// window says it has the focus): what resumes first at a relaunch.
 fn in_front(m: &Model, ws: &Workspace, pane: &str) -> bool {
-    if !visible(m, ws, pane) {
+    if !seen(m, ws, pane) {
         return false;
     }
     match m.focused_window().and_then(|id| m.live.windows.get(&id)) {
@@ -1347,7 +1366,7 @@ fn sync(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
             .panes
             .get(open)
             .and_then(|rt| m.workspace(&rt.ws))
-            .is_some_and(|ws| visible(m, ws, open));
+            .is_some_and(|ws| seen(m, ws, open));
         if !shown {
             st.picker = None;
         }
@@ -1595,6 +1614,49 @@ mod chat_view_tests {
         assert!(keyboard_goes_to(&m, &ws(&m), "ava"));
         assert_eq!(wanted_panes(&m), running);
         assert_eq!(signature(&st, &m), before);
+    }
+
+    fn with_roles(m: &mut Model) {
+        use crate::state::types::{PaneRole, ViewPane};
+        let mut state = m.state().clone();
+        let ws = state
+            .workspaces
+            .iter_mut()
+            .find(|w| w.id == "chat-on-screen")
+            .unwrap();
+        ws.panes[1].role = Some(PaneRole::Orchestrator);
+        ws.panes[0].role = Some(PaneRole::Worker);
+        ws.view_panes.push(ViewPane::new("notes"));
+        m.hydrate(state);
+    }
+
+    #[test]
+    fn in_the_chat_view_the_orchestrator_and_the_tools_area_are_seen_but_no_terminal_has_the_keyboard()
+     {
+        let mut m = model(true);
+        with_roles(&mut m);
+        chat(&mut m, true);
+        let w = ws(&m);
+        assert!(in_front(&m, &w, "leo"), "the orchestrator resumes first");
+        assert!(in_front(&m, &w, "notes"), "the tools area is seen");
+        assert!(!in_front(&m, &w, "ava"), "a worker waits for its wave");
+        for id in ["ava", "leo"] {
+            assert!(!visible(&m, &w, id));
+            assert!(!keyboard_goes_to(&m, &w, id), "{id} has no keyboard");
+        }
+    }
+
+    #[test]
+    fn in_the_panes_view_the_roles_change_nothing() {
+        let mut m = model(true);
+        with_roles(&mut m);
+        let w = ws(&m);
+        for id in ["ava", "leo"] {
+            assert!(in_front(&m, &w, id));
+        }
+        // Another workspace stays off screen, chat view or not.
+        let other = m.workspace("chat-other").unwrap().clone();
+        assert!(!in_front(&m, &other, "mia"));
     }
 
     #[test]
