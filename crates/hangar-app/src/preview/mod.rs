@@ -98,8 +98,8 @@ use self::access::Shared;
 use self::model::{FileKind, Kind};
 use self::parts::Notice;
 use self::store::{Body, Entry, Scope, Status};
-use self::text::{Head, Load};
-use self::viewer::{CodeColours, Coloured, Loaded, ViewerMsg, ViewerState, language_for};
+use self::text::Load;
+use self::viewer::{CodeColours, Coloured, Loaded, Parsed, ViewerMsg, ViewerState, language_for};
 use self::webview::{HelperHandle, StartError, WebMsg};
 use crate::control::{self, Hook};
 use crate::ctx::Ctx;
@@ -551,7 +551,7 @@ fn mount(st: &mut State, entry: &Entry, kind: FileKind) -> Task<Message> {
     let task = match kind {
         FileKind::Text | FileKind::Markdown => {
             viewer.load = Some(Load::Loading);
-            read_text(&entry.id, entry.revision, &entry.path)
+            read_text(&entry.id, entry.revision, &entry.path, kind)
         }
         FileKind::Image => read_image(&entry.id, entry.revision, &entry.path, decode::Size::Shown),
         FileKind::Html | FileKind::Pdf | FileKind::Video | FileKind::Audio => Task::none(),
@@ -560,17 +560,24 @@ fn mount(st: &mut State, entry: &Entry, kind: FileKind) -> Task<Message> {
     task
 }
 
-fn read_text(id: &str, revision: u64, path: &str) -> Task<Message> {
+/// Reads the head of a text off the UI thread, and parses it there when it
+/// is a Markdown page.
+fn read_text(id: &str, revision: u64, path: &str, kind: FileKind) -> Task<Message> {
     let (id, path) = (id.to_string(), path.to_string());
     Task::perform(
-        blocking(move || text::read_head(Path::new(&path))),
-        move |read| {
-            viewer_message(
-                &id,
-                revision,
-                ViewerMsg::Text(read.map(|head: Head| Loaded(Arc::new(head)))),
-            )
-        },
+        blocking(move || {
+            let head = text::read_head(Path::new(&path))?;
+            let parsed = if kind == FileKind::Markdown {
+                // The text the viewer will draw: a page is never laid out
+                // as JSON.
+                let text = text::Ready::of(&head, false, 0).text;
+                Parsed::new(markdown::Rendered::parse(&text, &path))
+            } else {
+                Parsed::default()
+            };
+            Ok(Loaded(Arc::new(head), parsed))
+        }),
+        move |read| viewer_message(&id, revision, ViewerMsg::Text(read)),
     )
 }
 
@@ -680,7 +687,7 @@ fn viewer_update(
             }
             Task::none()
         }
-        ViewerMsg::Text(Ok(Loaded(head))) => {
+        ViewerMsg::Text(Ok(Loaded(head, parsed))) => {
             st.generation += 1;
             let generation = st.generation;
             let Some(viewer) = st.viewers.get_mut(id) else {
@@ -696,7 +703,9 @@ fn viewer_update(
             let mut images = Task::none();
             let mut code = Task::none();
             if kind == FileKind::Markdown {
-                let rendered = markdown::Rendered::parse(&ready.text, &entry.path);
+                let rendered = parsed
+                    .take()
+                    .unwrap_or_else(|| markdown::Rendered::parse(&ready.text, &entry.path));
                 images = markdown_images(id, revision, rendered.wanted());
                 code = markdown_code(id, revision, generation, rendered.code_blocks());
                 viewer.rendered = Some(rendered);
@@ -746,10 +755,11 @@ fn viewer_update(
             Task::none()
         }
         ViewerMsg::Retry => {
-            if let Some(viewer) = st.viewers.get_mut(id) {
-                viewer.load = Some(Load::Loading);
-            }
-            read_text(id, revision, &entry.path)
+            let Some(viewer) = st.viewers.get_mut(id) else {
+                return Task::none();
+            };
+            viewer.load = Some(Load::Loading);
+            read_text(id, revision, &entry.path, viewer.kind)
         }
         ViewerMsg::Bytes(Ok(bytes)) => {
             if let Some(viewer) = st.viewers.get_mut(id) {
@@ -798,7 +808,8 @@ fn viewer_update(
             // A source is read the first time it is asked for.
             if viewer.source && viewer.load.is_none() {
                 viewer.load = Some(Load::Loading);
-                return Task::batch([read_text(id, revision, &entry.path), to_top(id)]);
+                let read = read_text(id, revision, &entry.path, viewer.kind);
+                return Task::batch([read, to_top(id)]);
             }
             // A Markdown page's source, read with the page, is coloured the
             // first time it is shown.
