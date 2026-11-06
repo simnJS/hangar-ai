@@ -72,9 +72,14 @@ jobs:
                 --jq 'map(select(.tag_name == env.TAG)) | .[0].id // empty')
 
           if [ -z "$id" ]; then
-            id=$(jq -n --arg tag "$TAG" --arg body "$NOTES" \
+            # A tag with a pre-release part (v2.2.0-rc.1) makes a pre-release:
+            # GitHub keeps it out of /releases/latest/, where the updater polls,
+            # so installs never update to it by themselves.
+            prerelease=false
+            case "$TAG" in *-*) prerelease=true ;; esac
+            id=$(jq -n --arg tag "$TAG" --arg body "$NOTES" --argjson pre "$prerelease" \
                   '{ tag_name: $tag, name: ("Hangar.AI " + $tag),
-                     body: $body, draft: true, prerelease: false }' \
+                     body: $body, draft: true, prerelease: $pre }' \
                  | gh api --method POST "repos/$GITHUB_REPOSITORY/releases" \
                      --input - --jq .id)
             echo "created release $id for $TAG"
@@ -509,7 +514,14 @@ jobs:
       # Publishing is what moves the release under /releases/latest/, which
       # is where the updater polls. It happens last, with the json complete.
       # `draft` is a boolean and `make_latest` a string, per the REST API.
+      # A pre-release (a tag such as v2.2.0-rc.1) is published as one and never
+      # made latest: the updater, which reads /releases/latest/, does not see it.
       - name: Publish
         run: |
-          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$ID" \
-            -F draft=false -f make_latest=true
+          set -euo pipefail
+          case "$TAG" in
+            *-*) gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$ID" \
+                   -F draft=false -F prerelease=true -f make_latest=false ;;
+            *)   gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$ID" \
+                   -F draft=false -f make_latest=true ;;
+          esac

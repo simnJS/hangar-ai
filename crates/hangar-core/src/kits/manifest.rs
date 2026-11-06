@@ -449,7 +449,11 @@ pub fn compatible(manifest: &Manifest, hangar_version: &str) -> Result<(), Strin
     ) else {
         return Ok(());
     };
-    if requirement.matches(&version) {
+    // A pre-release of Hangar (2.2.0-rc.1) answers as its release: semver
+    // would have `>=2.0.0` refuse every pre-release, and every kit with it.
+    let mut released = version.clone();
+    released.pre = semver::Prerelease::EMPTY;
+    if requirement.matches(&version) || requirement.matches(&released) {
         Ok(())
     } else {
         Err(format!(
@@ -2385,6 +2389,10 @@ mod tests {
             "needs Hangar >=1.6.0, and this is Hangar 1.5.0"
         );
         assert!(compatible(&kit.parse(&minimal()).unwrap(), "0.1.0").is_ok());
+        // A pre-release answers as its release, not below every requirement.
+        assert!(compatible(&manifest, "2.2.0-rc.1").is_ok());
+        assert!(compatible(&manifest, "1.6.0-rc.1").is_ok());
+        assert!(compatible(&manifest, "1.5.0-rc.1").is_err());
     }
 
     #[test]
