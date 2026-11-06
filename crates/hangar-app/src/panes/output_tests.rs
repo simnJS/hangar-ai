@@ -140,7 +140,8 @@ fn output_off_screen_reaches_the_terminal_and_the_activity_without_a_frame() {
 
 /// A pane on screen: a burst of chunks is one wake-up, then one look a frame,
 /// each of which the redraw after it draws, however many chunks came between
-/// two frames.
+/// two frames. A burst that is over by the time the wake-up is handled asks
+/// for no frames at all: the redraw after the wake-up draws it.
 #[test]
 fn a_burst_on_screen_is_one_look_a_frame() {
     let (mut m, mut st, mut wakes) = two_workspaces();
@@ -151,8 +152,19 @@ fn a_burst_on_screen_is_one_look_a_frame() {
     let sent = wakes_sent(&mut wakes);
     assert_eq!(sent, [("a".to_string(), HubKind::Output)]);
     handle_wakes(&mut st, &mut m, &sent);
-    assert!(st.ticking && !st.looking);
+    assert!(
+        !st.ticking && !st.looking,
+        "a lone burst asks for no frames"
+    );
     assert!(output_seen(&m, "a").0.is_some(), "told at once");
+
+    // Output still coming: the next chunk wakes the window, and while the
+    // wake-up's own look finds more, the frames look at the pane.
+    print(&mut ava, "again\r\n");
+    let sent = wakes_sent(&mut wakes);
+    assert_eq!(sent, [("a".to_string(), HubKind::Output)]);
+    st.ticking = true;
+    st.channel.stay_awake();
 
     for _ in 0..3 {
         for chunk in 0..20 {

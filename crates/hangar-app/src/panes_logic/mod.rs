@@ -104,7 +104,7 @@ use iced::{Subscription, Task, window};
 // What other packages name at `panes_logic::*`; several have no user until the
 // packages land.
 #[allow(unused_imports)]
-pub use self::agent_pane::{PaneTarget, find_agent_pane};
+pub use self::agent_pane::{PaneTarget, find_agent_pane, with_finder};
 #[allow(unused_imports)]
 pub use self::agent_state::{OVERLAP_SHOWN_MS, activity_at_hello};
 #[allow(unused_imports)]

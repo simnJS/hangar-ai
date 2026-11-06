@@ -1,6 +1,7 @@
 //! The week, hour by hour: seven rows of 24 cells, darker where more active
 //! time was spent (`StatsHeatmap`).
 
+use std::cell::RefCell;
 use std::sync::Arc;
 
 use hangar_i18n::{Key, Locale, Translator, args};
@@ -145,6 +146,49 @@ impl Heatmap {
     }
 }
 
+impl Heatmap {
+    /// The hour labels, the weekday names and the cells: what the grid's
+    /// cache keeps.
+    fn draw_cells(&self, frame: &mut canvas::Frame, layout: Layout) {
+        let colors = &self.theme.colors;
+        let summary = &self.summary;
+        for (at, label) in self.hours.iter().enumerate() {
+            frame.fill_text(caption(
+                label.clone(),
+                Point::new(layout.x(at * 6), HEAD / 2.0),
+                colors.fg_subtle,
+                font_size::LABEL,
+                alignment::Horizontal::Left,
+                alignment::Vertical::Center,
+            ));
+        }
+
+        let days = format::weekday_names(self.locale, false);
+        for (day, hours) in summary.heat.iter().enumerate() {
+            let top = Layout::y(day);
+            frame.fill_text(caption(
+                capitalized(days[day]),
+                Point::new(0.0, top + CELL / 2.0),
+                colors.fg_muted,
+                font_size::CAPTION,
+                alignment::Horizontal::Left,
+                alignment::Vertical::Center,
+            ));
+            for (hour, value) in hours.iter().enumerate() {
+                let level = heat_level(*value, summary.heat_max);
+                frame.fill(
+                    &Path::rounded_rectangle(
+                        Point::new(layout.x(hour), top),
+                        Size::new(layout.cell_width, CELL),
+                        3.0.into(),
+                    ),
+                    level_color(colors, level),
+                );
+            }
+        }
+    }
+}
+
 /// "Less ▢▢▢▢▢▢ More", at the right.
 fn legend<'a>(theme: &'static Theme, tr: Translator) -> Element<'a, Message> {
     let mut line = row![
@@ -191,12 +235,66 @@ fn capitalized(name: &str) -> String {
         .unwrap_or_default()
 }
 
+/// What the cached part of the grid (the labels and the cells) was drawn
+/// from: the hover and focus rings are drawn over it, every frame.
+#[derive(Debug, Clone, PartialEq)]
+struct Drawn {
+    heat: [[i64; 24]; 7],
+    heat_max: i64,
+    theme: *const Theme,
+    locale: Locale,
+    hours: [String; 4],
+}
+
+impl Drawn {
+    fn of(heatmap: &Heatmap) -> Drawn {
+        Drawn {
+            heat: heatmap.summary.heat,
+            heat_max: heatmap.summary.heat_max,
+            theme: std::ptr::from_ref(heatmap.theme),
+            locale: heatmap.locale,
+            hours: heatmap.hours.clone(),
+        }
+    }
+
+    fn is_of(&self, heatmap: &Heatmap) -> bool {
+        self.heat == heatmap.summary.heat
+            && self.heat_max == heatmap.summary.heat_max
+            && std::ptr::eq(self.theme, heatmap.theme)
+            && self.locale == heatmap.locale
+            && self.hours == heatmap.hours
+    }
+}
+
+/// The grid's tessellated cells, kept between frames.
+///
+/// The page's view is rebuilt after every message, and the 168 rounded cells
+/// were tessellated again each time: about a fifth of the statistics page's
+/// frame (task bddfd5c6). They are drawn again only when what they show
+/// changes, or the canvas' size (the cache's own rule).
+#[derive(Default)]
+pub struct Grid {
+    cells: canvas::Cache,
+    drawn: RefCell<Option<Drawn>>,
+}
+
+impl Grid {
+    /// Forgets the cells unless they were drawn from what `heatmap` shows.
+    fn keep_for(&self, heatmap: &Heatmap) {
+        let mut drawn = self.drawn.borrow_mut();
+        if !drawn.as_ref().is_some_and(|drawn| drawn.is_of(heatmap)) {
+            self.cells.clear();
+            *drawn = Some(Drawn::of(heatmap));
+        }
+    }
+}
+
 impl canvas::Program<Message> for Heatmap {
-    type State = ();
+    type State = Grid;
 
     fn update(
         &self,
-        _state: &mut (),
+        _state: &mut Grid,
         event: &canvas::Event,
         bounds: Rectangle,
         cursor: mouse::Cursor,
@@ -233,52 +331,20 @@ impl canvas::Program<Message> for Heatmap {
 
     fn draw(
         &self,
-        _state: &(),
+        grid: &Grid,
         renderer: &Renderer,
         _theme: &iced::Theme,
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
-        let mut frame = canvas::Frame::new(renderer, bounds.size());
         let colors = &self.theme.colors;
         let layout = Layout::new(bounds.width);
-        let summary = &self.summary;
+        grid.keep_for(self);
+        let cells = grid.cells.draw(renderer, bounds.size(), |frame| {
+            self.draw_cells(frame, layout)
+        });
 
-        for (at, label) in self.hours.iter().enumerate() {
-            frame.fill_text(caption(
-                label.clone(),
-                Point::new(layout.x(at * 6), HEAD / 2.0),
-                colors.fg_subtle,
-                font_size::LABEL,
-                alignment::Horizontal::Left,
-                alignment::Vertical::Center,
-            ));
-        }
-
-        let days = format::weekday_names(self.locale, false);
-        for (day, hours) in summary.heat.iter().enumerate() {
-            let top = Layout::y(day);
-            frame.fill_text(caption(
-                capitalized(days[day]),
-                Point::new(0.0, top + CELL / 2.0),
-                colors.fg_muted,
-                font_size::CAPTION,
-                alignment::Horizontal::Left,
-                alignment::Vertical::Center,
-            ));
-            for (hour, value) in hours.iter().enumerate() {
-                let level = heat_level(*value, summary.heat_max);
-                frame.fill(
-                    &Path::rounded_rectangle(
-                        Point::new(layout.x(hour), top),
-                        Size::new(layout.cell_width, CELL),
-                        3.0.into(),
-                    ),
-                    level_color(colors, level),
-                );
-            }
-        }
-
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
         if let Some((day, hour)) = self.active.filter(|(day, hour)| *day < 7 && *hour < 24) {
             // A ring around the cell, outside it, as the web page's shadow was.
             frame.stroke(
@@ -303,12 +369,12 @@ impl canvas::Program<Message> for Heatmap {
                     .with_width(2.0),
             );
         }
-        vec![frame.into_geometry()]
+        vec![cells, frame.into_geometry()]
     }
 
     fn mouse_interaction(
         &self,
-        _state: &(),
+        _state: &Grid,
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> mouse::Interaction {
@@ -368,6 +434,81 @@ mod tests {
         let ramp: Vec<Color> = (0..6).map(|level| level_color(&colors, level)).collect();
         for pair in ramp.windows(2) {
             assert_ne!(pair[0], pair[1]);
+        }
+    }
+
+    fn heatmap() -> Heatmap {
+        use crate::stats::model::{Measure, Period, SummaryOptions, TOP_SESSIONS, summarize};
+        let data = hangar_core::stats::UsageStats {
+            generated_at: 0,
+            scan: Default::default(),
+            sources: Vec::new(),
+            active_gap_cap_ms: 0,
+            sessions: Vec::new(),
+            models: Vec::new(),
+            buckets: Vec::new(),
+        };
+        let summary = summarize(
+            &data,
+            &SummaryOptions {
+                period: Period::D7,
+                project: None,
+                measure: Measure::Tokens,
+                now: 0,
+                projects: &[],
+                top_sessions: TOP_SESSIONS,
+            },
+        );
+        Heatmap {
+            theme: hangar_theme::default_theme(),
+            locale: Locale::En,
+            summary: Arc::new(summary),
+            active: None,
+            keyboard: false,
+            focused: false,
+            hours: ["0".into(), "6".into(), "12".into(), "18".into()],
+            on_event: |_| Message::Noop,
+        }
+    }
+
+    #[test]
+    fn the_cells_are_kept_while_what_they_show_stays_the_same() {
+        let grid = Grid::default();
+        let mut chart = heatmap();
+        grid.keep_for(&chart);
+        let first = grid.drawn.borrow().clone();
+        assert!(first.as_ref().is_some_and(|drawn| drawn.is_of(&chart)));
+        // The hover and the focus are drawn over the cells, not in them.
+        chart.active = Some((2, 13));
+        chart.focused = true;
+        chart.keyboard = true;
+        grid.keep_for(&chart);
+        assert_eq!(*grid.drawn.borrow(), first);
+    }
+
+    #[test]
+    fn the_cells_are_drawn_again_when_the_data_the_theme_or_the_language_change() {
+        let base = heatmap();
+        let mut more = heatmap();
+        let mut summary = (*more.summary).clone();
+        summary.heat[1][5] = 42;
+        summary.heat_max = 42;
+        more.summary = Arc::new(summary);
+        let mut other_theme = heatmap();
+        other_theme.theme = hangar_theme::themes()
+            .iter()
+            .find(|theme| !std::ptr::eq(*theme, base.theme))
+            .expect("two themes");
+        let mut french = heatmap();
+        french.locale = Locale::Fr;
+        let mut hours = heatmap();
+        hours.hours[1] = "6h".into();
+        for changed in [&more, &other_theme, &french, &hours] {
+            let grid = Grid::default();
+            grid.keep_for(&base);
+            assert!(!grid.drawn.borrow().as_ref().unwrap().is_of(changed));
+            grid.keep_for(changed);
+            assert!(grid.drawn.borrow().as_ref().unwrap().is_of(changed));
         }
     }
 }

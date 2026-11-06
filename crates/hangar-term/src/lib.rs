@@ -245,4 +245,6 @@ pub use links::is_web_link;
 pub use palette::{Palette, xterm_indexed};
 pub use search::{MAX_MATCHES, SearchDirection, SearchError, SearchOptions, SearchStatus};
 pub use terminal::{MAX_SCROLLBACK, Terminal};
-pub use widget::{Binding, BindingKey, Bindings, TerminalView, terminal_view};
+pub use widget::{
+    Binding, BindingKey, Bindings, TerminalView, terminal_view, view_state, view_tag,
+};

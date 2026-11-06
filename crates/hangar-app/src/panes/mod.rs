@@ -811,10 +811,26 @@ fn wake(st: &mut State, m: &mut Model, kind: &HubKind) -> bool {
 
 /// What printed is told at once rather than at the next look: the first
 /// chunk after a quiet spell is what an agent starting a turn looks like.
-fn woken(st: &State, m: &mut Model) {
+///
+/// A lone chunk (the echo of a key, a prompt) starts no frames of its own:
+/// the redraw after this message draws it, and the frames that followed only
+/// found the panes quiet, one redraw of an unchanged window each. So the
+/// look that ends the ticking is made here first ([`frame`]'s): the frames
+/// go on only if more came in meanwhile, as in a flood.
+fn woken(st: &mut State, m: &mut Model) {
     if st.ticking || st.looking {
         let panes = take_outputs(st, None);
         note(m, &panes);
+    }
+    if st.ticking {
+        st.channel.rest();
+        let more = take_outputs(st, Some(true));
+        if more.is_empty() {
+            st.ticking = false;
+        } else {
+            st.channel.stay_awake();
+            note(m, &more);
+        }
     }
 }
 

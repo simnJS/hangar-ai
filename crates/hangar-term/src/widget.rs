@@ -199,6 +199,18 @@ pub struct TerminalView<'a, Message, Theme = iced::Theme, Renderer = iced::Rende
     _marker: PhantomData<(Theme, Renderer)>,
 }
 
+/// The tag of a [`TerminalView`]'s tree, which does not depend on the
+/// terminal: for a wrapper that would otherwise lock a shared terminal just
+/// to answer it, as iced asks for it on every rebuild of the view.
+pub fn view_tag() -> tree::Tag {
+    tree::Tag::of::<State>()
+}
+
+/// A fresh [`TerminalView`] tree state, likewise.
+pub fn view_state() -> tree::State {
+    tree::State::new(State::default())
+}
+
 /// A widget that draws `terminal`. `on_action` turns what happens to it into
 /// the app's message; pass the result to [`Terminal::perform`].
 pub fn terminal_view<'a, Message, Theme, Renderer>(
@@ -346,6 +358,8 @@ struct Measured {
 #[derive(Default)]
 struct RowCache {
     epoch: u64,
+    /// The terminal's `row_shift` the plans are placed for.
+    shift: i64,
     plans: Vec<Option<(u64, RowPlan)>>,
 }
 
@@ -356,6 +370,22 @@ impl RowCache {
             self.epoch = terminal.epoch();
             self.plans.clear();
             self.plans.resize_with(rows, || None);
+        }
+        // The view moved over unchanged content: the plans move with it, as
+        // the terminal moved the rows' generations (`Terminal::scroll_view`).
+        let shift = terminal.row_shift() - self.shift;
+        self.shift = terminal.row_shift();
+        let by = shift.unsigned_abs() as usize;
+        if by >= rows {
+            self.plans.iter_mut().for_each(|plan| *plan = None);
+        } else if shift > 0 {
+            self.plans.rotate_right(by);
+            self.plans[..by].iter_mut().for_each(|plan| *plan = None);
+        } else if shift < 0 {
+            self.plans.rotate_left(by);
+            self.plans[rows - by..]
+                .iter_mut()
+                .for_each(|plan| *plan = None);
         }
         for (row, slot) in self.plans.iter_mut().enumerate() {
             let generation = terminal.row_generation(row);
@@ -567,11 +597,11 @@ where
     Renderer: text::Renderer<Font = iced::Font>,
 {
     fn tag(&self) -> tree::Tag {
-        tree::Tag::of::<State>()
+        view_tag()
     }
 
     fn state(&self) -> tree::State {
-        tree::State::new(State::default())
+        view_state()
     }
 
     fn size(&self) -> Size<Length> {
@@ -1798,6 +1828,90 @@ mod tests {
         width: 8.0,
         height: 16.0,
     };
+
+    /// Whether every cached plan is the plan of the row as it is now.
+    fn plans_are_current(cache: &RowCache, terminal: &Terminal) -> bool {
+        cache.plans.iter().enumerate().all(|(row, slot)| {
+            slot.as_ref()
+                .is_some_and(|(_, plan)| *plan == plan_row(terminal, row))
+        })
+    }
+
+    #[test]
+    fn the_row_cache_follows_scrolls_and_output_row_for_row() {
+        let mut terminal = Terminal::new(crate::Config::default(), 30, 12);
+        for i in 0..300 {
+            let colour = 31 + i % 7;
+            terminal.feed(
+                format!("\x1b[{colour}mline\x1b[0m {i} {}\r\n", "x".repeat(i % 20)).as_bytes(),
+            );
+        }
+        let mut cache = RowCache::default();
+        cache.sync(&terminal);
+        assert!(plans_are_current(&cache, &terminal));
+        let steps: &[&dyn Fn(&mut Terminal)] = &[
+            &|t| drop(t.perform(Action::Scroll(ScrollTo::Lines(3)))),
+            &|t| drop(t.perform(Action::Scroll(ScrollTo::Lines(1)))),
+            &|t| drop(t.perform(Action::Scroll(ScrollTo::Lines(-2)))),
+            &|t| drop(t.perform(Action::Scroll(ScrollTo::PageUp))),
+            &|t| drop(t.feed(b"new output\r\n")),
+            &|t| drop(t.perform(Action::Scroll(ScrollTo::Lines(11)))),
+            &|t| drop(t.perform(Action::Scroll(ScrollTo::Offset(50)))),
+            &|t| drop(t.perform(Action::Scroll(ScrollTo::Top))),
+            &|t| drop(t.perform(Action::Scroll(ScrollTo::Lines(-4)))),
+            &|t| t.scroll_to_bottom(),
+            &|t| drop(t.feed(b"\x1b[2Jcleared\r\n")),
+        ];
+        for (i, step) in steps.iter().enumerate() {
+            step(&mut terminal);
+            cache.sync(&terminal);
+            assert!(plans_are_current(&cache, &terminal), "after step {i}");
+        }
+    }
+
+    #[test]
+    fn a_notch_of_the_wheel_plans_only_the_rows_that_came_into_sight() {
+        let mut terminal = Terminal::new(crate::Config::default(), 30, 12);
+        for i in 0..300 {
+            terminal.feed(format!("line {i}\r\n").as_bytes());
+        }
+        let mut cache = RowCache::default();
+        cache.sync(&terminal);
+        let planned: Vec<u64> = cache
+            .plans
+            .iter()
+            .map(|slot| slot.as_ref().unwrap().0)
+            .collect();
+        terminal.perform(Action::Scroll(ScrollTo::Lines(3)));
+        cache.sync(&terminal);
+        // The nine rows kept their plans (planned at their old generation).
+        let kept: Vec<u64> = cache.plans[3..]
+            .iter()
+            .map(|slot| slot.as_ref().unwrap().0)
+            .collect();
+        assert_eq!(kept, planned[..9]);
+        assert!(plans_are_current(&cache, &terminal));
+    }
+
+    #[test]
+    fn the_tree_a_wrapper_makes_without_the_terminal_is_the_views_own() {
+        // A wrapper answers the tag and the state with `view_tag` and
+        // `view_state` rather than locking its terminal: they must be what
+        // the view itself answers, or its state would be reset every frame.
+        let terminal = Terminal::new(crate::Config::default(), 80, 24);
+        let view: TerminalView<'_, (), iced::Theme, iced::Renderer> =
+            terminal_view(&terminal, |_| ());
+        assert_eq!(
+            view_tag(),
+            Widget::<(), iced::Theme, iced::Renderer>::tag(&view)
+        );
+        let state = view_state();
+        let tree::State::Some(state) = state else {
+            panic!("a state");
+        };
+        assert!(state.downcast_ref::<State>().is_some());
+        assert!(Widget::<(), iced::Theme, iced::Renderer>::children(&view).is_empty());
+    }
 
     #[test]
     fn shapes_are_built_once_per_metrics() {
