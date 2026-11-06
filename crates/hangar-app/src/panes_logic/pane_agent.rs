@@ -107,16 +107,6 @@ pub struct PaneAgent {
     transcript_context: Option<ContextGauge>,
 }
 
-impl PaneAgent {
-    pub fn activity(&self) -> AgentActivity {
-        self.activity
-    }
-
-    pub fn is_bridged(&self) -> bool {
-        self.bridged
-    }
-}
-
 /// Text OSC 9 carries when it is a notification, or `None` when it is one of
 /// the numeric sub-commands the terminal leaves to whoever else wants them.
 ///
@@ -128,6 +118,7 @@ impl PaneAgent {
 /// segment (a message written for a human does not start with one) and
 /// left alone rather than badging the pane and popping up a notification
 /// reading `4;3;0`. The parser's handler answers `false` for `None`.
+#[cfg(test)]
 pub fn osc9_notification(data: &str) -> Option<String> {
     let digits = data.chars().take_while(char::is_ascii_digit).count();
     let numeric = digits > 0
@@ -144,6 +135,7 @@ pub fn osc9_notification(data: &str) -> Option<String> {
 /// Text of an OSC 777 `notify;title;body`, or `None` for any other kind.
 /// The body is the message, the title when there is no body; empty if both
 /// are.
+#[cfg(test)]
 pub fn osc777_notification(data: &str) -> Option<String> {
     let mut parts = data.split(';');
     if parts.next() != Some("notify") {

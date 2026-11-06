@@ -46,6 +46,7 @@ impl Probe {
         Probe { ws, answer }
     }
 
+    #[cfg(test)]
     pub fn ws(&self) -> &str {
         &self.ws
     }

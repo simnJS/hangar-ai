@@ -45,7 +45,7 @@ pub use runtime::{EngineMsg, OrchestrationHandle};
 
 use crate::message::{Intent, Message};
 use crate::services::{CoreEvent, Services};
-use crate::shell::{Notice, Region};
+use crate::shell::Notice;
 use crate::state::Model;
 use crate::state::live::BridgeEvent;
 use crate::state::types::{PaneId, PaneRole, WsId};
@@ -137,18 +137,12 @@ pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
     }
 }
 
-/// What takes the focus when F6 reaches a region this package owns. It owns
-/// none, so the shell never calls it.
-pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message>> {
-    None
-}
-
 /// The intents this package acts on: the person's « Arrêter les workers »,
 /// and a role given or taken (`Intent::AnnounceRole`), whose session is told.
 pub fn on_intent(
     st: &mut State,
     m: &mut Model,
-    sv: &Services,
+    _sv: &Services,
     intent: &Intent,
 ) -> Option<Task<Message>> {
     // Before hydration there is no runtime, and nothing to stop or tell.
@@ -201,8 +195,8 @@ fn role_told(intent: &Intent) -> Option<Msg> {
 /// a board written.
 pub fn on_event(
     st: &mut State,
-    m: &mut Model,
-    sv: &Services,
+    _m: &mut Model,
+    _sv: &Services,
     event: &CoreEvent,
 ) -> Option<Task<Message>> {
     let handle = st.runtime.as_ref()?;

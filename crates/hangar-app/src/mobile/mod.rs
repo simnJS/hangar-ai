@@ -53,7 +53,6 @@ use iced::{Subscription, Task};
 use crate::control::port::Hook;
 use crate::message::{Intent, Message};
 use crate::services::{CoreEvent, Services};
-use crate::shell::Region;
 use crate::state::Model;
 use crate::state::live::BridgeEvent;
 
@@ -105,13 +104,6 @@ pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
     } else {
         Subscription::none()
     }
-}
-
-/// What takes the focus when F6 reaches a region this package owns. It owns
-/// none, so the shell never calls it.
-pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message>> {
-    let _ = (st, m, region);
-    None
 }
 
 /// Every intent, after the shell's own handling of it. None is this

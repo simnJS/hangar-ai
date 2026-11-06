@@ -287,6 +287,7 @@ pub fn model_url_for(path: &str, windows: bool) -> String {
 }
 
 /// [`model_url_for`] for the platform this is built for.
+#[cfg(test)]
 pub fn model_url(path: &str) -> String {
     model_url_for(path, cfg!(windows))
 }
@@ -452,6 +453,7 @@ const EXTENSIONS: &[(&str, &str)] = &[
 
 /// Every language name `language_of` can answer, for the highlighter to
 /// check it knows each.
+#[cfg(test)]
 pub fn languages() -> Vec<&'static str> {
     let mut all: Vec<&'static str> = NAMES
         .iter()

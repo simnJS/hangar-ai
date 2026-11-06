@@ -420,6 +420,7 @@ pub fn preset_size(count: usize) -> usize {
 }
 
 /// The panes a preset of `count` closes, in reading order (`closedByPreset`).
+#[cfg(test)]
 pub fn closed_by_preset<'a>(
     panes: &'a [Pane],
     tree: Option<&SplitNode>,

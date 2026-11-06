@@ -53,7 +53,7 @@ use hangar_i18n::{Key, Locale, args, t_with};
 
 use crate::message::{Intent, Message};
 use crate::services::{Channel, ControlRequest, CoreEvent, Services, inbox::Answer};
-use crate::shell::{Notice, Region};
+use crate::shell::Notice;
 use crate::state::live::Delivering;
 use crate::state::roles::READY_TO_LAND_LABEL;
 use crate::state::{Model, StoreOutcome, Workspace, WsId};
@@ -227,13 +227,6 @@ pub async fn run_as_person(op: &str, args: Value, port: &Port) -> Result<Value, 
 pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
     let _ = (st, m);
     Subscription::none()
-}
-
-/// What takes the focus when F6 reaches a region this package owns. It owns
-/// none, so the shell never calls it.
-pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message>> {
-    let _ = (st, m, region);
-    None
 }
 
 /// Every intent, after the shell's own handling of it: `Some` when this

@@ -5,11 +5,6 @@
 
 // Prevents an extra console window on Windows in release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-// The skeleton declares every extension point before the packages that fill
-// them land: types, fields and functions nobody calls yet, and stub bodies
-// that ignore their arguments. These allows go away once the packages are in
-// (docs/native/PLAN.md, wave 3); a package keeps its own code clean of both.
-#![allow(dead_code, unused_variables)]
 
 mod app;
 mod commands;

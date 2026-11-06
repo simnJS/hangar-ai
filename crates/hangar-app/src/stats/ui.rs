@@ -1,8 +1,6 @@
 //! What the page's parts share: the theme and the language they are drawn in,
 //! and the few styles that belong to the statistics page alone.
 
-use std::borrow::Cow;
-
 use hangar_i18n::{AsKey, Locale, Translator};
 use hangar_theme::tokens::radius;
 use hangar_theme::{Theme, style};
@@ -34,11 +32,6 @@ impl Ui {
     /// A label, owned, for a widget that outlives the call.
     pub fn s(&self, key: impl AsKey) -> String {
         self.tr.t(key).into_owned()
-    }
-
-    /// A label as the borrowed text it is.
-    pub fn cow(&self, key: impl AsKey) -> Cow<'static, str> {
-        self.tr.t(key)
     }
 }
 

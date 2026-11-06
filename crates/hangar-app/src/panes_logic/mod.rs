@@ -106,20 +106,16 @@ pub use self::agent_pane::{PaneTarget, find_agent_pane};
 pub use self::agent_state::{OVERLAP_SHOWN_MS, activity_at_hello};
 #[allow(unused_imports)]
 pub use self::bridge_events::{
-    carry_key, file_base_name, first_line, newly_queued, session_id_label, short_session_id,
+    carry_key, file_base_name, first_line, newly_queued, short_session_id,
 };
 #[allow(unused_imports)]
 pub use self::context_gauge::{CONTEXT_GAUGE_CONFIG, compute_context_gauge, format_tokens};
 #[allow(unused_imports)]
-pub use self::hibernate::{
-    Awake, Blocker, HIBERNATE_DELAYS, HIBERNATE_TICK_MS, Verdict, sleep_refusal,
-};
+pub use self::hibernate::{Awake, Blocker, HIBERNATE_TICK_MS, Verdict, sleep_refusal};
 #[allow(unused_imports)]
 pub use self::hibernation::Asleep;
 #[allow(unused_imports)]
-pub use self::pane_agent::{
-    Ambient, Effect, PaneAgent, PaneInfo, osc9_notification, osc777_notification,
-};
+pub use self::pane_agent::{Ambient, Effect, PaneAgent, PaneInfo};
 #[allow(unused_imports)]
 pub use self::pane_branch::PaneBranch;
 #[allow(unused_imports)]
@@ -143,7 +139,7 @@ use self::pane_insight::Insights;
 use self::session_watch::SessionWatch;
 use crate::message::{Intent, Message};
 use crate::services::{CoreEvent, Services};
-use crate::shell::{Focus, Notice, Notification, Region, View, WindowKind};
+use crate::shell::{Focus, Notice, Notification, View, WindowKind};
 use crate::state::live::{
     AgentActivity, AgentRoster, BridgeEvent, GlyphState, PaneActivity, PaneInsight, PaneMcp,
     PaneStatus, PlanLimits, QueuedPrompt, WorkspaceActivity,
@@ -423,6 +419,7 @@ impl Live {
         self.claims.claim(session_id);
     }
 
+    /// Hands a session id back: another pane may latch onto it again.
     pub fn release_session(&mut self, session_id: Option<&str>) {
         self.claims.release(session_id);
     }
@@ -598,6 +595,7 @@ pub enum SleepLine {
 /// asked for by hand (`sleep.verdict(id)`): read from the model as it stands,
 /// changing nothing. `probed` is what the system said the shells run, once
 /// asked. `None` when the workspace is gone.
+#[cfg(test)]
 pub fn sleep_verdict(
     m: &Model,
     workspace_id: &str,
@@ -748,10 +746,38 @@ fn run_effects(m: &mut Model, info: &PaneInfo, effects: Vec<Effect>) -> Task<Mes
                         pane.session_id = Some(session_id.clone());
                     }),
                 });
+                // The session the pane was on is nobody's any more.
+                release_unheld_sessions(m);
             }
         }
     }
     Task::batch(tasks)
+}
+
+/// Releases the claims no pane holds any more: a pane closed, or moved on to
+/// another session, gives its session back, so that a pane opened later on
+/// that conversation (the transcript hunt) can latch onto it again. A pane
+/// put to sleep or restarted under a new id still holds its session in the
+/// state, so its claim stands.
+fn release_unheld_sessions(m: &mut Model) {
+    let held: HashSet<&str> = m
+        .state()
+        .workspaces
+        .iter()
+        .flat_map(|ws| &ws.panes)
+        .filter_map(|pane| pane.session_id.as_deref())
+        .collect();
+    let unheld: Vec<String> = m
+        .live
+        .panes_logic
+        .claims
+        .ids()
+        .filter(|id| !held.contains(id))
+        .map(str::to_owned)
+        .collect();
+    for id in unheld {
+        m.live.panes_logic.release_session(Some(&id));
+    }
 }
 
 // ----- the active workspace, and who is looking
@@ -1107,6 +1133,9 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
                 live.carried.stash(&key, queue, now);
             }
             live.unmount_pane(&pane, handing_over);
+            if !handing_over {
+                release_unheld_sessions(m);
+            }
             bump(m);
             Task::none()
         }
@@ -1154,7 +1183,7 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
                 m.live
                     .panes_logic
                     .watches
-                    .insert(pane, SessionWatch::new(agent, cwd, known, now));
+                    .insert(pane, SessionWatch::new(cwd, known, now));
             }
             Task::none()
         }
@@ -1175,7 +1204,7 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
             Task::none()
         }
         Msg::Tick => tick(m, sv, now),
-        Msg::Slow => slow(st, m, sv, now),
+        Msg::Slow => slow(st, m, now),
         Msg::HibernateTick => hibernate_tick(st, m, sv, now),
         Msg::Probed {
             workspace,
@@ -1336,7 +1365,7 @@ const CONTEXT_POLL_MS: u64 = 5000;
 /// What happens every second and a half while panes are mounted: the overlap
 /// marks wear off, the session hunt takes a round, the transcripts' context
 /// and the branches are read when it is time.
-fn slow(st: &mut State, m: &mut Model, sv: &Services, now: EpochMs) -> Task<Message> {
+fn slow(st: &mut State, m: &mut Model, now: EpochMs) -> Task<Message> {
     let mut tasks = Vec::new();
     if m.live.panes_logic.agents.expire(now) {
         bump(m);
@@ -1563,13 +1592,6 @@ fn window_focus(
         }
         _ => None,
     }
-}
-
-/// What takes the focus when F6 reaches a region this package owns. It owns
-/// none, so the shell never calls it.
-pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message>> {
-    let _ = (st, m, region);
-    None
 }
 
 /// Every intent, after the shell's own handling of it: `Some` when this

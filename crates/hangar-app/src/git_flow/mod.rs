@@ -25,7 +25,7 @@ use hangar_i18n::{Key, Translator, args};
 use crate::message::{Intent, Message};
 use crate::services::inbox::Answer;
 use crate::services::{CoreEvent, Services};
-use crate::shell::{Notice, Region};
+use crate::shell::Notice;
 use crate::state::Model;
 use crate::workspace_dialog::git_form::one_line;
 
@@ -133,12 +133,6 @@ fn started() -> impl iced::futures::Stream<Item = Message> {
 
 pub fn subscription(_st: &State, _m: &Model) -> Subscription<Message> {
     Subscription::run(started)
-}
-
-/// What takes the focus when F6 reaches a region this package owns. It owns
-/// none, so the shell never calls it.
-pub fn focus_entry(_st: &State, _m: &Model, _region: Region) -> Option<Task<Message>> {
-    None
 }
 
 /// Every intent, after the shell's own handling of it: `Some` when this

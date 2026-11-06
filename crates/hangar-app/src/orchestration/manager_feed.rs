@@ -383,6 +383,7 @@ impl std::fmt::Debug for ManagerFeed {
 }
 
 impl ManagerFeed {
+    #[cfg(test)]
     pub fn new(push: Option<Box<dyn ManagerSink>>) -> Self {
         ManagerFeed {
             push,
@@ -699,12 +700,6 @@ impl ManagerFeed {
         self.board_timer = Some(self.timer(now + BOARD_SETTLE_MS));
     }
 
-    /// Sends what is pending now, waits and holds aside (tests, `flush`).
-    pub fn flush(&mut self, io: &dyn EngineIo, now: u64) -> Option<String> {
-        self.timer = None;
-        self.send(io, now)
-    }
-
     /// What lately waited for the person, oldest first, block events left
     /// out: the manager's briefing and the phone's state (`managerJournal`).
     pub fn journal(&self) -> Vec<ManagerJournalEntry> {
@@ -726,6 +721,7 @@ impl ManagerFeed {
         self.journal.clone()
     }
 
+    #[cfg(test)]
     pub fn stop(&mut self) {
         self.stopped = true;
         self.timer = None;

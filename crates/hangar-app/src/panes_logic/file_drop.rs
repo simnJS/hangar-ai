@@ -8,6 +8,7 @@
 //! whole list and a point), so `DropTracker` counts the files and follows the
 //! cursor to put a drop back together.
 
+#[cfg(test)]
 use iced::Point;
 
 use crate::state::types::{AgentId, ShellInfo};
@@ -209,6 +210,7 @@ pub fn drop_text(paths: &[String], agent: AgentId, shell: Option<&ShellInfo>) ->
 /// ("drop 3 files to paste them"), remembers where the cursor last was, and
 /// holds the dropped paths until the events of that drop have all arrived
 /// (`take_drop`).
+#[cfg(test)]
 #[derive(Debug, Default)]
 pub struct DropTracker {
     hovered: usize,
@@ -216,6 +218,7 @@ pub struct DropTracker {
     dropped: Vec<String>,
 }
 
+#[cfg(test)]
 impl DropTracker {
     pub fn file_hovered(&mut self) {
         self.hovered += 1;

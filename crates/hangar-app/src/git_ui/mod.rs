@@ -24,7 +24,7 @@ use iced::{Element, Subscription, Task};
 use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::services::{CoreEvent, Services};
-use crate::shell::{Overlay, Region};
+use crate::shell::Overlay;
 use crate::state::{Model, PaneId, WsId};
 
 pub use diff_view::{DiffMsg, DiffState};
@@ -90,13 +90,6 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
 pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
     let _ = (st, m);
     Subscription::none()
-}
-
-/// What takes the focus when F6 reaches a region this package owns. It owns
-/// none, so the shell never calls it.
-pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message>> {
-    let _ = (st, m, region);
-    None
 }
 
 /// The folder and the name a diff of a workspace, or of one of its panes, is

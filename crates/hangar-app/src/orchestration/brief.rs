@@ -403,6 +403,7 @@ fn pane_of<'a>(state: &'a AppState, pane_id: &str) -> Option<(&'a Workspace, &'a
 
 /// The pane's briefing, or `None` for a pane with no part in an
 /// orchestration (`buildBriefing`).
+#[cfg(test)]
 pub fn build_briefing(inputs: &BriefingInputs<'_>) -> Option<Briefing> {
     build_briefing_with(inputs, None)
 }

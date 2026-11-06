@@ -25,7 +25,7 @@ use crate::navigator::menu::set_off;
 use crate::orchestration_ui::actions::pin_refusal;
 use crate::palette::sources::workspace_of;
 use crate::services::{CoreEvent, Services};
-use crate::shell::{MenuEntry, Region};
+use crate::shell::MenuEntry;
 use crate::state::types::{Pane, PaneRole, Workspace};
 use crate::state::{Model, PaneId, Patch, SplitDir};
 
@@ -105,12 +105,6 @@ fn focus_terminal(m: &Model, pane: PaneId) -> Task<Message> {
 pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
     let _ = (st, m);
     Subscription::none()
-}
-
-/// The menu owns no region, so the shell never calls this.
-pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message>> {
-    let _ = (st, m, region);
-    None
 }
 
 pub fn on_intent(
@@ -380,12 +374,6 @@ fn account_line(pane: &PaneId, entry: MenuEntry) -> menu::Entry<Message> {
         MenuEntry::Heading(label) => menu::heading(label),
         MenuEntry::Separator => menu::separator(),
     }
-}
-
-/// The « … » menu of a pane header (embedded by the pane header), with none
-/// of its buttons folded.
-pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, pane: &'a PaneId) -> Element<'a, Message> {
-    view_folded(st, ctx, pane, Folded::default())
 }
 
 /// The « … » button and its menu, for a header that folded `folded` away.

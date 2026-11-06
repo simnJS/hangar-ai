@@ -32,7 +32,7 @@ use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::panes_logic::state_glyph_state;
 use crate::services::{CoreEvent, Services};
-use crate::shell::{Notification, Region};
+use crate::shell::Notification;
 use crate::state::folders::sidebar_order;
 use crate::state::live::GlyphState;
 use crate::state::roles::orchestrator_of;
@@ -213,6 +213,7 @@ fn settle(st: &mut State, m: &mut Model, seen: Look) -> Task<Message> {
     tasks
 }
 
+#[cfg(test)]
 fn watched(m: &Model) -> Vec<String> {
     let state = m.state();
     watched_boards(&sidebar_order(&state.workspaces, &state.folders))
@@ -330,12 +331,6 @@ pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
         focus,
         iced::time::every(BEAT).map(|_| Message::NeedsYou(Msg::Refresh)),
     ])
-}
-
-/// What takes the focus when F6 reaches a region this package owns. It owns
-/// none, so the shell never calls it.
-pub fn focus_entry(_st: &State, _m: &Model, _region: Region) -> Option<Task<Message>> {
-    None
 }
 
 /// Every intent, after the shell's own handling of it: `Some` when this

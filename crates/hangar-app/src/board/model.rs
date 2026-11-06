@@ -67,12 +67,14 @@ impl Column {
 }
 
 /// Whether the task waits on something outside the board.
+#[cfg(test)]
 pub fn is_blocked(task: &Task) -> bool {
     task.blocked.is_some()
 }
 
 /// `isoDay` for a calendar date: the day as `board.rs` writes it, padded.
 /// Today's is `hangar_core::board::today()`.
+#[cfg(test)]
 pub fn iso_day(year: i32, month: u32, day: u32) -> String {
     format!("{year:04}-{month:02}-{day:02}")
 }
@@ -188,6 +190,7 @@ pub enum Blocker<'a> {
     Task(&'a Task),
     /// An id no task has any more: a deleted dependency blocks forever, which
     /// is exactly what needs showing.
+    #[allow(dead_code)] // The card says "missing" without the id; the tests read it.
     Missing(&'a str),
 }
 

@@ -298,7 +298,6 @@ pub(super) fn context<'a>(
     limits: Option<&'a [RateLimit]>,
 ) -> Section<'a, Message> {
     let (t, tr) = (s.theme(), s.tr());
-    let c = &t.colors;
     let show_plan = s.pane.agent == AgentId::Claude;
     let five_hour = limits
         .filter(|_| show_plan)
@@ -451,7 +450,7 @@ fn plan_tile<'a>(
     five_hour: Option<RateLimit>,
     week: Option<RateLimit>,
 ) -> Element<'a, Message> {
-    let (t, tr) = (s.theme(), s.tr());
+    let tr = s.tr();
     let body: Element<'a, Message> = if five_hour.is_some() || week.is_some() {
         let meters = [
             (

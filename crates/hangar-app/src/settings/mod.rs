@@ -61,7 +61,7 @@ use self::schema::{Act, Category, Context};
 use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::services::{CoreEvent, Services, dialogs};
-use crate::shell::{Overlay, Region, SettingsCategory};
+use crate::shell::{Overlay, SettingsCategory};
 use crate::state::Model;
 
 /// The package's UI state; lives in `App.pkg.settings`.
@@ -511,12 +511,6 @@ fn dev_open() -> impl iced::futures::Stream<Item = Message> {
     .filter_map(|message| async move { message })
 }
 
-/// What takes the focus when F6 reaches a region this package owns. It owns
-/// none, so the shell never calls it.
-pub fn focus_entry(_st: &State, _m: &Model, _region: Region) -> Option<Task<Message>> {
-    None
-}
-
 /// Every intent, after the shell's own handling of it: the sheet opening (or
 /// moving to another category), and closing, are seen here.
 pub fn on_intent(
@@ -546,7 +540,7 @@ pub fn on_intent(
 /// Every core event, after the shell's own handling of it.
 pub fn on_event(
     st: &mut State,
-    m: &mut Model,
+    _m: &mut Model,
     sv: &Services,
     event: &CoreEvent,
 ) -> Option<Task<Message>> {

@@ -398,7 +398,7 @@ fn set_dock_width(m: &mut Model, width: f32) {
     )));
 }
 
-pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
+pub fn update(st: &mut State, m: &mut Model, _sv: &Services, msg: Msg) -> Task<Message> {
     let abandoned = if msg.leaves_the_add_field() {
         // The field that was asked for is left, unless it is the next one.
         if !matches!(msg, Msg::StartAdding(..) | Msg::Draft(..)) {
@@ -764,7 +764,7 @@ pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message
 pub fn on_intent(
     st: &mut State,
     m: &mut Model,
-    sv: &Services,
+    _sv: &Services,
     intent: &Intent,
 ) -> Option<Task<Message>> {
     react(st, m, intent)
@@ -815,9 +815,9 @@ fn react(st: &mut State, m: &mut Model, intent: &Intent) -> Option<Task<Message>
 
 /// Every core event, after the shell's own handling of it.
 pub fn on_event(
-    st: &mut State,
+    _st: &mut State,
     m: &mut Model,
-    sv: &Services,
+    _sv: &Services,
     event: &CoreEvent,
 ) -> Option<Task<Message>> {
     match event {
@@ -1370,7 +1370,7 @@ mod tests {
     fn the_dock_as_a_drawer_counts_as_on_screen() {
         use crate::shell::Drawer;
         use crate::state::Patch;
-        let (mut m, main, site) = two_windows();
+        let (mut m, _, site) = two_windows();
         m.apply(StoreAction::UpdateSettings(Patch::new(
             |settings: &mut Settings| settings.board_dock_open = false,
         )));

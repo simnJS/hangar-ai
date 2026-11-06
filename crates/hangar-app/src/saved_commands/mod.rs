@@ -20,7 +20,7 @@ use hangar_core::pty::pty_write;
 use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::services::{CoreEvent, Services};
-use crate::shell::{Overlay, Region};
+use crate::shell::Overlay;
 use crate::state::types::SavedCommand;
 use crate::state::{
     AgentActivity, CommandScope, Model, PaneId, Settings, StoreAction, Workspace, WsId,
@@ -275,12 +275,6 @@ pub fn run(sv: &Services, command: &SavedCommand, panes: Vec<PaneId>) -> Task<Me
 pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
     let _ = (st, m);
     Subscription::none()
-}
-
-/// Saved commands own no region, so the shell never calls this.
-pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message>> {
-    let _ = (st, m, region);
-    None
 }
 
 /// Sets the dialog up when its overlay opens, drops it when it goes, closes

@@ -40,7 +40,7 @@ use iced::{Element, Subscription, Task};
 use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::services::{CoreEvent, Services};
-use crate::shell::{MenuEntry, Region};
+use crate::shell::MenuEntry;
 use crate::state::live::BridgeEvent;
 use crate::state::{Model, PaneId, Patch, Settings, StoreAction, Workspace, WsId};
 
@@ -376,12 +376,6 @@ pub fn subscription(_st: &State, _m: &Model) -> Subscription<Message> {
 /// other hook that runs before the first window is drawn.
 fn started() -> impl iced::futures::Stream<Item = Message> {
     stream::once(async { Message::Accounts(Msg::Started) })
-}
-
-/// What takes the focus when F6 reaches a region this package owns. It owns
-/// none, so the shell never calls it.
-pub fn focus_entry(_st: &State, _m: &Model, _region: Region) -> Option<Task<Message>> {
-    None
 }
 
 /// Every intent, after the shell's own handling of it: `Some` when this

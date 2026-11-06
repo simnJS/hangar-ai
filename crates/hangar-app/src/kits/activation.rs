@@ -16,7 +16,7 @@ use hangar_i18n::{Key, Translator, args};
 
 use super::model::{
     is_kit_commands_grant, is_kit_hooks_grant, kit_command_name, kit_commands_grant,
-    kit_hooks_grant, kit_loopback_port, kit_permissions_in, workspace_kits,
+    kit_hooks_grant, kit_loopback_port, kit_permissions_in,
 };
 use crate::state::types::{AgentId, PaneId, Workspace, WorkspaceKit};
 
@@ -501,6 +501,7 @@ pub fn panes_to_restart(ws: &Workspace) -> Vec<PaneId> {
 }
 
 /// Whether two lists hold the same kits with the same grants.
+#[cfg(test)]
 pub fn same_kits(a: &[WorkspaceKit], b: &[WorkspaceKit]) -> bool {
     if a.len() != b.len() {
         return false;
@@ -515,11 +516,6 @@ pub fn same_kits(a: &[WorkspaceKit], b: &[WorkspaceKit]) -> bool {
             .find(|other| other.id == kit.id)
             .is_some_and(|other| sorted(other) == sorted(kit))
     })
-}
-
-/// The workspace's kits through the defensive reader.
-pub fn kits_of(ws: Option<&Workspace>) -> Vec<WorkspaceKit> {
-    workspace_kits(ws)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

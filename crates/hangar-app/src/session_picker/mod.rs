@@ -27,7 +27,7 @@ use hangar_ui::{button as buttons, dialog};
 use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::services::{CoreEvent, Services};
-use crate::shell::{Overlay, Region};
+use crate::shell::Overlay;
 use crate::state::types::{AgentId, Pane};
 use crate::state::{Model, PaneId, Patch, WsId};
 
@@ -207,12 +207,6 @@ fn close(m: &Model) -> Task<Message> {
 pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
     let _ = (st, m);
     Subscription::none()
-}
-
-/// The picker owns no region, so the shell never calls this.
-pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message>> {
-    let _ = (st, m, region);
-    None
 }
 
 /// Follows the overlay stack: the picker opens on a pane (and asks for its

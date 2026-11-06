@@ -13,15 +13,18 @@
 use std::future::Future;
 use std::time::Duration;
 
+#[cfg(test)]
 use hangar_core::kits::StepStatus;
 
 /// The steps still to run on this machine: never run, or run with another
 /// command.
+#[cfg(test)]
 pub fn pending_steps(steps: &[StepStatus]) -> Vec<&StepStatus> {
     steps.iter().filter(|step| !step.done).collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg(test)]
 pub struct SetupSummary {
     pub done: usize,
     pub total: usize,
@@ -29,6 +32,7 @@ pub struct SetupSummary {
     pub complete: bool,
 }
 
+#[cfg(test)]
 pub fn setup_summary(steps: &[StepStatus]) -> SetupSummary {
     let done = steps.iter().filter(|step| step.done).count();
     SetupSummary {
@@ -55,6 +59,7 @@ pub enum KitOs {
 
 impl KitOs {
     /// The name the manifest and core use for it.
+    #[cfg(test)]
     pub fn name(self) -> &'static str {
         match self {
             KitOs::Windows => "windows",
@@ -79,6 +84,7 @@ pub fn current_os() -> KitOs {
 /// The same mapping from a platform string, which is how the web app learned
 /// the system (`navigator.platform`). The app asks [`current_os`]; this one is
 /// kept so the mapping has its test.
+#[cfg(test)]
 pub fn os_of_platform(platform: &str) -> KitOs {
     let platform = platform.to_lowercase();
     if platform.contains("win") {
@@ -111,6 +117,7 @@ pub trait PaneTyping: Send + Sync {
 }
 
 /// [`PaneTyping`] and the opening of the pane itself.
+#[cfg(test)]
 pub trait SetupPaneDeps: PaneTyping {
     /// Opens a shell pane in the kit's folder; `None` when the workspace is
     /// full.
@@ -156,6 +163,7 @@ pub async fn type_into_pane<D: PaneTyping>(pane: &str, command: &str, deps: &D) 
 }
 
 /// Opens the pane, waits for its terminal, then types the command.
+#[cfg(test)]
 pub async fn run_setup_command<D: SetupPaneDeps>(command: &str, deps: &D) -> SetupRunResult {
     match deps.open_pane() {
         Some(pane) => type_into_pane(&pane, command, deps).await,

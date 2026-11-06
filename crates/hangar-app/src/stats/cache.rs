@@ -84,6 +84,7 @@ impl UsageCache {
     }
 
     /// Whether a scan is under way.
+    #[cfg(test)]
     pub fn scanning(&self) -> bool {
         self.inner().scan.is_some()
     }

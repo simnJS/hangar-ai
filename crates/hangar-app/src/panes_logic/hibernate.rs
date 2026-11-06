@@ -359,9 +359,6 @@ pub fn step_aside(input: &StepAsideInput) -> Option<WsId> {
     first(awake).or_else(|| first(candidates))
 }
 
-/// The delays the settings offer, in minutes.
-pub const HIBERNATE_DELAYS: [u32; 5] = [5, 10, 20, 30, 60];
-
 /// How often the window looks for a workspace to put to sleep.
 pub const HIBERNATE_TICK_MS: u64 = 30_000;
 

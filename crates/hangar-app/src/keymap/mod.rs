@@ -63,7 +63,6 @@ use crate::commands::CommandId;
 use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::services::{CoreEvent, Services};
-use crate::shell::Region;
 use crate::state::{Model, Patch, Settings, StoreAction};
 
 pub use bindings::{Overrides, reset_command, with_binding, without_binding};
@@ -75,7 +74,7 @@ pub use index::KeymapIndex;
 #[allow(unused_imports)]
 pub use bindings::{Keymap, defaults};
 #[allow(unused_imports)]
-pub use index::{Conflict, ConflictKind, commands_for, find_conflicts};
+pub use index::{Conflict, ConflictKind};
 
 /// The package's UI state; lives in `App.pkg.keymap`. Everything the
 /// dispatcher keeps is in [`Live`], where the terminals' filter reads it.
@@ -286,12 +285,6 @@ pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
             .chain(iced::futures::stream::pending())
     });
     Subscription::batch([presses, changed])
-}
-
-/// The keymap owns no region, so the shell never calls this.
-pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message>> {
-    let _ = (st, m, region);
-    None
 }
 
 pub fn on_intent(

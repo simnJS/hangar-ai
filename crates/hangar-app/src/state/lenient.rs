@@ -40,6 +40,7 @@ use super::unread::{self, Kept, Owner};
 
 /// `state.json`'s JSON as an `AppState`, whatever it holds; what could not be
 /// read is dropped. A document that is not an object reads as the empty state.
+#[cfg(test)]
 pub fn app_state(value: Value) -> AppState {
     read(value).0
 }
@@ -47,6 +48,7 @@ pub fn app_state(value: Value) -> AppState {
 /// `state.json`'s JSON as an `AppState`, and the values it held that no field
 /// could read, to be written back (`Unread`). A document `read_checked`
 /// turns down reads as the empty state.
+#[cfg(test)]
 pub fn read(value: Value) -> (AppState, Vec<Kept>) {
     read_checked(value).unwrap_or_else(|why| {
         eprintln!("state.json could not be read ({why}); starting empty");

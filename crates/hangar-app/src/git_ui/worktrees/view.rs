@@ -344,7 +344,6 @@ fn worktree_row<'a>(
     open: &HashMap<String, String>,
 ) -> Element<'a, Message> {
     let (t, tr) = (ctx.theme, ctx.i18n);
-    let c = &t.colors;
     let busy = panel.busy.is_some();
     let meta = worktree
         .branch

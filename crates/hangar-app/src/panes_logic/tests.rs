@@ -1054,3 +1054,24 @@ fn a_pane_closed_for_good_loses_its_api_token_and_one_still_in_the_state_keeps_i
     tokens.revoke("tok-closed");
     tokens.revoke("tok-kept");
 }
+
+#[test]
+fn a_session_no_pane_holds_any_more_is_released_and_one_still_held_is_not() {
+    let (mut m, _) = model(vec![workspace(
+        "w1",
+        vec![
+            pane("p1", "Ava", AgentId::Claude),
+            pane("p2", "Bob", AgentId::Claude),
+        ],
+    )]);
+    m.live.panes_logic.claim_session("s-p1");
+    m.live.panes_logic.claim_session("s-p2");
+    m.live.panes_logic.claim_session("s-gone");
+
+    release_unheld_sessions(&mut m);
+
+    let claims = &m.live.panes_logic.claims;
+    assert!(claims.contains("s-p1"));
+    assert!(claims.contains("s-p2"));
+    assert!(!claims.contains("s-gone"));
+}

@@ -58,8 +58,6 @@ use super::model::{self, ImageSource, MarkdownLink};
 pub enum Msg {
     /// A link was pressed.
     Link(String),
-    /// The page scrolled: its offset, and where its viewport starts.
-    Scrolled(f32),
     /// A heading was found, this far down the page.
     Found(f32),
     /// What is selected on the page, said when the pointer is let go: empty
@@ -100,7 +98,6 @@ pub struct Rendered {
     /// The images that are files on the disk, by the address the page names
     /// them with: read by [`load_images`], never by the view.
     wanted: Vec<(Uri, PathBuf)>,
-    offset: f32,
     /// What is selected on the page, kept across the views built of it.
     doc: Doc,
     /// The colours of the code blocks, by [`block_key`]: classes, not colours,
@@ -159,7 +156,6 @@ impl Rendered {
             base,
             images,
             wanted,
-            offset: 0.0,
             doc: Doc::new(iced::Color::TRANSPARENT),
             code: HashMap::new(),
         }
@@ -252,14 +248,6 @@ impl Rendered {
             MarkdownLink::Anchor(id) => Some(id),
             _ => None,
         }
-    }
-
-    pub fn scrolled(&mut self, offset: f32) {
-        self.offset = offset;
-    }
-
-    pub fn offset(&self) -> f32 {
-        self.offset
     }
 }
 
@@ -1009,7 +997,6 @@ pub fn view<'a>(
             .on_press(|| Msg::Pressed),
     )
     .id(scroll)
-    .on_scroll(|viewport| Msg::Scrolled(viewport.absolute_offset().y))
     .width(Length::Fill)
     .height(Length::Fill)
     .style(style::scrollable::default(t))
@@ -1017,6 +1004,7 @@ pub fn view<'a>(
 }
 
 /// The ids the headings of a page get, in order (what a `#anchor` can name).
+#[cfg(test)]
 pub fn heading_ids(content: &markdown::Content, t: &Theme) -> Vec<String> {
     let settings = settings(t);
     let mut taken = HashMap::new();

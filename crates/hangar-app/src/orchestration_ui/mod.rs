@@ -23,13 +23,13 @@ use hangar_i18n::{Key, args};
 use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::services::{CoreEvent, Services};
-use crate::shell::{Notice, Overlay, Region, View};
+use crate::shell::{Notice, Overlay, View};
 use crate::state::types::PaneRole;
-use crate::state::{Model, PaneId, WsId};
+use crate::state::{Model, WsId};
 
 // For the pane header (P5), which knows its own width.
 #[allow(unused_imports)]
-pub use badge::{has_badge, pane_badge_in};
+pub use badge::pane_badge_in;
 
 /// The package's UI state; lives in `App.pkg.orchestration_ui`.
 /// `actions` provides pin, unpin, create orchestrator and open manager, reached
@@ -83,12 +83,6 @@ pub fn update(st: &mut State, m: &mut Model, _sv: &Services, msg: Msg) -> Task<M
 /// reads it again when it changes.
 pub fn subscription(_st: &State, _m: &Model) -> Subscription<Message> {
     Subscription::none()
-}
-
-/// What takes the focus when F6 reaches a region this package owns. It owns
-/// none, so the shell never calls it.
-pub fn focus_entry(_st: &State, _m: &Model, _region: Region) -> Option<Task<Message>> {
-    None
 }
 
 fn hq_name(m: &Model) -> String {
@@ -279,10 +273,4 @@ pub fn on_event(
 /// `Overlay::Orchestration`: a workspace's orchestration settings.
 pub fn panel_view<'a>(st: &'a State, ctx: Ctx<'a>, ws: &'a WsId) -> Element<'a, Message> {
     panel::view(st, ctx, ws)
-}
-
-/// A pane bar's orchestration badge (orchestrator, worker, manager); nothing
-/// for any other pane. `has_badge` says whether there is one.
-pub fn pane_badge<'a>(ctx: Ctx<'a>, ws: &'a WsId, pane: &'a PaneId) -> Element<'a, Message> {
-    badge::pane_badge(ctx, ws, pane)
 }

@@ -43,7 +43,7 @@ use crate::git_flow::flow::{FromGitOutcome, FromGitRequest};
 use crate::git_flow::paths::{projects_folder_of, resolve_parent};
 use crate::message::{GitOrigin, Intent, Message};
 use crate::services::{CoreEvent, Services, dialogs};
-use crate::shell::{Notice, Overlay, Region};
+use crate::shell::{Notice, Overlay};
 use crate::state::types::{AgentId, WorkspaceKit};
 use crate::state::{Model, Patch, StoreAction, WsId};
 
@@ -810,12 +810,6 @@ pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
     } else {
         Subscription::none()
     }
-}
-
-/// What takes the focus when F6 reaches a region this package owns. It owns
-/// none, so the shell never calls it.
-pub fn focus_entry(_st: &State, _m: &Model, _region: Region) -> Option<Task<Message>> {
-    None
 }
 
 /// Every intent, after the shell's own handling of it: `Some` when this

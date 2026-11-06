@@ -193,6 +193,11 @@ impl Claims {
     pub fn contains(&self, session_id: &str) -> bool {
         self.0.contains(session_id)
     }
+
+    /// Every session id claimed.
+    pub fn ids(&self) -> impl Iterator<Item = &str> {
+        self.0.iter().map(String::as_str)
+    }
 }
 
 /// The session ids an agent already has under this folder, read before a

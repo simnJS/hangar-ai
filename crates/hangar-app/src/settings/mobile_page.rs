@@ -90,8 +90,6 @@ pub enum Tone {
     Ok,
     /// `.mob-note`: smaller, quieter.
     Note,
-    /// `.mob-error`.
-    Error,
 }
 
 /// A piece of a sentence with commands in it.
@@ -677,6 +675,7 @@ pub fn page(props: &Props) -> Page {
 }
 
 impl Row {
+    #[cfg(test)]
     fn strings(&self, out: &mut Vec<String>) {
         match self {
             Row::Text { text, .. } => out.push(text.clone()),
@@ -722,12 +721,14 @@ impl Row {
 
 impl Page {
     /// Every row, in page order.
+    #[cfg(test)]
     pub fn rows(&self) -> impl Iterator<Item = &Row> {
         self.blocks.iter().flat_map(|block| &block.rows)
     }
 
     /// Everything the page says, in one string: what the markup of the TS
     /// tests was searched for.
+    #[cfg(test)]
     pub fn text(&self) -> String {
         let mut out = vec![self.switch.label.clone(), self.switch.hint.clone()];
         out.extend(self.failure.clone());
@@ -742,6 +743,7 @@ impl Page {
     }
 
     /// The switches that are on, the page's own included.
+    #[cfg(test)]
     pub fn switches_on(&self) -> usize {
         let own = usize::from(self.switch.on);
         own + self
@@ -751,6 +753,7 @@ impl Page {
     }
 
     /// The controls that cannot be used right now, the page's switch included.
+    #[cfg(test)]
     pub fn disabled_controls(&self) -> usize {
         let own = usize::from(!self.switch.enabled);
         let rest: usize = self

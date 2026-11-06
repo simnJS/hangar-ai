@@ -27,8 +27,6 @@ use crate::state::{AppState, PaneId, WsId};
 
 use super::push::{folder_name, workspace_of_share};
 
-/// How often the journals are read.
-pub const TICK_MS: u64 = 5_000;
 /// A line the disk refused is kept, this many, and tried again.
 const MAX_UNWRITTEN: usize = 200;
 /// The same task asking for the person twice within this is one line.
@@ -467,6 +465,7 @@ impl ActivityLog {
         }
     }
 
+    #[cfg(test)]
     pub fn stop(&mut self) {
         self.stopped = true;
     }

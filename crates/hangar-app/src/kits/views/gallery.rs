@@ -315,6 +315,7 @@ impl GalleryModel {
     }
 
     /// Every sentence the library shows, one per line.
+    #[cfg(test)]
     pub fn text(&self) -> String {
         let mut out = vec![
             self.title.clone(),

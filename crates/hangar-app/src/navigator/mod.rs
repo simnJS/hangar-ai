@@ -182,12 +182,6 @@ impl State {
     }
 }
 
-impl State {
-    pub fn query(&self) -> &str {
-        &self.query
-    }
-}
-
 /// The package's shared read-model, which other packages may read; lives in
 /// `Model.live.navigator`.
 #[derive(Debug, Default)]

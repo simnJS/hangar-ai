@@ -104,7 +104,6 @@ use crate::control::{self, Hook};
 use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::services::{CoreEvent, PreviewAccess, Services};
-use crate::shell::Region;
 use crate::state::{Model, WsId};
 
 /// How often the file in front is looked at for a newer version
@@ -816,7 +815,7 @@ fn viewer_update(
             }
             Task::none()
         }
-        ViewerMsg::Markdown(msg) => markdown_update(st, m, id, revision, msg, locale),
+        ViewerMsg::Markdown(msg) => markdown_update(st, id, revision, msg, locale),
         ViewerMsg::Window(action) => window_action(st, m, env, &entry, action),
     }
 }
@@ -837,7 +836,6 @@ fn to_top(id: &str) -> Task<Message> {
 
 fn markdown_update(
     st: &mut State,
-    m: &Model,
     id: &str,
     revision: u64,
     msg: markdown::Msg,
@@ -870,10 +868,6 @@ fn markdown_update(
         return Task::none();
     };
     match msg {
-        markdown::Msg::Scrolled(offset) => {
-            rendered.scrolled(offset);
-            Task::none()
-        }
         markdown::Msg::Found(y) => markdown::scroll_by(scroll, y).map(to_message),
         // Handled above, before the page is looked for.
         markdown::Msg::Pressed | markdown::Msg::Selected(_) | markdown::Msg::Copied => Task::none(),
@@ -1257,14 +1251,6 @@ pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
     Subscription::batch(subscriptions)
 }
 
-/// What takes the focus when F6 reaches a region this package owns. It owns
-/// none since the previews are panes of the grid (region `main`), so the
-/// shell never calls it.
-pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message>> {
-    let _ = (st, m, region);
-    None
-}
-
 /// Every intent, after the shell's own handling of it: `Some` when this
 /// package acted on it.
 pub fn on_intent(
@@ -1325,10 +1311,10 @@ fn heard(st: &mut State, m: &mut Model, env: &Env, intent: &Intent) -> Option<Ta
 
 /// Every core event, after the shell's own handling of it.
 pub fn on_event(
-    st: &mut State,
-    m: &mut Model,
-    sv: &Services,
-    event: &CoreEvent,
+    _st: &mut State,
+    _m: &mut Model,
+    _sv: &Services,
+    _event: &CoreEvent,
 ) -> Option<Task<Message>> {
     None
 }

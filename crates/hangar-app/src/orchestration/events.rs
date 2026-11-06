@@ -917,6 +917,7 @@ fn orchestrated(state: &AppState) -> Vec<(Workspace, Pane)> {
 }
 
 impl OrchestratorEngine {
+    #[cfg(test)]
     pub fn new() -> Self {
         Self::default()
     }
@@ -1343,15 +1344,6 @@ impl OrchestratorEngine {
             .collect()
     }
 
-    /// Sends what is pending now, waits and holds aside (tests, `flush`).
-    pub fn flush(&mut self, io: &dyn EngineIo, workspace_id: &str, now: u64) -> Option<String> {
-        self.space(workspace_id).timer = None;
-        let state = io.state();
-        let ws = workspace_in(&state, workspace_id)?;
-        let orchestrator = orchestrator_of(&ws)?.clone();
-        self.send(io, &ws, &orchestrator, now)
-    }
-
     /// What happened lately in the workspace, oldest first, for its briefing.
     pub fn journal(&self, workspace_id: &str) -> Vec<JournalEntry> {
         self.spaces
@@ -1368,6 +1360,7 @@ impl OrchestratorEngine {
             .unwrap_or_default()
     }
 
+    #[cfg(test)]
     pub fn stop(&mut self) {
         self.stopped = true;
         self.spaces.clear();

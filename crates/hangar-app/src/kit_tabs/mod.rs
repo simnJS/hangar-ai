@@ -85,7 +85,6 @@ use crate::preview::access::Shared;
 use crate::preview::store::{Entry, KitTabToOpen};
 use crate::preview::webview::{StartError, WinState};
 use crate::services::{CoreEvent, Inbox, Services};
-use crate::shell::Region;
 use crate::state::{Model, Snapshot, Workspace, WsId};
 
 /// How often the running tabs are brought in line with what nothing tells
@@ -958,13 +957,6 @@ pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
         subscriptions.push(iced::time::every(TOAST_TICK).map(|_| send(Msg::ToastTick)));
     }
     Subscription::batch(subscriptions)
-}
-
-/// What takes the focus when F6 reaches a region this package owns. It owns
-/// none, so the shell never calls it.
-pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message>> {
-    let _ = (st, m, region);
-    None
 }
 
 /// Every intent, after the shell's own handling of it: `Some` when this

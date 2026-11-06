@@ -28,8 +28,6 @@ pub const DOCK_BAR_HEIGHT: f32 = 30.0;
 /// A column's header (`.column__head`), and the dock's.
 pub const COLUMN_HEAD: f32 = 34.0;
 pub const DOCK_COLUMN_HEAD: f32 = 28.0;
-/// The row to add a card in, and the cards' spacing.
-pub const ADD_HEIGHT: f32 = 28.0;
 /// The dock's grip: the area that takes the pointer, and the line it draws.
 pub const GRIP_WIDTH: f32 = 5.0;
 pub const GRIP_INSET: f32 = 1.0;
