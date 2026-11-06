@@ -595,7 +595,7 @@ mod tests {
             assert!(seen.headers.get(header::COOKIE).is_none());
             assert!(seen.headers.get("x-hangar").is_none());
 
-            // Byte for byte both ways, each byte a use of the slot.
+            // A moment on, so the echo below counts as a later use of the slot.
             tokio::time::sleep(Duration::from_millis(20)).await;
             let before = now_ms();
             socket.write_all(b"ping from the phone").await.unwrap();

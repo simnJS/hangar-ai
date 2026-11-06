@@ -171,7 +171,7 @@ impl ActivityLog {
                 .filter_map(|line| serde_json::from_str::<Entry>(line).ok())
                 .filter(|entry| entry.at > since)
                 .collect();
-            // Written in the order they came; the newest last.
+            // The file is written oldest first: reversed, then sorted newest first.
             today.reverse();
             today.sort_by_key(|entry| std::cmp::Reverse(entry.at));
             out.extend(today);

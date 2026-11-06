@@ -133,7 +133,7 @@ fn walk(root: &Path, path: &Path, depth: usize, found: &mut Vec<(String, String)
         return;
     };
     if meta.file_type().is_symlink() {
-        // A linked folder kit's: what it points at, not followed.
+        // A link: what it points at, not followed.
         let target = fs::read_link(path).unwrap_or_default();
         found.push((name, format!("link:{}", target.to_string_lossy())));
     } else if meta.is_file() {
