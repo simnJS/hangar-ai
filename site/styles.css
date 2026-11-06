@@ -413,9 +413,9 @@ html:not(.js) .js-only {
 }
 
 /* One soft pool of the accent behind the title and the window: the
-   only decoration on the page, and it takes the theme's accent. */
-.hero::before {
-  content: "";
+   only decoration on the page, and it takes the theme's accent.
+   An element rather than a ::before, so assets/motion.js can drift it. */
+.hero__glow {
   position: absolute;
   inset: 0 0 auto;
   z-index: -1;
@@ -1383,6 +1383,142 @@ html:not(.js) .js-only {
   .foot__links {
     margin-left: 0;
   }
+}
+
+/* ── motion (assets/motion.js) ───────────────────────────────────
+   index.html sets .motion on <html> before the first paint when the
+   visitor allows motion; motion.js adds .motion-ready when it runs.
+   Between the two, the hero's copy waits hidden and its window leans
+   back exactly as motion.js starts them, so nothing jumps. Without
+   script, or with reduced motion, none of this applies. */
+
+html.motion {
+  scroll-behavior: auto;
+}
+
+html.motion:not(.motion-ready) .hero__copy > * {
+  opacity: 0;
+}
+
+@media (min-width: 960px) {
+  html.motion:not(.motion-ready) .shot--hero .window {
+    transform: perspective(1400px) translate3d(0, 60px, 0) rotateX(18deg) scale(0.88);
+  }
+}
+
+@media (max-width: 959px) {
+  html.motion:not(.motion-ready) .shot--hero .window {
+    transform: translate3d(0, 30px, 0) scale(0.96);
+  }
+}
+
+html.motion .shot--hero .window {
+  will-change: transform;
+}
+
+/* a word of a title, and a line of one in its mask */
+.w {
+  display: inline-block;
+}
+
+.rl {
+  display: block;
+  overflow: hidden;
+  /* room for descenders inside the mask, given back below */
+  padding-bottom: 0.12em;
+  margin-bottom: -0.12em;
+}
+
+.rl > span {
+  display: block;
+}
+
+/* the tasks panel's veils and bars, placed over the capture */
+.window--panel {
+  position: relative;
+}
+
+.tfx {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.tfx__veil,
+.tfx__bar {
+  position: absolute;
+}
+
+.tfx__bar {
+  overflow: hidden;
+  border-radius: 999px;
+}
+
+.tfx__fill {
+  position: absolute;
+  inset: 0;
+}
+
+/* the delivery: the stage under way stands out, a passed one links on */
+.dstep {
+  transition: background-color 200ms var(--ease);
+}
+
+.dstep[data-state="running"] {
+  background: color-mix(in srgb, var(--state-working) 7%, transparent);
+}
+
+.dstep::before {
+  transition: background-color 200ms var(--ease);
+}
+
+.dstep[data-state="done"]::before {
+  background: color-mix(in srgb, var(--state-working) 55%, var(--border-strong));
+}
+
+/* performance: before (the whole bar) and after (its share) */
+.perf__item {
+  position: relative;
+}
+
+.perf__num {
+  display: inline-block;
+}
+
+.perf__bar {
+  position: absolute;
+  right: 24px;
+  bottom: 11px;
+  left: 24px;
+  height: 3px;
+}
+
+.perf__bar i {
+  position: absolute;
+  inset: 0;
+  border-radius: 2px;
+  transform-origin: 0 50%;
+}
+
+.perf__bar-was {
+  background: var(--line-strong);
+}
+
+.perf__bar-now {
+  background: var(--fg-secondary);
+}
+
+@media (max-width: 599px) {
+  .perf__bar {
+    right: 18px;
+    bottom: 8px;
+    left: 18px;
+  }
+}
+
+/* a section a link glided to takes the focus, without a ring */
+[tabindex="-1"]:focus:not(:focus-visible) {
+  outline: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

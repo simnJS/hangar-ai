@@ -32,9 +32,18 @@
 <meta name="twitter:image:alt" content="Hangar.AI's chat view: Iris, the orchestrator, sums up a recipe app's progress beside the board's tasks.">
 
 <link rel="preload" href="fonts/inter-latin-opsz.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="styles.css?v=f474595161">
+<link rel="stylesheet" href="styles.css?v=36067723b1">
 <link rel="stylesheet" href="assets/mobile.css?v=f8c856a9c0">
-<script>document.documentElement.classList.add('js');</script>
+<script>
+(function (r) {
+  r.classList.add('js');
+  // assets/motion.js takes it from here; without it, after 3 s, the page shows as written.
+  if (window.matchMedia && matchMedia('(prefers-reduced-motion: no-preference)').matches) {
+    r.classList.add('motion');
+    setTimeout(function () { if (!r.classList.contains('motion-ready')) r.classList.remove('motion'); }, 3000);
+  }
+})(document.documentElement);
+</script>
 
 <script type="application/ld+json">
 {
@@ -96,6 +105,7 @@
 
 <!-- Hero ─────────────────────────────────────────────────────────── -->
 <section class="hero" id="top" aria-labelledby="hero-title">
+  <div class="hero__glow" aria-hidden="true"></div>
   <div class="wrap hero__copy">
     <a class="release" href="#chat">
       <span class="release__dot" aria-hidden="true"></span>
@@ -712,6 +722,9 @@
   </div>
 </footer>
 
-<script src="main.js?v=ba6176dd6b" defer></script>
+<script src="main.js?v=252ab7a37d" defer></script>
+<script src="vendor/gsap.min.js?v=3.15.0" defer></script>
+<script src="vendor/ScrollTrigger.min.js?v=3.15.0" defer></script>
+<script src="assets/motion.js?v=0278911c0e" defer></script>
 </body>
 </html>

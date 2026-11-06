@@ -8,7 +8,9 @@ loaded from another origin.
 index.html            the page
 styles.css            every colour is a token; Graphite unless main.js swaps them
 main.js               themes, section bar, download per OS, the delivery, folds
+assets/motion.js      the scroll-driven motion (see Motion below)
 assets/mobile.css     the Hangar Mobile section: the phones drawn around their screens
+vendor/               GSAP 3.15.0 and its ScrollTrigger, unchanged, and their licence
 img/                  crops of captures of the app, AVIF + WebP, cut as img/crops.json says
 fonts/                Inter (latin, variable, with optical sizes) and its OFL licence
 og.png                the 1200×630 share image for X, Open Graph and the rest
@@ -56,10 +58,71 @@ when the copy changes. The short facts (under the orchestrator and the kits,
 and "Also in the box") are `<details class="fold">`, written open; `main.js`
 folds them to their titles on a phone, and above 600 px they simply stay open.
 
-The delivery card is HTML, not a capture. It is written in its final state;
-`main.js` resets it and plays the four stages once when it scrolls into view,
-unless the visitor asked for reduced motion. It is the only thing on the page
-that moves by itself, and it says it is an illustration.
+The delivery card is HTML, not a capture. It is written in its final state,
+and says it is an illustration. `assets/motion.js` walks it through its four
+stages as it scrolls up the screen; if that script did not run, `main.js` plays
+them once on a timer when the card comes into view, and with reduced motion it
+stays as written.
+
+## Motion
+
+`assets/motion.js`, with GSAP and ScrollTrigger from `vendor/` (3.15.0, the
+npm package's `dist/` files as they came; `vendor/GSAP-LICENSE.md` holds the
+licence and their checksums). About 46 KB gzipped together; nothing comes from
+another origin. To update GSAP, copy the two files from the new package, change
+the `?v=3.15.0` of their `<script>` tags, and the version and checksums in the
+licence file (the crop script stamps `assets/motion.js`, not `vendor/`).
+
+What moves, top to bottom:
+
+- **Hero.** At load, the headline rises word by word and the rest of the copy
+  after it (timed, once). As you scroll, the window leans back in perspective
+  and lies flat by the time its top nears the bar, the copy fades back, and the
+  accent glow drifts down, slower than the page.
+- **Chat view.** The tasks panel comes in part by part (veils of the capture's
+  own background lift, top to bottom). On a wide, tall enough screen the
+  section then pins: point by point, the part of the panel it is about stays lit
+  and the rest dims, and the five progress bars fill, redrawn over the capture
+  in its own colours where it has them (`PARTS` and `BARS` in pixels of the
+  580 × 1400 crop: move them if `tasks` is cut again).
+- **Orchestrator.** The panes window leans back and lies flat as it comes in;
+  the delivery's stages run with the scroll, forth and back.
+- **Hangar Mobile.** The four phones come in one after the other, from depth,
+  fanned out.
+- **Kits.** The 3D preview's window comes in turned and leaning, and straightens.
+- **Performance.** Each figure counts up as it enters, and a bar under it goes
+  from before (the whole bar) to after (its share of it). A figure whose
+  "before" is no number gets no bar; the bars are drawn by the script, so a page
+  without it has none.
+- **Everywhere.** Section titles rise line by line out of a mask; cards, facts
+  and short texts fade up as they enter; links within the page glide to their
+  section (any wheel, touch or key stops the glide).
+
+How: `gsap.matchMedia()` with three sets. `full` (960 px and wider) does all of
+the above; `light` (narrower) drops the pin, the tilts and the phones' depth for
+plain rises and fades; `reduce` is next.
+
+**Reduced motion** (`prefers-reduced-motion: reduce`): nothing travels, scales
+or counts. Titles, cards and texts only fade in, and every figure, bar and the
+delivery show their final state. The inline script in `<head>` does not even set
+`motion` then.
+
+Without script everything is visible as written: the only CSS that hides
+anything (the hero's copy, before its entrance) applies under `html.motion`,
+which the inline script sets before the first paint and takes back after 3 s if
+`motion.js` never set `motion-ready`.
+
+Tuning: the numbers live in `TUNE` at the top of `motion.js` (scrub lag, the
+hero's tilt, scale, lift and where it lies flat, the glow's drift, how long the
+chat stays pinned, the windows' tilt, the reveals' rise, the line stagger, the
+counting time); the delivery's stages are `STAGES`, stretches of the card's way
+up the screen. Rules to keep: move `transform` and `opacity` only (the
+exception is the figures' text while they count, held at its final width so
+nothing shifts); give back the final state on the way out of a set (each
+returns its cleanups); create the pin before what comes after it. Check with
+the page served locally and headless Chrome at 1440 and 390 px, with and
+without reduced motion, and a layout-shift observer while scrolling: it should
+read 0.
 
 ## Design
 
