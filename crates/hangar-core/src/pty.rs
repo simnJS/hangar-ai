@@ -34,6 +34,7 @@ use std::time::Duration;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
 
+mod drain;
 mod scope;
 
 /// A pane's input, shared out of the registry: `pty_write` takes a clone of
@@ -684,14 +685,17 @@ pub fn pty_spawn_with(
     };
 
     let mut child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
-    let ends = (pair.master.try_clone_reader(), pair.master.take_writer());
+    let ends = (
+        drain::reader(&*pair.master),
+        pair.master.take_writer().map_err(|e| e.to_string()),
+    );
     let (mut reader, writer) = match ends {
         (Ok(reader), Ok(writer)) => (reader, writer),
         // The shell runs already: not left behind with no pane to own it.
         (Err(e), _) | (_, Err(e)) => {
             let _ = child.kill();
             let _ = child.wait();
-            return Err(e.to_string());
+            return Err(e);
         }
     };
 
@@ -729,24 +733,24 @@ pub fn pty_spawn_with(
     let reader_thread = std::thread::Builder::new().name(format!("pty-{id}"));
     let spawned = reader_thread.spawn(move || {
         let mut pending: Vec<u8> = Vec::new();
-        let mut buf = [0u8; 8192];
+        // Each event carries what the PTY held when it was read, up to
+        // `drain::MOST`: a flood in a few big pieces rather than a line
+        // each, and a lone echo at once all the same.
+        let mut buf = vec![0u8; drain::MOST];
         loop {
-            match reader.read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
-                    // The pane may have been killed while this chunk was in
-                    // flight. It belongs to nobody now, and the id may already
-                    // be back in use by another pane.
-                    if !reader_live.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    pending.extend_from_slice(&buf[..n]);
-                    let text = take_utf8(&mut pending);
-                    if !text.is_empty() {
-                        emit(&mut output, &history, &reader_id, text);
-                    }
-                }
-                Err(_) => break,
+            let open = drain::read_some(&mut *reader, &mut buf, &mut pending);
+            // The pane may have been killed while this chunk was in
+            // flight. It belongs to nobody now, and the id may already
+            // be back in use by another pane.
+            if !reader_live.load(Ordering::Relaxed) {
+                break;
+            }
+            let text = take_utf8(&mut pending);
+            if !text.is_empty() {
+                emit(&mut output, &history, &reader_id, text);
+            }
+            if !open {
+                break;
             }
         }
         // Only a shell that ended on its own has an exit to report: a killed
@@ -1646,6 +1650,65 @@ mod tests {
         );
         pty_kill(&manager, "p-sink".into(), None).unwrap();
         assert!(!pty_alive(&manager, "p-sink".into()));
+    }
+
+    /// A flood of small writes, as `seq` or a build log makes: the PTY holds
+    /// them while the sink is busy with the first, and they come out whole,
+    /// in order, numbered, in a few events rather than one per write.
+    #[cfg(unix)]
+    #[test]
+    fn a_flood_of_small_writes_reaches_the_sink_whole_in_few_events() {
+        let manager = Arc::new(PtyManager::default());
+        let (sent, received) = std::sync::mpsc::channel();
+        let mut first = true;
+        // 2000 writes of 6 bytes, `printf` being a builtin of sh.
+        let script =
+            "printf 'go\\n'; i=0; while [ $i -lt 2000 ]; do printf 'x%04d\\n' $i; i=$((i+1)); done";
+        pty_spawn(
+            &manager,
+            Box::new(move |event| {
+                if first {
+                    first = false;
+                    std::thread::sleep(Duration::from_millis(500));
+                }
+                let _ = sent.send(event);
+            }),
+            "p-flood".into(),
+            std::env::temp_dir().to_string_lossy().into_owned(),
+            Some(sh(script)),
+            80,
+            24,
+            None,
+            Some(false),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect("spawned");
+
+        let mut printed = String::new();
+        let mut events = 0;
+        loop {
+            match received
+                .recv_timeout(Duration::from_secs(10))
+                .expect("an event")
+            {
+                PtyEvent::Output(chunk) => {
+                    events += 1;
+                    printed.push_str(&chunk.data);
+                    assert_eq!(chunk.seq, printed.len() as u64);
+                }
+                PtyEvent::Exit(_) => break,
+            }
+        }
+        let expected: String = std::iter::once("go\r\n".to_string())
+            .chain((0..2000).map(|i| format!("x{i:04}\r\n")))
+            .collect();
+        assert_eq!(printed, expected);
+        assert!(events < 20, "{events} events for 2001 writes");
+        pty_kill(&manager, "p-flood".into(), None).unwrap();
     }
 
     /// Spawns `script` under /bin/sh in pane `id`, and answers the pid it
