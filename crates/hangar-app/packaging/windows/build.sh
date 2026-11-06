@@ -95,6 +95,16 @@ fi
 cp "$here/installer.nsi" "$here/theme.nsh" "$here/utils.nsh" "$here/backdrop.bmp" "$here/backdrop@2x.bmp" "$work/"
 cp "$icons/icon.ico" "$work/icon.ico"
 cp "$release_dir/hangar-ai.exe" "$release_dir/hangar-webview.exe" "$work/"
+# The Visual C++ runtime the executables import, beside them: a fresh Windows
+# has no Redistributable (the release workflow stages these from Visual Studio).
+crt_dlls="vcruntime140.dll vcruntime140_1.dll msvcp140.dll"
+for crt in $crt_dlls; do
+  if [ ! -f "$release_dir/$crt" ]; then
+    echo "$release_dir/$crt is missing: copy the x64 Microsoft.VC14*.CRT DLLs of Visual Studio there (docs/native/PACKAGING.md)" >&2
+    exit 1
+  fi
+  cp "$release_dir/$crt" "$work/"
+done
 cp "$node_dir/hangar-node-x86_64" "$node_dir/hangar-node-aarch64" "$work/"
 # NSIS reads these as UTF-8 only with the byte order mark in front.
 for language in English French; do
@@ -102,6 +112,7 @@ for language in English French; do
 done
 
 size=$(( $(wc -c < "$release_dir/hangar-ai.exe") + $(wc -c < "$release_dir/hangar-webview.exe") + $(wc -c < "$node_dir/hangar-node-x86_64") + $(wc -c < "$node_dir/hangar-node-aarch64") ))
+for crt in $crt_dlls; do size=$(( size + $(wc -c < "$release_dir/$crt") )); done
 estimated="$(printf '0x%06x' $(( size / 1000 )))"
 
 installer="Hangar.AI_${version}_x64-setup.exe"

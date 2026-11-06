@@ -382,18 +382,28 @@ jobs:
           fi
 
       # The runner has the Visual C++ Redistributable, a fresh Windows does not:
-      # an executable that imports its DLLs starts here and nowhere else
-      # (.cargo/config.toml links the C runtime in). The import table names the
-      # DLLs in plain ASCII, so a search of the file finds them.
-      - name: Check the Windows executables need no Visual C++ Redistributable
+      # hangar-ai.exe and hangar-webview.exe import VCRUNTIME140.dll,
+      # VCRUNTIME140_1.dll and MSVCP140.dll and exit at once without them
+      # (STATUS_DLL_NOT_FOUND). Linking the C runtime in (+crt-static) is not
+      # an option: whisper.cpp's CMake build stays on the DLL runtime and the
+      # link fails. So the three DLLs ship beside the executables (app-local
+      # deployment, which Microsoft allows for the redistributable's files),
+      # taken from the Visual Studio redistributable folder the build used.
+      - name: Stage the Visual C++ runtime DLLs
         if: runner.os == 'Windows'
+        shell: pwsh
         run: |
-          for exe in target/dist/hangar-ai.exe target/dist/hangar-webview.exe; do
-            if grep -a -i -q -E 'vcruntime140|msvcp140' "$exe"; then
-              echo "$exe imports the Visual C++ Redistributable's DLLs" >&2
-              exit 1
-            fi
-          done
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $crt = Get-ChildItem -Path "$vs\VC\Redist\MSVC" -Recurse -Directory -Filter "Microsoft.VC14*.CRT" |
+                 Where-Object { $_.FullName -match '\\x64\\' -and $_.FullName -notmatch 'onecore|debug_nonredist' } |
+                 Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $crt) { throw "no x64 Microsoft.VC14*.CRT folder under $vs\VC\Redist\MSVC" }
+          foreach ($dll in "vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll") {
+            $src = Join-Path $crt.FullName $dll
+            if (-not (Test-Path $src)) { throw "$src is missing" }
+            Copy-Item $src "target/dist/$dll"
+            Write-Output "staged $src"
+          }
 
       # hangar-node for Linux x86_64 and arm64, from the `node` job, where the
       # packaging scripts take them from (they refuse to package without).

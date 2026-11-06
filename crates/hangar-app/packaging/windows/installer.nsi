@@ -909,6 +909,13 @@ Section Install
   File /a "/oname=hangar-node-x86_64" "hangar-node-x86_64"
   File /a "/oname=hangar-node-aarch64" "hangar-node-aarch64"
 
+  ; Custom: the Visual C++ runtime both executables import, beside them, which
+  ; Windows looks for first: a fresh Windows has no Redistributable, and
+  ; without these the app exits at once (STATUS_DLL_NOT_FOUND).
+  File /a "/oname=vcruntime140.dll" "vcruntime140.dll"
+  File /a "/oname=vcruntime140_1.dll" "vcruntime140_1.dll"
+  File /a "/oname=msvcp140.dll" "msvcp140.dll"
+
   ; Create uninstaller
   WriteUninstaller "$INSTDIR\uninstall.exe"
 
@@ -1026,6 +1033,9 @@ Section Uninstall
   Delete "$INSTDIR\${HELPERBINARYNAME}"
   Delete "$INSTDIR\hangar-node-x86_64"
   Delete "$INSTDIR\hangar-node-aarch64"
+  Delete "$INSTDIR\vcruntime140.dll"
+  Delete "$INSTDIR\vcruntime140_1.dll"
+  Delete "$INSTDIR\msvcp140.dll"
 
   ; Delete uninstaller
   Delete "$INSTDIR\uninstall.exe"
