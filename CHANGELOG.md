@@ -33,6 +33,7 @@ Every release, with its installers, is on the
 
 ### Fixed
 
+- Chat view: a question with several parts is asked one part at a time, as Claude Code asks it (1/3, Back, Next, then your answers and Send), its card scrolls instead of overflowing, and a missing answer or a refusal is said beside the buttons instead of Send doing nothing. Runs of tool calls fold into one quiet line ("3 commands, 2 tasks created · 1 failed") that opens on a click.
 - Windows: a pane whose folder is longer than 258 characters starts its shell (in the folder's short 8.3 name) instead of failing with "The directory name is invalid".
 - Windows: Hangar starts on a Windows without the Visual C++ Redistributable. The installer now puts the runtime's three DLLs beside the executables; before, they exited at once (STATUS_DLL_NOT_FOUND) on a fresh install.
 - A Hangar started in a folder inside a worktree no longer removes other workers' worktrees: the sweep of orphan worktrees at start only removes the worktree of a task that is done, and never one a live process works in; landing a delivery and stopping a worker keep a folder another pane or process uses.
