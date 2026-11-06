@@ -4,8 +4,9 @@
 //!
 //! The shell pushes `Overlay::SessionPicker` (`Intent::OpenSessions`); this
 //! package follows it in `on_intent`, asking `list_sessions` off the UI
-//! thread, and picking one respawns the pane on it (`Intent::ReplacePane`
-//! with its `sessionId`).
+//! thread (or, for a pane of a workspace on a node, the node's
+//! `/node/sessions`, where its transcripts are), and picking one respawns
+//! the pane on it (`Intent::ReplacePane` with its `sessionId`).
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -251,24 +252,32 @@ pub fn on_intent(
     };
     // Only Claude Code keeps conversations; a shell has none to list.
     let claude = picker.agent == AgentId::Claude;
+    let node = workspace.node.clone();
     st.picker = Some(picker);
     Some(Task::perform(
-        tokio::task::spawn_blocking(move || {
-            if claude {
-                list_sessions(cwd)
-            } else {
-                Vec::new()
-            }
-        }),
-        move |found| {
-            send(Msg::Loaded {
-                ws,
-                pane,
+        async move {
+            match (claude, node) {
+                (false, _) => Vec::new(),
+                (true, Some(node)) => listed_on(&node, &cwd).await,
                 // An error is an empty list, as it was.
-                sessions: found.unwrap_or_default(),
-            })
+                (true, None) => tokio::task::spawn_blocking(move || list_sessions(cwd))
+                    .await
+                    .unwrap_or_default(),
+            }
         },
+        move |sessions| send(Msg::Loaded { ws, pane, sessions }),
     ))
+}
+
+/// The conversations node `node` keeps for `cwd`, with their labels; empty
+/// when it cannot say, as a local listing that fails is.
+async fn listed_on(node: &str, cwd: &str) -> Vec<AgentSession> {
+    let Ok(client) = crate::nodes::remote::client_of(node) else {
+        return Vec::new();
+    };
+    crate::nodes::remote::sessions(&client, cwd, true)
+        .await
+        .unwrap_or_default()
 }
 
 pub fn on_event(
@@ -522,6 +531,35 @@ mod tests {
         assert_eq!(relative(en, now, now - 30 * 60 * MINUTE), "1\u{a0}d ago");
         let fr = Translator::new(Locale::Fr);
         assert_eq!(relative(fr, now, now - 5 * MINUTE), "il y a 5\u{a0}min");
+    }
+
+    #[tokio::test]
+    async fn a_remote_pane_s_sessions_are_its_node_s_with_their_labels() {
+        use crate::nodes::testing::{answer, listen, read_request};
+
+        let (listener, client) = listen().await;
+        let node = "node-session-picker";
+        crate::nodes::remote::publish(node, Some(client));
+        let fake = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let line = read_request(&mut stream).await.line().to_owned();
+            let body = r#"{"sessions":[{"id":"s1","label":"fix the build","modifiedMs":5}]}"#;
+            answer(&mut stream, 200, body).await;
+            line
+        });
+        let found = listed_on(node, "/home/hangar/demo").await;
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            (found[0].id.as_str(), found[0].label.as_str()),
+            ("s1", "fix the build")
+        );
+        assert_eq!(
+            fake.await.unwrap(),
+            "GET /node/sessions?cwd=%2Fhome%2Fhangar%2Fdemo&labels=1 HTTP/1.1"
+        );
+        // Away: an empty list, as a local listing that fails.
+        crate::nodes::remote::publish(node, None);
+        assert!(listed_on(node, "/w").await.is_empty());
     }
 
     #[test]

@@ -10,6 +10,10 @@
 //! hangar-core's `memory_*` functions, so both sides always see one truth;
 //! `CoreEvent::MemoryChanged` tells this view when the other side wrote.
 //!
+//! A workspace on a node (`Workspace.node`) shows the node's memory instead,
+//! the store its agents write to (remote.rs): read and written through the
+//! node's API, reloaded when the node's `/node/events` says it changed.
+//!
 //! The view is a main-view region: it exists while `ui.view` is `Memory`, as
 //! the React component did, so it loads when the view is chosen and forgets
 //! everything (the search, the open entries, a half-typed composer) when
@@ -17,6 +21,7 @@
 
 mod format;
 mod guards;
+pub(crate) mod remote;
 mod view;
 
 use std::collections::HashSet;
@@ -25,6 +30,7 @@ use iced::widget::{Id, operation, text_editor};
 use iced::{Element, Subscription, Task};
 
 use hangar_core::memory::{self, MemoryEntry, MemoryPatch, NewMemory};
+use iced::futures::Stream;
 
 use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
@@ -166,6 +172,8 @@ pub enum Wrote {
 pub enum Msg {
     /// `memory_load` answered.
     Loaded(Result<Vec<MemoryEntry>, String>),
+    /// The node of the workspace shown says its memory changed.
+    NodeChanged,
     /// A create, update or delete answered.
     Wrote(Result<Wrote, String>),
 
@@ -195,38 +203,84 @@ pub enum Msg {
     Delete(String),
 }
 
-/// `memory_load` off the UI thread.
-fn load(sv: &Services) -> Task<Message> {
-    let host = sv.core().host().clone();
-    Task::perform(
-        async move {
-            tokio::task::spawn_blocking(move || {
-                memory::memory_load(&host).map(|memory| memory.entries)
-            })
-            .await
-            .map_err(|error| error.to_string())
-            .and_then(|loaded| loaded)
-        },
-        |result| Message::Memory(Msg::Loaded(result)),
-    )
+/// The node whose memory the view shows: the active workspace's, when it is
+/// on one; `None` for this machine's.
+fn source(m: &Model) -> Option<String> {
+    m.active_workspace().and_then(|ws| ws.node.clone())
 }
 
-/// Runs a write off the UI thread. Every write funnels through here, so a
-/// refused one (a limit, a missing title) is always shown.
-fn write(
-    sv: &Services,
-    run: impl FnOnce(&hangar_core::Host) -> Result<Wrote, String> + Send + 'static,
-) -> Task<Message> {
+/// The memory of `node` (this machine's for `None`), off the UI thread.
+async fn read(host: hangar_core::Host, node: Option<String>) -> Result<Vec<MemoryEntry>, String> {
+    match node {
+        Some(node) => remote::load(&crate::nodes::remote::client_of(&node)?).await,
+        None => tokio::task::spawn_blocking(move || {
+            memory::memory_load(&host).map(|memory| memory.entries)
+        })
+        .await
+        .map_err(|error| error.to_string())
+        .and_then(|loaded| loaded),
+    }
+}
+
+/// The memory read again, wherever the view's lives.
+fn load(sv: &Services, m: &Model) -> Task<Message> {
     let host = sv.core().host().clone();
-    Task::perform(
-        async move {
-            tokio::task::spawn_blocking(move || run(&host))
-                .await
-                .map_err(|error| error.to_string())
-                .and_then(|wrote| wrote)
-        },
-        |result| Message::Memory(Msg::Wrote(result)),
-    )
+    Task::perform(read(host, source(m)), |result| {
+        Message::Memory(Msg::Loaded(result))
+    })
+}
+
+/// A write on this machine's memory.
+fn write_here(host: &hangar_core::Host, write: remote::Write) -> Result<Wrote, String> {
+    match write {
+        remote::Write::Create { cwd, entry } => memory::memory_create(
+            host,
+            NewMemory {
+                title: entry.title,
+                content: entry.content,
+                tags: entry.tags,
+                workspace: cwd,
+                agent: "user".into(),
+            },
+        )
+        .map(|_| Wrote::Created),
+        remote::Write::Update { id, entry } => memory::memory_update(
+            host,
+            id,
+            MemoryPatch {
+                title: Some(entry.title),
+                content: Some(entry.content),
+                tags: Some(entry.tags),
+            },
+        )
+        .map(|_| Wrote::Updated),
+        remote::Write::Delete { id } => memory::memory_delete(host, id).map(|()| Wrote::Deleted),
+    }
+}
+
+/// The write on the memory of `node` (this machine's for `None`).
+async fn apply(
+    host: hangar_core::Host,
+    node: Option<String>,
+    write: remote::Write,
+) -> Result<Wrote, String> {
+    match node {
+        Some(node) => remote::write(&crate::nodes::remote::client_of(&node)?, write).await,
+        None => tokio::task::spawn_blocking(move || write_here(&host, write))
+            .await
+            .map_err(|error| error.to_string())
+            .and_then(|wrote| wrote),
+    }
+}
+
+/// Runs a write off the UI thread, on the memory the view shows. Every write
+/// funnels through here, so a refused one (a limit, a missing title) is
+/// always shown.
+fn write(sv: &Services, m: &Model, write: remote::Write) -> Task<Message> {
+    let host = sv.core().host().clone();
+    Task::perform(apply(host, source(m), write), |result| {
+        Message::Memory(Msg::Wrote(result))
+    })
 }
 
 pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
@@ -252,6 +306,8 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
             }
             Task::none()
         }
+        Msg::NodeChanged if m.ui.view == View::Memory && st.entries.is_some() => load(sv, m),
+        Msg::NodeChanged => Task::none(),
         Msg::Wrote(result) => match result {
             Ok(wrote) => {
                 match wrote {
@@ -262,7 +318,7 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
                     Wrote::Updated => st.editing = None,
                     Wrote::Deleted => {}
                 }
-                load(sv)
+                load(sv, m)
             }
             // A refused write says so where it happened and changes nothing
             // else: the list on screen is still what the core holds.
@@ -319,23 +375,11 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
                 return Task::none();
             };
             st.error = None;
-            let workspace = m
+            let cwd = m
                 .active_workspace()
                 .map(|ws| ws.cwd.clone())
                 .unwrap_or_default();
-            write(sv, move |host| {
-                memory::memory_create(
-                    host,
-                    NewMemory {
-                        title: entry.title,
-                        content: entry.content,
-                        tags: entry.tags,
-                        workspace,
-                        agent: "user".into(),
-                    },
-                )
-                .map(|_| Wrote::Created)
-            })
+            write(sv, m, remote::Write::Create { cwd, entry })
         }
 
         Msg::Toggle(id) => {
@@ -393,18 +437,12 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
             let id = editing.id.clone();
             let tags = parse_tags(&editing.draft.tags);
             st.error = None;
-            write(sv, move |host| {
-                memory::memory_update(
-                    host,
-                    id,
-                    MemoryPatch {
-                        title: Some(title),
-                        content: Some(content),
-                        tags: Some(tags),
-                    },
-                )
-                .map(|_| Wrote::Updated)
-            })
+            let entry = NewEntry {
+                title,
+                content,
+                tags,
+            };
+            write(sv, m, remote::Write::Update { id, entry })
         }
         Msg::Arm(id) => {
             st.armed = Some(id);
@@ -417,15 +455,45 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
         Msg::Delete(id) => {
             st.armed = None;
             st.error = None;
-            write(sv, move |host| {
-                memory::memory_delete(host, id).map(|()| Wrote::Deleted)
-            })
+            write(sv, m, remote::Write::Delete { id })
         }
     }
 }
 
-pub fn subscription(_st: &State, _m: &Model) -> Subscription<Message> {
-    Subscription::none()
+/// While the view shows a node's memory, that node's events: its agents'
+/// writes reach the view as a local agent's do through `MemoryChanged`.
+pub fn subscription(_st: &State, m: &Model) -> Subscription<Message> {
+    match source(m) {
+        Some(node) if m.ui.view == View::Memory => {
+            Subscription::run_with(OnNode(node), node_changes)
+        }
+        _ => Subscription::none(),
+    }
+}
+
+/// The node a subscription follows, by id.
+#[derive(Hash)]
+struct OnNode(String);
+
+/// `NodeChanged` each time the node says its memory changed (or that events
+/// were lost, once at each connection too).
+fn node_changes(node: &OnNode) -> impl Stream<Item = Message> + use<> {
+    let node = node.0.clone();
+    iced::stream::channel(4, async move |output| {
+        let emit = move |event: serde_json::Value| {
+            if remote::touches_memory(&event) {
+                // A full channel already holds a reload.
+                let _ = output.clone().try_send(Message::Memory(Msg::NodeChanged));
+            }
+        };
+        crate::nodes::remote::follow_events(
+            node,
+            emit,
+            crate::nodes::remote::Backoff::default(),
+            crate::nodes::remote::directory,
+        )
+        .await;
+    })
 }
 
 /// What takes the focus when F6 reaches region `Main`, which this package
@@ -441,7 +509,7 @@ pub fn focus_entry(_st: &State, m: &Model, region: Region) -> Option<Task<Messag
 /// any other forgets what it held, as unmounting it did.
 pub fn on_intent(
     st: &mut State,
-    _m: &mut Model,
+    m: &mut Model,
     sv: &Services,
     intent: &Intent,
 ) -> Option<Task<Message>> {
@@ -450,7 +518,7 @@ pub fn on_intent(
         // the person typed stays; the list is read again either way, since
         // the view may have been left by a way that does not come through
         // here (`OpenBoard`) and the memory changed meanwhile.
-        Intent::SetView(View::Memory) => Some(load(sv)),
+        Intent::SetView(View::Memory) => Some(load(sv, m)),
         Intent::SetView(_) | Intent::OpenBoard(_) => {
             *st = State::default();
             None
@@ -470,7 +538,8 @@ pub fn on_event(
 ) -> Option<Task<Message>> {
     match event {
         CoreEvent::MemoryChanged if m.ui.view == View::Memory && st.entries.is_some() => {
-            Some(load(sv))
+            // A node's memory is followed by its own events.
+            (source(m).is_none()).then(|| load(sv, m))
         }
         _ => None,
     }
@@ -547,6 +616,75 @@ mod tests {
         assert!(st.confirming_replace);
         assert!(matches!(st.create_step(), CreateStep::Write(_)));
         assert!(!st.confirming_replace);
+    }
+
+    /// A workspace on node `node` is active: the view's memory is its.
+    #[tokio::test]
+    async fn a_remote_workspace_reads_and_writes_its_node_s_memory() {
+        use crate::nodes::testing::{answer, listen, read_request};
+        use crate::state::types::Workspace;
+
+        let (listener, client) = listen().await;
+        let node = "node-memory-view";
+        crate::nodes::remote::publish(node, Some(client));
+        let fake = tokio::spawn(async move {
+            let mut lines = Vec::new();
+            for body in [
+                r#"{"entries":[{"id":"m1","title":"On the node","content":"x","created_at":1,"updated_at":1}]}"#,
+                r#"{"ok":true}"#,
+            ] {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                lines.push(read_request(&mut stream).await.line().to_owned());
+                answer(&mut stream, 200, body).await;
+            }
+            lines
+        });
+        let mut m = Model::default();
+        m.hydrate(crate::state::types::AppState {
+            workspaces: vec![Workspace {
+                id: "w1".into(),
+                cwd: "/home/hangar/demo".into(),
+                node: Some(node.into()),
+                ..Workspace::default()
+            }],
+            active_workspace_id: Some("w1".into()),
+            ..Default::default()
+        });
+        assert_eq!(source(&m).as_deref(), Some(node));
+        let host = hangar_core::Host::new();
+        let entries = read(host.clone(), source(&m)).await.unwrap();
+        assert_eq!(entries[0].title, "On the node");
+        let deleted = remote::Write::Delete { id: "m1".into() };
+        assert_eq!(apply(host, source(&m), deleted).await, Ok(Wrote::Deleted));
+        assert_eq!(
+            fake.await.unwrap(),
+            [
+                "GET /node/memory HTTP/1.1",
+                "DELETE /api/memory/m1 HTTP/1.1"
+            ]
+        );
+        // Away, the view says so rather than show an empty memory.
+        crate::nodes::remote::publish(node, None);
+        let away = read(hangar_core::Host::new(), Some(node.into())).await;
+        assert_eq!(away.err(), Some(format!("node {node} is not connected")));
+    }
+
+    #[test]
+    fn a_local_workspace_shows_this_machine_s_memory() {
+        use crate::state::types::Workspace;
+
+        let mut m = Model::default();
+        m.hydrate(crate::state::types::AppState {
+            workspaces: vec![Workspace {
+                id: "w1".into(),
+                cwd: "/w".into(),
+                ..Workspace::default()
+            }],
+            active_workspace_id: Some("w1".into()),
+            ..Default::default()
+        });
+        assert_eq!(source(&m), None);
+        assert_eq!(source(&Model::default()), None, "no workspace at all");
     }
 
     #[test]

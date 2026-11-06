@@ -17,6 +17,7 @@ mod files;
 mod panes;
 mod proxy;
 mod state;
+mod transcripts;
 
 #[cfg(not(target_os = "linux"))]
 fn main() {

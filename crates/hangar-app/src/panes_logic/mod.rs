@@ -83,9 +83,12 @@ pub mod pane_agent;
 pub mod pane_branch;
 mod pane_index;
 pub mod pane_insight;
+pub mod remote_transcripts;
 pub mod session_watch;
 pub mod shells;
 
+#[cfg(test)]
+mod remote_tests;
 #[cfg(test)]
 mod tests;
 
@@ -1196,8 +1199,9 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
             Task::none()
         }
         Msg::Launched { pane, resumed } => {
+            let watch = watch_remote(m, &pane, resumed.as_deref());
             launched(m, &pane, resumed.as_deref(), now);
-            Task::none()
+            watch
         }
         Msg::WindowFocus { window, focused } => {
             let live = &mut m.live.panes_logic;
@@ -1279,6 +1283,38 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
             Task::none()
         }
     }
+}
+
+/// The session hunt of a pane of a remote workspace, which its controller
+/// leaves out (remote_transcripts.rs): started once the agent's command is
+/// typed, with what the node already holds (and the session resumed) as
+/// known.
+fn watch_remote(m: &Model, pane: &str, resumed: Option<&str>) -> Task<Message> {
+    let Some((ws, found)) = m.find_pane(pane) else {
+        return Task::none();
+    };
+    let Some(node) = ws.node.clone() else {
+        return Task::none();
+    };
+    let agent = found.agent;
+    if !is_resumable(agent) {
+        return Task::none();
+    }
+    let cwd = folder_of(ws, found);
+    let pane = pane.to_owned();
+    let resumed = resumed.map(str::to_owned);
+    Task::perform(
+        remote_transcripts::known_session_ids(node, cwd.clone()),
+        move |mut known| {
+            known.extend(resumed.clone());
+            Message::PanesLogic(Msg::WatchSession {
+                pane: pane.clone(),
+                agent,
+                cwd: cwd.clone(),
+                known,
+            })
+        },
+    )
 }
 
 /// The agent's command was typed into a pane's shell: dates its session and
@@ -1406,11 +1442,16 @@ fn slow(st: &mut State, m: &mut Model, now: EpochMs) -> Task<Message> {
             continue;
         }
         let cwd = watch.cwd.clone();
+        // A remote pane's transcripts are on its node.
+        let node = m.find_pane(&pane).and_then(|(ws, _)| ws.node.clone());
         tasks.push(Task::perform(
             async move {
-                tokio::task::spawn_blocking(move || session_watch::hunt_listing(cwd))
-                    .await
-                    .ok()
+                match node {
+                    Some(node) => remote_transcripts::hunt_listing(node, cwd).await,
+                    None => tokio::task::spawn_blocking(move || session_watch::hunt_listing(cwd))
+                        .await
+                        .ok(),
+                }
             },
             move |sessions| {
                 Message::PanesLogic(Msg::Sessions {
@@ -1442,7 +1483,12 @@ fn slow(st: &mut State, m: &mut Model, now: EpochMs) -> Task<Message> {
                         if attended_workspace(m, ws)
                             && live.pane_status(&pane.id) == Some(PaneStatus::Running)
                         {
-                            reads.push((pane.id.clone(), session, folder_of(ws, pane)));
+                            reads.push((
+                                pane.id.clone(),
+                                session,
+                                folder_of(ws, pane),
+                                ws.node.clone(),
+                            ));
                         }
                     }
                     // A shell keeps no transcript, and before a session is
@@ -1455,16 +1501,21 @@ fn slow(st: &mut State, m: &mut Model, now: EpochMs) -> Task<Message> {
         for pane in clears {
             m.live.panes_logic.set_transcript_context(&pane, None);
         }
-        for (pane, session, cwd) in reads {
-            tasks.push(Task::perform(
-                hangar_core::context::context_usage(session, cwd),
-                move |usage| {
-                    Message::PanesLogic(Msg::Context {
-                        pane: pane.clone(),
-                        usage,
-                    })
-                },
-            ));
+        for (pane, session, cwd, node) in reads {
+            let read = async move {
+                match node {
+                    Some(node) => remote_transcripts::context_usage(node, session, cwd).await,
+                    None => Ok(hangar_core::context::context_usage(session, cwd).await),
+                }
+            };
+            tasks.push(Task::perform(read, move |usage| match usage {
+                Ok(usage) => Message::PanesLogic(Msg::Context {
+                    pane: pane.clone(),
+                    usage,
+                }),
+                // The node did not answer: the last reading stands.
+                Err(_) => Message::Noop,
+            }));
         }
     }
 

@@ -18,6 +18,18 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use super::model::NodeClient;
 use super::wire::{self, Incoming, Socket, WsError};
 
+// The Claude Code transcripts of a remote workspace (nodes/chat.rs): the
+// context gauge, the session hunt and picker, and the chat view's
+// conversation ask the node, not this machine's disk.
+#[path = "chat.rs"]
+mod chat;
+#[allow(
+    unused_imports,
+    reason = "for the chat view's conversation, which calls it next"
+)]
+pub use chat::chat;
+pub use chat::{client_of, context, sessions};
+
 /// The connected nodes' clients, by node id: what a pane's stream, started
 /// once, reaches its node with however many times the tunnel came back.
 /// The process's, as the tunnels are.
