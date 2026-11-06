@@ -320,6 +320,7 @@ pub async fn follow(
     let mut size: Option<Outgoing> = None;
     let mut wait = backoff.first;
     loop {
+        // Before the look: a publish between the two is not missed.
         let mut published = PUBLISHED.subscribe();
         let connected = match resolve(&node) {
             Some(client) => {
