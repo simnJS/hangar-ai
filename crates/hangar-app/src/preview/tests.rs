@@ -198,7 +198,8 @@ impl Harness {
             .expect("open")
             .path
             .clone();
-        let bytes = super::image::read(Path::new(&path)).expect("readable");
+        let bytes =
+            super::image::read(Path::new(&path), super::decode::Size::Shown).expect("readable");
         self.viewer(id, ViewerMsg::Bytes(Ok(bytes)));
         // What the stage tells once the renderer has the picture.
         let natural = match image_size(&path) {
@@ -316,6 +317,33 @@ async fn a_markdown_file_is_rendered_and_its_source_is_a_toggle_away() {
     assert!(!viewer.source);
     h.viewer(&id, ViewerMsg::ToggleSource);
     assert!(h.st.viewers.get(&id).unwrap().source);
+}
+
+#[tokio::test]
+async fn a_markdown_pages_source_is_coloured_only_once_it_is_shown() {
+    let mut h = Harness::new("markdown-colour");
+    let path = h.write("NOTES.md", "# Title\n\n```rust\nfn main() {}\n```\n");
+    let id = h.show(&path).await;
+    let head = text::read_head(Path::new(&path)).expect("readable");
+    h.viewer(&id, ViewerMsg::Text(Ok(Loaded(Arc::new(head)))));
+    // The page is rendered: its source is not given to the highlighter.
+    assert!(!h.st.viewers.get(&id).unwrap().coloured);
+    h.viewer(&id, ViewerMsg::ToggleSource);
+    assert!(h.st.viewers.get(&id).unwrap().coloured);
+    // Back to the page and to the source again: coloured once.
+    h.viewer(&id, ViewerMsg::ToggleSource);
+    h.viewer(&id, ViewerMsg::ToggleSource);
+    assert!(h.st.viewers.get(&id).unwrap().coloured);
+}
+
+#[tokio::test]
+async fn a_code_file_is_coloured_as_soon_as_it_is_read() {
+    let mut h = Harness::new("code-colour");
+    let path = h.write("main.rs", "fn main() {}\n");
+    let id = h.show(&path).await;
+    let head = text::read_head(Path::new(&path)).expect("readable");
+    h.viewer(&id, ViewerMsg::Text(Ok(Loaded(Arc::new(head)))));
+    assert!(h.st.viewers.get(&id).unwrap().coloured);
 }
 
 #[tokio::test]

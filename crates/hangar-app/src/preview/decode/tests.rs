@@ -112,7 +112,7 @@ fn a_gif_of_several_frames_is_played_with_the_time_of_each() {
             ([0, 0, 255, 255], 40),
         ],
     );
-    let animation = animated(load(file));
+    let animation = animated(load(file, Size::Full));
     assert_eq!((animation.width, animation.height), (8, 6));
     assert_eq!(animation.frames.len(), 3);
     let delays: Vec<_> = animation.frames.iter().map(|f| f.delay).collect();
@@ -141,7 +141,7 @@ fn pixels(loaded: Result<Loaded, String>) -> (Vec<u8>, u32, u32) {
 #[test]
 fn a_gif_of_one_frame_is_decoded_to_pixels() {
     let file = gif((4, 4), &[([1, 2, 3, 255], 100)]);
-    let (rgba, width, height) = pixels(load(file));
+    let (rgba, width, height) = pixels(load(file, Size::Full));
     assert_eq!((width, height), (4, 4));
     assert!(same([rgba[0], rgba[1], rgba[2], rgba[3]], [1, 2, 3, 255]));
 }
@@ -153,7 +153,7 @@ fn a_png_is_decoded_to_pixels_off_the_ui_thread() {
     image
         .write_to(&mut Cursor::new(&mut file), ::image::ImageFormat::Png)
         .unwrap();
-    let (rgba, width, height) = pixels(load(file));
+    let (rgba, width, height) = pixels(load(file, Size::Full));
     assert_eq!((width, height), (5, 3));
     assert_eq!(rgba.len(), 5 * 3 * 4);
     assert_eq!(&rgba[..4], &[10, 20, 30, 255]);
@@ -174,7 +174,7 @@ fn a_picture_that_claims_too_many_pixels_is_refused_before_it_is_decoded() {
     file.extend_from_slice(&1u16.to_le_bytes()); // planes
     file.extend_from_slice(&24u16.to_le_bytes()); // bits a pixel
     file.extend_from_slice(&[0; 24]); // no compression, sizes, palette
-    let why = load(file).unwrap_err();
+    let why = load(file, Size::Full).unwrap_err();
     assert!(why.contains("20000 × 20000"), "{why}");
 }
 
@@ -182,12 +182,12 @@ fn a_picture_that_claims_too_many_pixels_is_refused_before_it_is_decoded() {
 fn a_gif_is_told_by_its_bytes_and_not_by_its_name() {
     // `load` is given nothing but bytes, so the name cannot matter.
     let file = gif((4, 4), &[([1, 2, 3, 255], 100), ([4, 5, 6, 255], 100)]);
-    assert_eq!(animated(load(file)).frames.len(), 2);
+    assert_eq!(animated(load(file, Size::Full)).frames.len(), 2);
 }
 
 #[test]
 fn an_animated_webp_is_played_with_the_time_of_each_frame() {
-    let animation = animated(load(ANIMATED_WEBP.to_vec()));
+    let animation = animated(load(ANIMATED_WEBP.to_vec(), Size::Full));
     assert_eq!((animation.width, animation.height), (6, 4));
     let delays: Vec<_> = animation.frames.iter().map(|f| f.delay).collect();
     assert_eq!(delays, [ms(100), ms(200), ms(300)]);
@@ -207,7 +207,7 @@ fn a_file_that_is_not_a_readable_picture_fails() {
         b"GIF89a".to_vec(),
         b"RIFF\0\0\0\0WEBPjunk".to_vec(),
     ] {
-        assert!(load(bytes.clone()).is_err(), "{bytes:?}");
+        assert!(load(bytes.clone(), Size::Full).is_err(), "{bytes:?}");
     }
 }
 
@@ -223,7 +223,7 @@ fn a_gif_broken_after_some_frames_plays_the_frames_it_has() {
     );
     // Cut in the last frame's data: the first two are what a browser plays.
     let cut = file[..file.len() - 12].to_vec();
-    let animation = animated(load(cut));
+    let animation = animated(load(cut, Size::Full));
     assert!(animation.frames.len() >= 2, "{}", animation.frames.len());
     assert_eq!(first_pixel(&animation.frames[0]), [255, 0, 0, 255]);
 }
@@ -231,7 +231,10 @@ fn a_gif_broken_after_some_frames_plays_the_frames_it_has() {
 #[test]
 fn two_loads_of_one_file_are_two_animations() {
     let file = gif((4, 4), &[([1, 2, 3, 255], 100), ([4, 5, 6, 255], 100)]);
-    let (a, b) = (animated(load(file.clone())), animated(load(file)));
+    let (a, b) = (
+        animated(load(file.clone(), Size::Full)),
+        animated(load(file, Size::Full)),
+    );
     assert_eq!(*a, *a);
     assert_ne!(*a, *b);
 }
@@ -245,7 +248,7 @@ fn an_avif_is_decoded_to_pixels() {
     AvifEncoder::new_with_speed_quality(&mut file, 10, 100)
         .write_image(&rgba, 10, 7, ExtendedColorType::Rgba8)
         .unwrap();
-    match load(file).expect("loaded") {
+    match load(file, Size::Full).expect("loaded") {
         Loaded::Pixels(
             Handle::Rgba {
                 width,
@@ -278,4 +281,70 @@ fn a_file_over_the_cap_is_not_read() {
     let why = read_file(&big).unwrap_err();
     assert!(why.contains("larger than the 64 MB"), "{why}");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A PNG of `width` × `height`, one colour on the left half and another on
+/// the right.
+fn halves(width: u32, height: u32) -> Vec<u8> {
+    let image = RgbaImage::from_fn(width, height, |x, _| {
+        if x < width / 2 {
+            Rgba([255, 0, 0, 255])
+        } else {
+            Rgba([0, 0, 255, 255])
+        }
+    });
+    let mut out = Vec::new();
+    image
+        .write_to(&mut Cursor::new(&mut out), ::image::ImageFormat::Png)
+        .unwrap();
+    out
+}
+
+#[test]
+fn a_picture_larger_than_a_screen_is_reduced_for_its_first_look() {
+    let file = halves(SHOWN_EDGE * 2, 6);
+    let shown = load(file.clone(), Size::Shown).expect("loaded");
+    assert!(reduced(&shown));
+    let Loaded::Pixels(
+        Handle::Rgba {
+            width,
+            height,
+            pixels,
+            ..
+        },
+        w,
+        h,
+    ) = shown
+    else {
+        panic!("pixels");
+    };
+    // The handle holds the reduced pixels, the size is the picture's own.
+    assert_eq!((width, height), (SHOWN_EDGE, 3));
+    assert_eq!((w, h), (SHOWN_EDGE * 2, 6));
+    assert_eq!(pixels.len(), (SHOWN_EDGE * 3 * 4) as usize);
+    // Still what the picture shows: red on the left, blue on the right.
+    assert_eq!(pixels[..4], [255, 0, 0, 255]);
+    assert_eq!(pixels[pixels.len() - 4..], [0, 0, 255, 255]);
+
+    let full = load(file, Size::Full).expect("loaded");
+    assert!(!reduced(&full));
+    let Loaded::Pixels(Handle::Rgba { width, .. }, w, _) = full else {
+        panic!("pixels");
+    };
+    assert_eq!((width, w), (SHOWN_EDGE * 2, SHOWN_EDGE * 2));
+}
+
+#[test]
+fn a_picture_that_fits_is_decoded_whole_either_way() {
+    let shown = load(halves(SHOWN_EDGE, 4), Size::Shown).expect("loaded");
+    assert!(!reduced(&shown));
+}
+
+#[test]
+fn the_reduced_size_keeps_the_proportions_and_never_reaches_zero() {
+    assert_eq!(shown_size(8000, 6000, Size::Shown), (4096, 3072));
+    assert_eq!(shown_size(6000, 8000, Size::Shown), (3072, 4096));
+    assert_eq!(shown_size(100_000, 10, Size::Shown), (4096, 1));
+    assert_eq!(shown_size(8000, 6000, Size::Full), (8000, 6000));
+    assert_eq!(shown_size(4096, 10, Size::Shown), (4096, 10));
 }

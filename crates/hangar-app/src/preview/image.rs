@@ -54,14 +54,14 @@ pub enum Msg {
 /// frames of an animation, an AVIF. Its handle is made from the bytes, not
 /// from the path: the renderer keys what it decoded on the handle, and a path
 /// that is rewritten must not come back from its cache.
-pub fn read(path: &Path) -> Result<Loaded, String> {
+pub fn read(path: &Path, size: decode::Size) -> Result<Loaded, String> {
     let bytes = decode::read_file(path)?;
     // An SVG is drawn from its source by the stage, whatever its bytes say.
     if model::has_source(&path.to_string_lossy()) {
         check_svg(&bytes).map_err(|why| format!("{}: {why}", path.display()))?;
         return Ok(Loaded::Encoded(Bytes(std::sync::Arc::new(bytes))));
     }
-    decode::load(bytes).map_err(|why| format!("{}: {why}", path.display()))
+    decode::load(bytes, size).map_err(|why| format!("{}: {why}", path.display()))
 }
 
 /// Whether an SVG can be drawn. The renderer reports a size of nothing for a
@@ -84,7 +84,7 @@ pub fn pic_of(path: &str, loaded: &Loaded) -> Pic {
         Loaded::Encoded(bytes) => {
             Pic::Raster(iced::widget::image::Handle::from_bytes(bytes.0.to_vec()))
         }
-        Loaded::Pixels(handle, ..) => Pic::Raster(handle.clone()),
+        Loaded::Pixels(handle, width, height) => Pic::Pixels(handle.clone(), *width, *height),
         Loaded::Animated(animation) => Pic::Animated(animation.clone()),
     }
 }
@@ -100,9 +100,44 @@ pub struct Picture {
     pub stage: Size,
     /// The person's own framing; `None` while it is fitted to the panel.
     pub chosen: Option<ImageFrame>,
+    /// The zoom up to which the pixels held are enough, when they are fewer
+    /// than the picture has (`decode::Size::Shown`); `None` once they are
+    /// all there.
+    pub detail: Option<f32>,
+    /// Every pixel was asked for.
+    pub full_asked: bool,
+}
+
+/// The zoom up to which `loaded`'s pixels are enough, when it was reduced.
+pub fn detail_of(loaded: &Loaded) -> Option<f32> {
+    match loaded {
+        Loaded::Pixels(iced::widget::image::Handle::Rgba { width, .. }, natural, _)
+            if width < natural =>
+        {
+            Some(*width as f32 / *natural as f32)
+        }
+        _ => None,
+    }
 }
 
 impl Picture {
+    /// Holds what was read: a reduced picture says how far it may be zoomed
+    /// before every pixel is wanted.
+    pub fn set(&mut self, path: &str, loaded: &Loaded) {
+        self.pic = Some(pic_of(path, loaded));
+        self.detail = detail_of(loaded);
+        self.failed = None;
+    }
+
+    /// It is zoomed past what its reduced pixels show, and every pixel has
+    /// not been asked for yet: the viewer reads them, once.
+    pub fn needs_full(&self) -> bool {
+        // Until the stage and the picture's size are known it is not framed
+        // yet, and the zoom of 1 that stands in means nothing.
+        let framed = self.natural.is_some() && self.stage.width > 0.0;
+        !self.full_asked && framed && self.detail.is_some_and(|detail| self.frame().zoom > detail)
+    }
+
     /// Fitted to the stage with a margin, centred.
     pub fn fitted(&self) -> ImageFrame {
         let zoom = match self.natural {
@@ -349,6 +384,60 @@ mod tests {
     }
 
     #[test]
+    fn a_reduced_picture_asks_for_every_pixel_once_zoomed_past_them() {
+        // 8000 px wide, held as 4096: enough up to a zoom of 0.512.
+        let natural = (8000.0, 6000.0);
+        let mut shown = picture(natural, (1032.0, 800.0));
+        let loaded = Loaded::Pixels(
+            iced::widget::image::Handle::from_rgba(4096, 3072, vec![0; 4096 * 3072 * 4]),
+            8000,
+            6000,
+        );
+        shown.set("a/photo.png", &loaded);
+        assert_eq!(shown.detail, Some(0.512));
+        // Not framed yet (the stage or the size not told): nothing is asked.
+        let mut unframed = Picture::default();
+        unframed.set("a/photo.png", &loaded);
+        assert!(!unframed.needs_full());
+        unframed.update(Msg::Stage(Size::new(1032.0, 800.0)));
+        assert!(!unframed.needs_full(), "the size is not known yet");
+        unframed.update(Msg::Measured(Measured::Size(Size::new(8000.0, 6000.0))));
+        assert!(!unframed.needs_full(), "fitted, it holds enough");
+        assert!(matches!(shown.pic, Some(Pic::Pixels(_, 8000, 6000))));
+        // Fitted to the panel, it is drawn smaller than what it holds.
+        assert!(!shown.needs_full());
+        shown.update(Msg::ActualSize);
+        assert!(shown.needs_full());
+        // Asked once: the viewer reads the file and says so.
+        shown.full_asked = true;
+        assert!(!shown.needs_full());
+        // Every pixel there, nothing more is wanted.
+        let full = Loaded::Pixels(
+            iced::widget::image::Handle::from_rgba(8, 6, vec![0; 8 * 6 * 4]),
+            8,
+            6,
+        );
+        shown.set("a/photo.png", &full);
+        assert_eq!(shown.detail, None);
+    }
+
+    #[test]
+    fn a_picture_decoded_whole_never_asks_again() {
+        let mut shown = picture((800.0, 600.0), (1032.0, 800.0));
+        let loaded = Loaded::Pixels(
+            iced::widget::image::Handle::from_rgba(800, 600, vec![0; 800 * 600 * 4]),
+            800,
+            600,
+        );
+        shown.set("a/photo.png", &loaded);
+        shown.update(Msg::Gesture(Gesture::Zoom {
+            factor: 30.0,
+            at: (0.0, 0.0),
+        }));
+        assert!(!shown.needs_full());
+    }
+
+    #[test]
     fn follows_the_panel_while_fitted() {
         let mut shown = picture((2000.0, 1000.0), (1032.0, 800.0));
         assert_eq!(shown.frame().zoom, 0.5);
@@ -463,8 +552,11 @@ mod tests {
         )
         .unwrap();
         std::fs::write(dir.join("bad.svg"), "<svg><oops").unwrap();
-        assert!(matches!(read(&dir.join("ok.svg")), Ok(Loaded::Encoded(_))));
-        let why = read(&dir.join("bad.svg")).unwrap_err();
+        assert!(matches!(
+            read(&dir.join("ok.svg"), decode::Size::Shown),
+            Ok(Loaded::Encoded(_))
+        ));
+        let why = read(&dir.join("bad.svg"), decode::Size::Shown).unwrap_err();
         assert!(why.contains("bad.svg"), "{why}");
         let _ = std::fs::remove_dir_all(&dir);
     }

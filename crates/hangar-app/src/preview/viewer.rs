@@ -151,6 +151,10 @@ pub struct ViewerState {
     pub rendered: Option<Rendered>,
     /// Which text a colouring is for.
     pub generation: u64,
+    /// The text read was given to the highlighter. A Markdown page's source
+    /// waits until it is shown: colouring all of it takes seconds of a core,
+    /// for lines nobody looks at while the page is rendered.
+    pub coloured: bool,
     /// Where the lines of the text are scrolled to.
     pub scroll: code_lines::Scroll,
     /// What is selected among the lines, and what is selected of the lines or
@@ -172,6 +176,7 @@ impl ViewerState {
             picture: Picture::default(),
             rendered: None,
             generation: 0,
+            coloured: false,
             scroll: code_lines::Scroll::default(),
             doc: Doc::new(iced::Color::TRANSPARENT),
             selection: String::new(),

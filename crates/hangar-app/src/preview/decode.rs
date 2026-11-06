@@ -15,6 +15,13 @@
 //! Only an SVG is handed on as its source (`Loaded::Encoded`), for the stage
 //! to rasterise.
 //!
+//! A still picture larger than [`SHOWN_EDGE`] on a side is reduced to it
+//! once decoded ([`Size::Shown`]): a pane shows an 8000 × 6000 photo a few
+//! hundred pixels wide, and the whole of it was 192 MB of pixels held on the
+//! heap and in the GPU's atlas, its first frame holding the window for two
+//! seconds while it was uploaded. The viewer asks for every pixel
+//! ([`Size::Full`]) only once it is zoomed past what the reduced copy holds.
+//!
 //! A file is told by its first bytes, not by its name: a `.png` that is a GIF
 //! plays as one.
 
@@ -53,12 +60,28 @@ const FALLBACK: Duration = Duration::from_millis(100);
 /// is four bytes each (the same cap as an AVIF's, and a Markdown picture's).
 pub const MAX_PIXELS: u64 = avif::MAX_PIXELS;
 
+/// The longest side a still picture is decoded to for the viewer's first
+/// look, and for a picture in the flow of a Markdown page: as wide as a 4K
+/// screen, so that a picture fitted to any pane is drawn from enough pixels.
+pub const SHOWN_EDGE: u32 = 4096;
+
+/// How many of a still picture's pixels are wanted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Size {
+    /// At most [`SHOWN_EDGE`] on its longest side.
+    Shown,
+    /// Every pixel of it.
+    Full,
+}
+
 /// What the viewer is given for a picture file.
 #[derive(Debug, Clone)]
 pub enum Loaded {
     /// The file as it is: an SVG's source, for the stage to rasterise.
     Encoded(Bytes),
-    /// A picture decoded here, as pixels.
+    /// A picture decoded here, as pixels, and the size the picture itself
+    /// has: the handle holds fewer pixels when it was reduced
+    /// ([`Size::Shown`]).
     Pixels(Handle, u32, u32),
     /// A picture of several frames.
     Animated(Arc<Animation>),
@@ -195,20 +218,57 @@ pub fn read_file(path: &Path) -> Result<Vec<u8>, String> {
 /// The decoders read files an agent or a repository wrote; one that panics on
 /// a damaged file (a parser's assertion) must not take the task with it, so a
 /// panic is a failed picture like any other.
-pub fn load(bytes: Vec<u8>) -> Result<Loaded, String> {
+pub fn load(bytes: Vec<u8>, size: Size) -> Result<Loaded, String> {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        match decode(&bytes)? {
+        match decode(&bytes, size)? {
             Some(loaded) => Ok(loaded),
             // A picture of one frame, or an animation that would take too
             // much memory: its first frame.
-            None => still(&bytes),
+            None => still(&bytes, size),
         }
     }))
     .unwrap_or_else(|_| Err("the file is damaged".to_string()))
 }
 
+/// Whether the handle of a decoded picture holds fewer pixels than the
+/// picture has (`image::detail_of` says by how much).
+#[cfg(test)]
+pub fn reduced(loaded: &Loaded) -> bool {
+    match loaded {
+        Loaded::Pixels(Handle::Rgba { width, .. }, natural, _) => width < natural,
+        _ => false,
+    }
+}
+
+/// The size a picture of `width` × `height` is decoded to.
+fn shown_size(width: u32, height: u32, size: Size) -> (u32, u32) {
+    let longest = width.max(height);
+    if size == Size::Full || longest <= SHOWN_EDGE {
+        return (width, height);
+    }
+    let scale = |side: u32| {
+        ((u64::from(side) * u64::from(SHOWN_EDGE) + u64::from(longest) / 2) / u64::from(longest))
+            .max(1) as u32
+    };
+    (scale(width), scale(height))
+}
+
+/// `rgba`, reduced to `size` when it is larger than [`SHOWN_EDGE`]: the
+/// handle, and the picture's own size.
+fn pixels(rgba: ::image::RgbaImage, size: Size) -> Loaded {
+    let (width, height) = rgba.dimensions();
+    let (w, h) = shown_size(width, height, size);
+    let rgba = if (w, h) == (width, height) {
+        rgba
+    } else {
+        ::image::imageops::thumbnail(&rgba, w, h)
+    };
+    let (w, h) = rgba.dimensions();
+    Loaded::Pixels(Handle::from_rgba(w, h, rgba.into_raw()), width, height)
+}
+
 /// A picture of one frame, decoded to pixels after its size is checked.
-fn still(bytes: &[u8]) -> Result<Loaded, String> {
+fn still(bytes: &[u8], size: Size) -> Result<Loaded, String> {
     let reader = ::image::ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
         .map_err(|err| err.to_string())?;
@@ -225,23 +285,31 @@ fn still(bytes: &[u8]) -> Result<Loaded, String> {
             MAX_PIXELS / 1_000_000
         ));
     }
-    let rgba = ::image::DynamicImage::from_decoder(decoder)
-        .map_err(|err| err.to_string())?
-        .into_rgba8();
-    let (width, height) = rgba.dimensions();
+    let decoded = ::image::DynamicImage::from_decoder(decoder).map_err(|err| err.to_string())?;
+    // Reduced before it is made RGBA: an RGB photo is not first copied whole
+    // at four bytes a pixel.
+    let (w, h) = shown_size(width, height, size);
+    let decoded = if (w, h) == (width, height) {
+        decoded
+    } else {
+        decoded.thumbnail_exact(w, h)
+    };
+    let rgba = decoded.into_rgba8();
+    let (w, h) = rgba.dimensions();
     Ok(Loaded::Pixels(
-        Handle::from_rgba(width, height, rgba.into_raw()),
+        Handle::from_rgba(w, h, rgba.into_raw()),
         width,
         height,
     ))
 }
 
 /// An AVIF or an animation, or `None` for a picture of one frame.
-fn decode(bytes: &[u8]) -> Result<Option<Loaded>, String> {
+fn decode(bytes: &[u8], size: Size) -> Result<Option<Loaded>, String> {
     if avif::is_avif(&bytes[..bytes.len().min(512)]) {
-        let pixels = avif::decode(bytes)?;
-        let handle = Handle::from_rgba(pixels.width, pixels.height, pixels.rgba);
-        return Ok(Some(Loaded::Pixels(handle, pixels.width, pixels.height)));
+        let decoded = avif::decode(bytes)?;
+        let rgba = ::image::RgbaImage::from_raw(decoded.width, decoded.height, decoded.rgba)
+            .ok_or("the decoder gave fewer pixels than the picture has")?;
+        return Ok(Some(pixels(rgba, size)));
     }
     let animation = if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
         let decoder = ::image::codecs::gif::GifDecoder::new(Cursor::new(bytes));

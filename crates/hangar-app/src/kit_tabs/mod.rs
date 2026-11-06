@@ -236,7 +236,9 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
 fn step(st: &mut State, m: &mut Model, env: &Env, msg: Msg) -> Task<Message> {
     let first = handle(st, m, msg);
     let then = reconcile(st, m, env);
-    Task::batch([first, then])
+    let held = st.pages.values().filter(|page| page.state.holds()).count();
+    let held = crate::preview::webview::hold(st.shared.helper(), bridge::PREFIX, held);
+    Task::batch([first, then, held])
 }
 
 /// A native tab's effects, as the app's tasks.
@@ -265,6 +267,9 @@ fn handle(st: &mut State, m: &Model, msg: Msg) -> Task<Message> {
         Msg::Changed | Msg::Tick => Task::none(),
         Msg::Compiled(done) => {
             st.runtime.finish(done);
+            // Cranelift's working memory, freed on the thread that compiled,
+            // goes back to the system (`preview::heap`).
+            crate::preview::heap::give_back_soon();
             Task::none()
         }
         Msg::Native(id, message) => match st.natives.get_mut(&id) {
@@ -690,11 +695,17 @@ fn reconcile(st: &mut State, m: &mut Model, env: &Env) -> Task<Message> {
         .filter(|id| !keep_native.contains(*id))
         .cloned()
         .collect();
+    let closed = !gone.is_empty();
     for id in gone {
         if let Some(mut native) = st.natives.remove(&id) {
             native.close();
             unwatch(st, &id, native.watch);
         }
+    }
+    // What the instances held (their memory, their pages) goes back to the
+    // system.
+    if closed {
+        crate::preview::heap::give_back_soon();
     }
     let gone: Vec<String> = st
         .pages

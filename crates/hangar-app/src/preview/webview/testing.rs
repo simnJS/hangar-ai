@@ -38,6 +38,35 @@ impl Write for Recorder {
     }
 }
 
+/// A fake helper's client, shared as the helper holds it, and what it was
+/// sent.
+pub(crate) fn shared() -> (Arc<Client>, Recorder, Sender<Vec<u8>>) {
+    let (keep, reader) = mpsc::channel();
+    let sent = Recorder::default();
+    let (client, _events) = Client::from_io(Silent(reader), sent.clone());
+    (Arc::new(client), sent, keep)
+}
+
+impl Recorder {
+    /// The `type` of every command written so far, waiting up to a moment
+    /// for `count` of them.
+    pub(crate) fn types(&self, count: usize) -> Vec<String> {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let text = String::from_utf8(self.0.lock().unwrap().clone()).unwrap();
+            let types: Vec<String> = text
+                .lines()
+                .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+                .filter_map(|line| line["type"].as_str().map(str::to_string))
+                .collect();
+            if types.len() >= count || Instant::now() > deadline {
+                return types;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+}
+
 pub(crate) struct Fake {
     pub(crate) client: Client,
     pub(crate) sent: Recorder,
