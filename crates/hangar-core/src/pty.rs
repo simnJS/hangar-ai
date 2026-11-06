@@ -34,6 +34,8 @@ use std::time::Duration;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
 
+mod scope;
+
 /// A pane's input, shared out of the registry: `pty_write` takes a clone of
 /// it under the registry's lock and writes once that lock is released, so a
 /// program that does not read its input — a long paste into a busy agent, a
@@ -526,12 +528,18 @@ pub fn pty_spawn(
         kits,
         agent,
         claude_account,
+        false,
     )
 }
 
 /// `pty_spawn` with the workspace's build cache environment
 /// (`build_cache::env_for`), applied to a worker's pane only: one without
 /// `port_base` starts without it, whatever is passed.
+///
+/// `scoped`: the `pane-scopes` experiment is on, and the shell is moved into
+/// a systemd user scope of its own once started (Linux; see `pty/scope.rs`).
+/// Nothing else about the pane changes, and a scope that cannot be made
+/// leaves it where it would have been.
 #[allow(clippy::too_many_arguments)]
 pub fn pty_spawn_with(
     manager: &PtyManager,
@@ -549,6 +557,7 @@ pub fn pty_spawn_with(
     kits: Option<Vec<String>>,
     agent: Option<String>,
     claude_account: Option<String>,
+    scoped: bool,
 ) -> Result<Spawned, String> {
     // An id belongs to one shell at a time, and one being reaped by `pty_kill`
     // still counts: its child is alive and its reader thread still speaks under
@@ -663,6 +672,17 @@ pub fn pty_spawn_with(
     // Dropping the slave handle is what lets the reader see EOF on exit.
     drop(pair.slave);
 
+    // Its own scope, before the shell gets far enough to start anything:
+    // what it forks from then on is born there.
+    scope::place(
+        scoped,
+        child.process_id(),
+        &id,
+        name.as_deref(),
+        start_scope,
+        |message| eprintln!("{message}"),
+    );
+
     let live = Arc::new(AtomicBool::new(true));
     let history = Arc::new(Mutex::new(History::default()));
     slot.install(PtySession {
@@ -721,6 +741,17 @@ pub fn pty_spawn_with(
         account,
         account_issues,
     })
+}
+
+/// The user manager, asked for a pane's scope.
+#[cfg(target_os = "linux")]
+fn start_scope(unit: &str, description: &str, pid: u32) -> Result<(), String> {
+    scope::start_transient(unit, description, pid)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn start_scope(_unit: &str, _description: &str, _pid: u32) -> Result<(), String> {
+    Err("systemd scopes are Linux's".into())
 }
 
 /// Records a chunk in the pane's history, then hands it to its sink:
@@ -1597,6 +1628,69 @@ mod tests {
                 return pid;
             }
         }
+    }
+
+    /// With `pane-scopes` on and a user manager to ask, the pane's shell is
+    /// in a `hangar-pane-*.scope` of its own, and closing the pane still
+    /// kills it. Skipped where no systemd user manager answers.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_scoped_pane_lives_in_a_scope_of_its_own_and_still_dies_with_its_pane() {
+        let reachable = std::env::var_os("XDG_RUNTIME_DIR")
+            .map(|dir| std::path::Path::new(&dir).join("systemd/private").exists())
+            .unwrap_or(false)
+            && zbus::blocking::Connection::session().is_ok();
+        if !reachable {
+            eprintln!("no systemd user manager here, case skipped");
+            return;
+        }
+        let manager = PtyManager::default();
+        let id = format!("pty-scope-{}", std::process::id());
+        pty_spawn_with(
+            &manager,
+            Box::new(|_| {}),
+            id.clone(),
+            std::env::temp_dir().to_string_lossy().into_owned(),
+            Some(sh("exec sleep 30")),
+            80,
+            24,
+            Some("Scope test".into()),
+            Some(false),
+            None,
+            Vec::new(),
+            None,
+            None,
+            None,
+            None,
+            true,
+        )
+        .expect("spawned");
+        let pid = manager
+            .lock()
+            .sessions
+            .get(&id)
+            .and_then(|session| session.child.process_id())
+            .expect("a pid") as libc::pid_t;
+        let wanted = "hangar-pane-scope-test-ptyscope-";
+        let mut cgroup = String::new();
+        for _ in 0..100 {
+            cgroup = std::fs::read_to_string(format!("/proc/{pid}/cgroup")).unwrap_or_default();
+            let leaf = cgroup.trim_end().rsplit('/').next().unwrap_or("");
+            if leaf.starts_with(wanted) && leaf.ends_with(".scope") {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let leaf = cgroup
+            .trim_end()
+            .rsplit('/')
+            .next()
+            .unwrap_or("")
+            .to_owned();
+        let in_scope = leaf.starts_with(wanted) && leaf.ends_with(".scope");
+        pty_kill(&Arc::new(manager), id, None).unwrap();
+        assert!(in_scope, "the shell's cgroup is {cgroup:?}");
+        assert!(ends(pid), "the scoped shell outlived its pane");
     }
 
     /// Whether `pid` is gone within a few seconds (a process reparented to

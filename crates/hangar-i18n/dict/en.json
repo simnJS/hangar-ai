@@ -1432,6 +1432,8 @@
   "experiments.onlyOn": "Only on {platforms}",
   "experiments.chatView.title": "Chat view",
   "experiments.chatView.hint": "Each workspace can be shown as a chat instead of its panes: the conversation, its tasks, and the previews and kit tabs beside them. The terminals keep running behind it, and the panes come back as they were.",
+  "experiments.paneScopes.title": "One systemd scope per pane",
+  "experiments.paneScopes.hint": "Each pane runs in a systemd scope of its own, named after it, so when memory runs out the system stops the pane that uses it rather than Hangar and every agent. Applies to the panes started or restarted after it is turned on; Hangar itself does not need a restart.",
   "chatView.chat": "Chat",
   "chatView.panes": "Panes",
   "chatView.switchHint": "Show this workspace as a chat or as its panes",

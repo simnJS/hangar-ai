@@ -90,14 +90,29 @@ pub struct Experiment {
 /// The chat view of a workspace (`chat_view`), in place of its grid.
 pub const CHAT_VIEW: &str = "chat-view";
 
+/// Each pane's processes in a systemd user scope of their own
+/// (`hangar_core::pty::scope`), so that a memory kill takes that pane rather
+/// than Hangar's own scope and every pane in it. Read when a pane's shell
+/// starts: panes started before it changed keep where they are.
+pub const PANE_SCOPES: &str = "pane-scopes";
+
 /// Newest last.
-pub const EXPERIMENTS: &[Experiment] = &[Experiment {
-    id: CHAT_VIEW,
-    stage: Stage::Experimental,
-    title: Key::ExperimentsChatViewTitle,
-    hint: Key::ExperimentsChatViewHint,
-    platforms: None,
-}];
+pub const EXPERIMENTS: &[Experiment] = &[
+    Experiment {
+        id: CHAT_VIEW,
+        stage: Stage::Experimental,
+        title: Key::ExperimentsChatViewTitle,
+        hint: Key::ExperimentsChatViewHint,
+        platforms: None,
+    },
+    Experiment {
+        id: PANE_SCOPES,
+        stage: Stage::Experimental,
+        title: Key::ExperimentsPaneScopesTitle,
+        hint: Key::ExperimentsPaneScopesHint,
+        platforms: Some(&[Platform::Linux]),
+    },
+];
 
 /// The experiments this machine can offer: those with no platform list, or
 /// one that names it.
@@ -317,6 +332,34 @@ mod tests {
     #[test]
     fn nothing_is_the_start_of_the_list() {
         assert_eq!(with_experiment(&[], "a", true), list(&["a"]));
+    }
+
+    #[test]
+    fn pane_scopes_are_offered_on_linux_only_and_off_until_turned_on() {
+        let linux = available_experiments(EXPERIMENTS, Some(Platform::Linux));
+        assert!(linux.iter().any(|e| e.id == PANE_SCOPES));
+        for other in [Platform::Windows, Platform::Macos] {
+            let offered = available_experiments(EXPERIMENTS, Some(other));
+            assert!(offered.iter().all(|e| e.id != PANE_SCOPES));
+            assert!(!is_experiment_enabled(
+                &with(&[PANE_SCOPES]),
+                PANE_SCOPES,
+                EXPERIMENTS,
+                Some(other)
+            ));
+        }
+        assert!(!is_experiment_enabled(
+            &Settings::default(),
+            PANE_SCOPES,
+            EXPERIMENTS,
+            Some(Platform::Linux)
+        ));
+        assert!(is_experiment_enabled(
+            &with(&[PANE_SCOPES]),
+            PANE_SCOPES,
+            EXPERIMENTS,
+            Some(Platform::Linux)
+        ));
     }
 
     #[test]

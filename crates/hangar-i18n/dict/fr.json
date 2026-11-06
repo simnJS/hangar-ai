@@ -1432,6 +1432,8 @@
   "experiments.onlyOn": "Uniquement sur {platforms}",
   "experiments.chatView.title": "Vue chat",
   "experiments.chatView.hint": "Chaque workspace peut s'afficher en chat plutôt qu'en panneaux : la conversation, ses tâches, et les aperçus et onglets de kits à côté. Les terminaux continuent de tourner derrière, et les panneaux reviennent tels qu'ils étaient.",
+  "experiments.paneScopes.title": "Un scope systemd par panneau",
+  "experiments.paneScopes.hint": "Chaque panneau tourne dans un scope systemd à lui, nommé d'après lui : quand la mémoire vient à manquer, le système arrête le panneau qui la consomme plutôt que Hangar et tous les agents. S'applique aux panneaux démarrés ou redémarrés après l'activation ; Hangar lui-même n'a pas besoin de redémarrer.",
   "chatView.chat": "Chat",
   "chatView.panes": "Panneaux",
   "chatView.switchHint": "Afficher ce workspace en chat ou en panneaux",

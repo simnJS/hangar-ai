@@ -295,6 +295,8 @@ struct Spawn {
     /// The workspace's MCP choice applies (a Claude Code that is not a login
     /// pane).
     mcp: Option<McpLaunch>,
+    /// `pane-scopes` is on: the shell goes into a systemd scope of its own.
+    scoped: bool,
 }
 
 /// What the MCP scope of a launch is made from (`mcpLaunchConfig`).
@@ -370,6 +372,10 @@ pub fn mount(
             family: shell_family(shell.as_ref()),
             tr: Translator::new(m.locale()),
         }),
+        scoped: crate::settings::experiments::enabled(
+            settings,
+            crate::settings::experiments::PANE_SCOPES,
+        ),
     };
 
     let id = pane.id.clone();
@@ -509,6 +515,7 @@ impl Spawn {
             Some(kits.ids),
             Some(self.agent.as_str().to_owned()),
             account.clone(),
+            self.scoped,
         )?;
         Ok(SpawnReport {
             kit_issues: kit_issues(&kits.held, &spawned.kit_issues),
@@ -1297,6 +1304,7 @@ mod tests {
                 family: None,
                 tr: Translator::new(Locale::En),
             }),
+            scoped: false,
         };
         assert!(spawn.shell.is_none());
 
