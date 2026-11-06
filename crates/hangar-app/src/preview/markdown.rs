@@ -382,7 +382,7 @@ fn read_image(file: &Path) -> Option<Resolved> {
     if u64::from(width) * u64::from(height) > MAX_PIXELS {
         return None;
     }
-    Some(match decode::load(bytes).ok()? {
+    Some(match decode::load(bytes, decode::Size::Shown).ok()? {
         Loaded::Encoded(bytes) => Resolved::Raster(image::Handle::from_bytes(bytes.0.to_vec())),
         Loaded::Pixels(handle, ..) => Resolved::Raster(handle),
         Loaded::Animated(animation) => Resolved::Animated(animation),

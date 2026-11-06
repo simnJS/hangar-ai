@@ -1439,3 +1439,67 @@ fn a_request_that_panics_does_not_take_its_thread_with_it() {
     drop(pool);
     assert_eq!(done.load(Ordering::SeqCst), 1);
 }
+
+/// The helper was told to quit and nothing else: by the call, and again by
+/// the client as it is dropped.
+fn told_to_quit(sent: &super::testing::Recorder) {
+    let types = sent.types(1);
+    assert!(!types.is_empty());
+    assert!(types.iter().all(|kind| kind == "quit"), "{types:?}");
+}
+
+#[test]
+fn the_helper_is_let_go_once_nothing_is_held_in_it_for_a_while() {
+    let (client, sent, _keep) = super::testing::shared();
+    let helper = Helper::running(client);
+    assert_eq!(helper.hold(PREFIX, 1), None);
+    // The last window closes: a check is due, and nothing else happened
+    // meanwhile, so the helper is told to quit and let go.
+    let change = helper.hold(PREFIX, 0).expect("idle");
+    assert!(helper.quit_if_idle(change));
+    assert!(helper.client().is_none());
+    told_to_quit(&sent);
+    // Nothing more to let go of.
+    assert!(!helper.quit_if_idle(change));
+}
+
+#[test]
+fn a_window_held_meanwhile_keeps_the_helper() {
+    let (client, sent, _keep) = super::testing::shared();
+    let helper = Helper::running(client);
+    helper.hold(PREFIX, 1);
+    let first = helper.hold(PREFIX, 0).expect("idle");
+    // A kit's tab opens a page before the check: it is stale.
+    assert_eq!(helper.hold("kit-", 1), None);
+    assert!(!helper.quit_if_idle(first));
+    // And closes it: the check made then is the one that counts.
+    let second = helper.hold("kit-", 0).expect("idle");
+    assert!(!helper.quit_if_idle(first));
+    assert!(helper.client().is_some());
+    assert!(helper.quit_if_idle(second));
+    told_to_quit(&sent);
+}
+
+#[test]
+fn nothing_is_due_while_a_window_is_held_or_no_helper_runs() {
+    let (client, _sent, _keep) = super::testing::shared();
+    let helper = Helper::running(client);
+    helper.hold(PREFIX, 2);
+    assert_eq!(helper.hold("kit-", 0), None, "the preview holds two");
+    // The same count again is no change.
+    assert_eq!(helper.hold(PREFIX, 2), None);
+    let idle = Helper::new();
+    idle.hold(PREFIX, 1);
+    assert_eq!(idle.hold(PREFIX, 0), None, "no helper runs");
+}
+
+#[test]
+fn only_the_windows_on_their_way_or_open_are_held() {
+    let mut windows = Windows::default();
+    let fake = Fake::new();
+    let shown = entry(FileKind::Pdf, "/work/a.pdf");
+    let _ = opened(&mut windows, &fake, &shown, Kind::Pdf, false);
+    assert_eq!(windows.held(), 1);
+    windows.lost();
+    assert_eq!(windows.held(), 0);
+}

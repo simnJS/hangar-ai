@@ -15,6 +15,13 @@
 //! Only an SVG is handed on as its source (`Loaded::Encoded`), for the stage
 //! to rasterise.
 //!
+//! A still picture larger than [`SHOWN_EDGE`] on a side is reduced to it
+//! once decoded ([`Size::Shown`]): a pane shows an 8000 × 6000 photo a few
+//! hundred pixels wide, and the whole of it was 192 MB of pixels held on the
+//! heap and in the GPU's atlas, its first frame holding the window for two
+//! seconds while it was uploaded. The viewer asks for every pixel
+//! ([`Size::Full`]) only once it is zoomed past what the reduced copy holds.
+//!
 //! A file is told by its first bytes, not by its name: a `.png` that is a GIF
 //! plays as one.
 
@@ -53,12 +60,28 @@ const FALLBACK: Duration = Duration::from_millis(100);
 /// is four bytes each (the same cap as an AVIF's, and a Markdown picture's).
 pub const MAX_PIXELS: u64 = avif::MAX_PIXELS;
 
+/// The longest side a still picture is decoded to for the viewer's first
+/// look, and for a picture in the flow of a Markdown page: as wide as a 4K
+/// screen, so that a picture fitted to any pane is drawn from enough pixels.
+pub const SHOWN_EDGE: u32 = 4096;
+
+/// How many of a still picture's pixels are wanted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Size {
+    /// At most [`SHOWN_EDGE`] on its longest side.
+    Shown,
+    /// Every pixel of it.
+    Full,
+}
+
 /// What the viewer is given for a picture file.
 #[derive(Debug, Clone)]
 pub enum Loaded {
     /// The file as it is: an SVG's source, for the stage to rasterise.
     Encoded(Bytes),
-    /// A picture decoded here, as pixels.
+    /// A picture decoded here, as pixels, and the size the picture itself
+    /// has: the handle holds fewer pixels when it was reduced
+    /// ([`Size::Shown`]).
     Pixels(Handle, u32, u32),
     /// A picture of several frames.
     Animated(Arc<Animation>),
@@ -195,20 +218,129 @@ pub fn read_file(path: &Path) -> Result<Vec<u8>, String> {
 /// The decoders read files an agent or a repository wrote; one that panics on
 /// a damaged file (a parser's assertion) must not take the task with it, so a
 /// panic is a failed picture like any other.
-pub fn load(bytes: Vec<u8>) -> Result<Loaded, String> {
+pub fn load(bytes: Vec<u8>, size: Size) -> Result<Loaded, String> {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        match decode(&bytes)? {
+        match decode(&bytes, size)? {
             Some(loaded) => Ok(loaded),
             // A picture of one frame, or an animation that would take too
             // much memory: its first frame.
-            None => still(&bytes),
+            None => still(&bytes, size),
         }
     }))
     .unwrap_or_else(|_| Err("the file is damaged".to_string()))
 }
 
+/// Whether the handle of a decoded picture holds fewer pixels than the
+/// picture has (`image::detail_of` says by how much).
+#[cfg(test)]
+pub fn reduced(loaded: &Loaded) -> bool {
+    match loaded {
+        Loaded::Pixels(Handle::Rgba { width, .. }, natural, _) => width < natural,
+        _ => false,
+    }
+}
+
+/// By how much a picture of `width` × `height` is reduced on each side: 1
+/// for none, else the least whole number that brings its longest side to
+/// [`SHOWN_EDGE`] or less.
+fn factor(width: u32, height: u32, size: Size) -> u32 {
+    let longest = width.max(height);
+    if size == Size::Full || longest <= SHOWN_EDGE {
+        return 1;
+    }
+    longest.div_ceil(SHOWN_EDGE)
+}
+
+/// The size a picture of `width` × `height` is decoded to.
+#[cfg(test)]
+fn shown_size(width: u32, height: u32, size: Size) -> (u32, u32) {
+    let k = factor(width, height, size);
+    (width.div_ceil(k), height.div_ceil(k))
+}
+
+/// `pixels` of `channels` bytes each (grey, grey and alpha, RGB or RGBA),
+/// `width` wide, as RGBA reduced `k` times on each side: each pixel the mean
+/// of the block of `k` × `k` it stands for (fewer at the right and bottom
+/// edges). A whole factor and a box filter, on every core: a third of a
+/// second less than a resampling filter for a 48-megapixel photo, and as
+/// good when shrinking.
+fn reduce(pixels: &[u8], width: u32, height: u32, channels: usize, k: u32) -> (Vec<u8>, u32, u32) {
+    let (w, h) = (width.div_ceil(k), height.div_ceil(k));
+    let (width, k_us) = (width as usize, k as usize);
+    let row_bytes = w as usize * 4;
+    let mut out = vec![0u8; row_bytes * h as usize];
+    let threads = std::thread::available_parallelism()
+        .map_or(4, usize::from)
+        .clamp(1, 16);
+    let rows_each = (h as usize).div_ceil(threads).max(1);
+    std::thread::scope(|scope| {
+        for (band, rows) in out.chunks_mut(rows_each * row_bytes).enumerate() {
+            scope.spawn(move || {
+                let mut sums = vec![0u32; w as usize * 4];
+                let mut counts = vec![0u32; w as usize];
+                for (r, row) in rows.chunks_mut(row_bytes).enumerate() {
+                    let y0 = (band * rows_each + r) * k_us;
+                    let y1 = (y0 + k_us).min(height as usize);
+                    sums.fill(0);
+                    counts.fill(0);
+                    for y in y0..y1 {
+                        let line = &pixels[y * width * channels..(y + 1) * width * channels];
+                        for (x, px) in line.chunks_exact(channels).enumerate() {
+                            let ox = x / k_us;
+                            let rgba = match channels {
+                                1 => [px[0], px[0], px[0], 255],
+                                2 => [px[0], px[0], px[0], px[1]],
+                                3 => [px[0], px[1], px[2], 255],
+                                _ => [px[0], px[1], px[2], px[3]],
+                            };
+                            for (sum, value) in sums[ox * 4..ox * 4 + 4].iter_mut().zip(rgba) {
+                                *sum += u32::from(value);
+                            }
+                            counts[ox] += 1;
+                        }
+                    }
+                    for (ox, count) in counts.iter().enumerate() {
+                        let count = (*count).max(1);
+                        for c in 0..4 {
+                            row[ox * 4 + c] = ((sums[ox * 4 + c] + count / 2) / count) as u8;
+                        }
+                    }
+                }
+            });
+        }
+    });
+    (out, w, h)
+}
+
+/// A decoded picture as the viewer's pixels, reduced `k` times: the handle,
+/// and the picture's own size.
+fn pixels(decoded: ::image::DynamicImage, size: Size) -> Loaded {
+    use ::image::DynamicImage as D;
+    let (width, height) = (decoded.width(), decoded.height());
+    let k = factor(width, height, size);
+    if k == 1 {
+        let rgba = decoded.into_rgba8();
+        return Loaded::Pixels(
+            Handle::from_rgba(width, height, rgba.into_raw()),
+            width,
+            height,
+        );
+    }
+    // Reduced from the decoder's own layout: an RGB photo is not first
+    // copied whole at four bytes a pixel.
+    let (rgba, w, h) = match &decoded {
+        D::ImageLuma8(image) => reduce(image.as_raw(), width, height, 1, k),
+        D::ImageLumaA8(image) => reduce(image.as_raw(), width, height, 2, k),
+        D::ImageRgb8(image) => reduce(image.as_raw(), width, height, 3, k),
+        D::ImageRgba8(image) => reduce(image.as_raw(), width, height, 4, k),
+        // Sixteen bits or floats: brought to eight first.
+        other => reduce(other.to_rgba8().as_raw(), width, height, 4, k),
+    };
+    Loaded::Pixels(Handle::from_rgba(w, h, rgba), width, height)
+}
+
 /// A picture of one frame, decoded to pixels after its size is checked.
-fn still(bytes: &[u8]) -> Result<Loaded, String> {
+fn still(bytes: &[u8], size: Size) -> Result<Loaded, String> {
     let reader = ::image::ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
         .map_err(|err| err.to_string())?;
@@ -225,23 +357,17 @@ fn still(bytes: &[u8]) -> Result<Loaded, String> {
             MAX_PIXELS / 1_000_000
         ));
     }
-    let rgba = ::image::DynamicImage::from_decoder(decoder)
-        .map_err(|err| err.to_string())?
-        .into_rgba8();
-    let (width, height) = rgba.dimensions();
-    Ok(Loaded::Pixels(
-        Handle::from_rgba(width, height, rgba.into_raw()),
-        width,
-        height,
-    ))
+    let decoded = ::image::DynamicImage::from_decoder(decoder).map_err(|err| err.to_string())?;
+    Ok(pixels(decoded, size))
 }
 
 /// An AVIF or an animation, or `None` for a picture of one frame.
-fn decode(bytes: &[u8]) -> Result<Option<Loaded>, String> {
+fn decode(bytes: &[u8], size: Size) -> Result<Option<Loaded>, String> {
     if avif::is_avif(&bytes[..bytes.len().min(512)]) {
-        let pixels = avif::decode(bytes)?;
-        let handle = Handle::from_rgba(pixels.width, pixels.height, pixels.rgba);
-        return Ok(Some(Loaded::Pixels(handle, pixels.width, pixels.height)));
+        let decoded = avif::decode(bytes)?;
+        let rgba = ::image::RgbaImage::from_raw(decoded.width, decoded.height, decoded.rgba)
+            .ok_or("the decoder gave fewer pixels than the picture has")?;
+        return Ok(Some(pixels(::image::DynamicImage::ImageRgba8(rgba), size)));
     }
     let animation = if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
         let decoder = ::image::codecs::gif::GifDecoder::new(Cursor::new(bytes));

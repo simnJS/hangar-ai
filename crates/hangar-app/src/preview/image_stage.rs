@@ -34,6 +34,9 @@ use super::model::{ImageFrame, Size as FrameSize};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Pic {
     Raster(image::Handle),
+    /// Pixels decoded off the UI thread (`decode.rs`), and the size of the
+    /// picture they are of: fewer of them than that when it was reduced.
+    Pixels(image::Handle, u32, u32),
     Vector(svg_core::Handle),
     Animated(Arc<Animation>),
 }
@@ -223,7 +226,7 @@ fn measure(renderer: &iced::Renderer, pic: &Pic) -> Measured {
     match pic {
         // Decoded off the UI thread (`decode.rs`): its size is known, and
         // asking the renderer would upload it in the middle of the layout.
-        Pic::Raster(image::Handle::Rgba { width, height, .. }) => {
+        Pic::Pixels(_, width, height) | Pic::Raster(image::Handle::Rgba { width, height, .. }) => {
             Measured::Size(FrameSize::new(*width as f32, *height as f32))
         }
         Pic::Raster(handle) => match renderer.load_image(handle) {
@@ -553,7 +556,7 @@ impl<M: Clone> Widget<M, iced::Theme, iced::Renderer> for Stage<'_, M> {
                 }
             }
             match self.pic {
-                Pic::Raster(handle) => renderer.draw_image(
+                Pic::Raster(handle) | Pic::Pixels(handle, ..) => renderer.draw_image(
                     iced::advanced::image::Image::new(handle.clone()).filter_method(
                         if self.pixelated {
                             image::FilterMethod::Nearest

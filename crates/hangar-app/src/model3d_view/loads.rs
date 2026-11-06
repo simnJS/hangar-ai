@@ -135,11 +135,17 @@ pub(super) fn settle(
         .filter(|id| !open.contains(id.as_str()))
         .cloned()
         .collect();
+    let closed = !gone.is_empty();
     for id in gone {
         if let Some(mut slot) = st.slots.remove(&id) {
             slot.abandon();
         }
         st.registry.remove(&id);
+    }
+    // A model's meshes and textures, hundreds of megabytes for a large one,
+    // go back to the system with it (`preview::heap`).
+    if closed {
+        crate::preview::heap::give_back_soon();
     }
 
     // The registry knows the theme each workspace is drawn in, so a snapshot
@@ -356,6 +362,7 @@ fn evict(st: &mut State, awake: &[&Want]) {
         }
         st.registry.remove(&id);
     }
+    crate::preview::heap::give_back_soon();
 }
 
 /// The folders a model's own files — a glTF's textures, an OBJ's `.mtl` — may

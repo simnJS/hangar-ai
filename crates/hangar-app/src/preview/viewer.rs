@@ -31,9 +31,35 @@ use crate::ctx::Ctx;
 use crate::message::Message;
 use crate::state::WsId;
 
-/// A head read from a file, to ride in a message.
+/// A head read from a file, to ride in a message, and for a Markdown file
+/// its page, parsed where the file was read: parsing a long page takes a
+/// quarter of a second, which the window's thread is not to spend.
 #[derive(Clone)]
-pub struct Loaded(pub Arc<Head>);
+pub struct Loaded(pub Arc<Head>, pub Parsed);
+
+/// A page parsed off the window's thread, taken once by the viewer.
+#[derive(Clone, Default)]
+pub struct Parsed(Option<Arc<std::sync::Mutex<Option<Rendered>>>>);
+
+impl Parsed {
+    pub fn new(rendered: Rendered) -> Parsed {
+        Parsed(Some(Arc::new(std::sync::Mutex::new(Some(rendered)))))
+    }
+
+    /// The page, if it was parsed and not taken yet.
+    pub fn take(&self) -> Option<Rendered> {
+        self.0
+            .as_ref()
+            .and_then(|held| held.lock().unwrap_or_else(|p| p.into_inner()).take())
+    }
+}
+
+impl Loaded {
+    /// A head with nothing parsed.
+    pub fn new(head: Head) -> Loaded {
+        Loaded(Arc::new(head), Parsed::default())
+    }
+}
 
 impl std::fmt::Debug for Loaded {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -151,6 +177,10 @@ pub struct ViewerState {
     pub rendered: Option<Rendered>,
     /// Which text a colouring is for.
     pub generation: u64,
+    /// The text read was given to the highlighter. A Markdown page's source
+    /// waits until it is shown: colouring all of it takes seconds of a core,
+    /// for lines nobody looks at while the page is rendered.
+    pub coloured: bool,
     /// Where the lines of the text are scrolled to.
     pub scroll: code_lines::Scroll,
     /// What is selected among the lines, and what is selected of the lines or
@@ -172,6 +202,7 @@ impl ViewerState {
             picture: Picture::default(),
             rendered: None,
             generation: 0,
+            coloured: false,
             scroll: code_lines::Scroll::default(),
             doc: Doc::new(iced::Color::TRANSPARENT),
             selection: String::new(),

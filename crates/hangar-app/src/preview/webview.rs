@@ -31,13 +31,19 @@
 //!   (Wayland, see [`Arrival`]), the app does not map one by itself for an
 //!   agent's file at all: the panel offers the window, and a click on it is
 //!   the person's.
+//! - **The helper goes when nothing is shown in it.** Once neither the
+//!   preview nor a kit's tab holds a window in it ([`Helper::hold`]) for
+//!   [`HELPER_IDLE`], it is told to quit: WebKit's processes hold some
+//!   hundred megabytes for as long as they run. The next page starts it again.
 //! - **A PDF waits to be known drawable.** The engine is asked whether it has
 //!   a PDF viewer once, by a window that stays hidden until it answers, so a
 //!   window that would be blank never flashes up.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use hangar_webview::{
     Client, Closed, Content, Event, OpenWindow, SchemeRequest, SchemeResponse, SpawnOptions,
@@ -79,13 +85,24 @@ impl std::fmt::Display for StartError {
 type Route = Box<dyn Fn(&Event) + Send + Sync>;
 type Serve = Arc<dyn Fn(&SchemeRequest) -> SchemeResponse + Send + Sync>;
 
+/// How long the helper runs on with no window in it before it is told to
+/// quit: long enough that going back to a PDF a moment later does not start
+/// it again.
+pub const HELPER_IDLE: Duration = Duration::from_secs(60);
+
 /// The helper process and the way to it, shared by everything that shows a
-/// page: started on the first window, and again after it was lost.
+/// page: started on the first window, and again after it was lost or let go.
 #[derive(Default)]
 pub struct Helper {
     client: Mutex<Option<Arc<Client>>>,
     routes: Mutex<Vec<(String, Route)>>,
     serves: Mutex<Vec<(String, Serve)>>,
+    /// How many windows each user of the helper (by the prefix of their
+    /// windows' names) holds in it.
+    held: Mutex<HashMap<String, usize>>,
+    /// Counts the changes of `held`: a check for idleness made before the
+    /// last change is stale.
+    held_changes: AtomicU64,
 }
 
 impl std::fmt::Debug for Helper {
@@ -142,6 +159,56 @@ impl Helper {
             .as_ref()
             .filter(|client| !client.is_closed())
             .cloned()
+    }
+
+    /// Says how many windows the user of `prefix` holds in the helper, from
+    /// the window's thread, where every window is opened. Answers the change
+    /// to check for idleness after [`HELPER_IDLE`] when none is held any more
+    /// and the helper runs.
+    pub fn hold(&self, prefix: &str, windows: usize) -> Option<u64> {
+        let mut held = self
+            .held
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if held.get(prefix).copied().unwrap_or(0) == windows {
+            return None;
+        }
+        held.insert(prefix.to_string(), windows);
+        let change = self.held_changes.fetch_add(1, Ordering::SeqCst) + 1;
+        let idle = held.values().all(|count| *count == 0);
+        drop(held);
+        (idle && self.client().is_some()).then_some(change)
+    }
+
+    /// Tells the helper to quit if no window was held since `change`. Called
+    /// on the window's thread, as every window is opened there, so none can
+    /// be on its way meanwhile. Says whether it was told.
+    pub fn quit_if_idle(&self, change: u64) -> bool {
+        let idle = self
+            .held
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .values()
+            .all(|count| *count == 0);
+        if !idle || self.held_changes.load(Ordering::SeqCst) != change {
+            return false;
+        }
+        // Let go here: the next window starts another. The thread reading
+        // its events holds the last client and drops it once the helper's
+        // output ends, which reaps it.
+        let Some(client) = self.lock_client().take() else {
+            return false;
+        };
+        let _ = client.quit();
+        true
+    }
+
+    /// A helper that runs `client`, for the tests.
+    #[cfg(test)]
+    pub(crate) fn running(client: Arc<Client>) -> Arc<Helper> {
+        let helper = Helper::new();
+        *helper.lock_client() = Some(client);
+        helper
     }
 
     /// Hears the events of the windows whose name starts with `prefix`
@@ -303,6 +370,21 @@ pub enum WebMsg {
     Event(Event),
     /// The helper's output ended.
     Gone,
+    /// [`HELPER_IDLE`] passed since no window was held any more, at this
+    /// change of what is held ([`Helper::hold`]).
+    Idle(u64),
+}
+
+/// Holds `windows` for `prefix` in the helper, and when that leaves the
+/// helper with nothing to show, the check that lets it go after
+/// [`HELPER_IDLE`].
+pub fn hold(helper: &Helper, prefix: &str, windows: usize) -> iced::Task<Message> {
+    match helper.hold(prefix, windows) {
+        Some(change) => iced::Task::perform(tokio::time::sleep(HELPER_IDLE), move |()| {
+            Message::Preview(super::Msg::Web(WebMsg::Idle(change)))
+        }),
+        None => iced::Task::none(),
+    }
 }
 
 /// A client, to ride in a message.
@@ -312,6 +394,13 @@ pub struct HelperHandle(pub Arc<Client>);
 impl std::fmt::Debug for HelperHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("HelperHandle(..)")
+    }
+}
+
+impl WinState {
+    /// The helper has, or is about to have, a window for it.
+    pub fn holds(&self) -> bool {
+        matches!(self, WinState::Waiting | WinState::Opening | WinState::Open)
     }
 }
 
@@ -652,6 +741,13 @@ pub struct Windows {
     pdf_viewer: Option<bool>,
     /// A window can be opened without the keyboard here.
     unfocused_open: bool,
+}
+
+impl Windows {
+    /// How many windows the helper has, or is about to have, for these.
+    pub fn held(&self) -> usize {
+        self.wins.values().filter(|win| win.state.holds()).count()
+    }
 }
 
 impl Default for Windows {
