@@ -259,8 +259,11 @@ pub fn run(sv: &Services, command: &SavedCommand, panes: Vec<PaneId>) -> Task<Me
                 match delivery {
                     // Nothing to tell anyone when a pane has gone meanwhile:
                     // the web app dropped these errors as well.
+                    // A pane of a remote workspace is typed into on its node.
                     Delivery::Type(data) => {
-                        let _ = pty_write(core.pty(), pane, data);
+                        if crate::nodes::remote::write(&pane, data.clone()).is_none() {
+                            let _ = pty_write(core.pty(), pane, data);
+                        }
                     }
                     Delivery::Queue(text) => {
                         bridge_enqueue(core.host(), pane, text, None);

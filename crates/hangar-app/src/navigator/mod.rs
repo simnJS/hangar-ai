@@ -457,7 +457,9 @@ fn ask_shells(sv: &Services, ws: WsId, shells: Vec<PaneId>) -> Task<Message> {
     let manager = sv.core().pty().clone();
     let asked = shells.clone();
     Task::perform(
-        hangar_core::pty::pty_has_children(manager, shells),
+        // A remote workspace's shells are taken as busy: its node is not
+        // asked.
+        crate::nodes::remote::has_children(manager, shells),
         move |answer| {
             Message::Navigator(Msg::SleepProbed {
                 ws: ws.clone(),

@@ -693,11 +693,16 @@ struct PtyTyping {
 
 impl PaneTyping for PtyTyping {
     async fn alive(&self, pane: &str) -> bool {
-        hangar_core::pty::pty_alive(&self.pty, pane.to_owned())
+        crate::nodes::remote::alive(pane)
+            .unwrap_or_else(|| hangar_core::pty::pty_alive(&self.pty, pane.to_owned()))
     }
 
+    /// A pane of a remote workspace is typed into on its node (the kit's
+    /// files stay this machine's: kits of remote files come later).
     async fn write(&self, pane: &str, data: &str) -> Result<(), String> {
-        hangar_core::pty::pty_write(&self.pty, pane.to_owned(), data.to_owned())
+        crate::nodes::remote::write(pane, data.to_owned()).unwrap_or_else(|| {
+            hangar_core::pty::pty_write(&self.pty, pane.to_owned(), data.to_owned())
+        })
     }
 
     async fn wait(&self, delay: Duration) {

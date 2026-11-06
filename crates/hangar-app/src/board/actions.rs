@@ -4,13 +4,21 @@
 //! Each runs off the UI thread (it takes the board's lock and writes
 //! `board.json`) and answers with `Msg::Mutated`, after which the cache reads
 //! the board again: the window shows what the file says, not what it hoped.
+//!
+//! The board of a workspace on a node (its key is `cache::board_key`'s) is
+//! the node's: it is read and written through the node's `/api/board` and
+//! `/api/tasks…`, the routes its agents use too.
 
 use hangar_core::board::{NewTask, TaskPatch};
 use iced::Task;
+use serde_json::{Value, json};
 
 use crate::message::Message;
+use crate::nodes::NodeClient;
+use crate::nodes::wire;
 
 use super::Msg;
+use super::cache::remote_board;
 use super::model::{Column, block_patch, unblock_patch};
 
 /// One change to a task, as the dialog and the drag make it. Own type because
@@ -36,6 +44,41 @@ pub enum Edit {
 }
 
 impl Edit {
+    /// The patch as the API's `PATCH /api/tasks/{id}` takes it. A block or
+    /// an unblock sent this way is signed "user" but not marked as the
+    /// person's: the API keeps that mark for the window's own calls.
+    pub fn json(&self) -> Value {
+        match self {
+            Edit::Title(title) => json!({ "title": title }),
+            Edit::Description(description) => json!({ "description": description }),
+            Edit::Column(column) => json!({ "column": column.id() }),
+            Edit::Priority(priority) => json!({ "priority": priority }),
+            Edit::Release => json!({ "release": true }),
+            Edit::Owns(owns) => json!({ "owns": owns }),
+            Edit::DependsOn(ids) => json!({ "depends_on": ids }),
+            Edit::Block {
+                reason,
+                recheck,
+                human_only,
+            } => {
+                let day = recheck.trim();
+                json!({ "block": {
+                    "reason": reason.trim(),
+                    "recheck": (!day.is_empty()).then_some(day),
+                    "human_only": human_only,
+                    "by": "user",
+                } })
+            }
+            Edit::Unblock { note } => {
+                let text = note.trim();
+                json!({ "unblock": {
+                    "note": (!text.is_empty()).then_some(text),
+                    "by": "user",
+                } })
+            }
+        }
+    }
+
     /// The patch that makes it (`board_update`'s `patch`).
     pub fn patch(&self) -> TaskPatch {
         match self {
@@ -101,6 +144,18 @@ impl Draft {
         }
     }
 
+    /// The task as the API's `POST /api/tasks` takes it.
+    pub fn json(&self) -> Value {
+        json!({
+            "title": self.title,
+            "description": self.description,
+            "column": self.column.id(),
+            "priority": self.priority,
+            "depends_on": self.depends_on,
+            "owns": self.owns,
+        })
+    }
+
     pub fn new_task(&self) -> NewTask {
         NewTask {
             title: self.title.clone(),
@@ -141,6 +196,62 @@ pub enum Errors {
     ToDialog,
 }
 
+/// The node's client for a remote board, or why there is none.
+fn client_for(node: &str) -> Result<NodeClient, String> {
+    crate::nodes::remote::directory(node).ok_or_else(|| format!("node {node} is not connected"))
+}
+
+/// `?cwd=` of the API's board routes.
+fn on_board(path: &str, cwd: &str) -> String {
+    format!("{path}?cwd={}", wire::encode(cwd))
+}
+
+/// The change, through the API of the node at `client`, to its board in
+/// `cwd`.
+pub async fn apply_remote(
+    client: &NodeClient,
+    cwd: &str,
+    mutation: Mutation,
+) -> Result<(), String> {
+    let (method, path, body) = match mutation {
+        Mutation::Create(draft) => ("POST", "/api/tasks".to_owned(), Some(draft.json())),
+        Mutation::Update { id, edit } => (
+            "PATCH",
+            format!("/api/tasks/{}", wire::encode(&id)),
+            Some(edit.json()),
+        ),
+        Mutation::Comment { id, text } => (
+            "POST",
+            format!("/api/tasks/{}/comment", wire::encode(&id)),
+            Some(json!({ "author": "user", "text": text })),
+        ),
+        Mutation::Delete { id } => ("DELETE", format!("/api/tasks/{}", wire::encode(&id)), None),
+    };
+    let answer = wire::request(client, method, &on_board(&path, cwd), body.as_ref()).await?;
+    if answer.ok() {
+        Ok(())
+    } else {
+        Err(answer.error())
+    }
+}
+
+/// The tasks of the node's board in `cwd`.
+pub async fn read_remote(
+    client: &NodeClient,
+    cwd: &str,
+) -> Result<Vec<hangar_core::board::Task>, String> {
+    let board = wire::request(client, "GET", &on_board("/api/board", cwd), None)
+        .await?
+        .json()?;
+    serde_json::from_value(
+        board
+            .get("tasks")
+            .cloned()
+            .unwrap_or(Value::Array(Vec::new())),
+    )
+    .map_err(|err| err.to_string())
+}
+
 fn apply(cwd: String, mutation: Mutation) -> Result<(), String> {
     match mutation {
         Mutation::Create(draft) => hangar_core::board_create(cwd, draft.new_task()).map(drop),
@@ -173,6 +284,10 @@ pub fn run(cwd: &str, mutation: Mutation, errors: Errors, after: After) -> Task<
     let work = cwd.to_owned();
     Task::perform(
         async move {
+            if let Some((node, cwd)) = remote_board(&work) {
+                let client = client_for(node)?;
+                return apply_remote(&client, cwd, mutation).await;
+            }
             tokio::task::spawn_blocking(move || apply(work, mutation))
                 .await
                 .unwrap_or_else(|panic| Err(panic.to_string()))
@@ -194,6 +309,12 @@ pub fn read(cwd: &str) -> Task<Message> {
     let work = cwd.to_owned();
     Task::perform(
         async move {
+            // A remote board not read (its node away) leaves the board as it
+            // was; the node's events read it again once it is back.
+            if let Some((node, cwd)) = remote_board(&work) {
+                let client = client_for(node).ok()?;
+                return read_remote(&client, cwd).await.ok();
+            }
             tokio::task::spawn_blocking(move || hangar_core::board_load(work).tasks)
                 .await
                 .ok()
@@ -408,5 +529,110 @@ mod tests {
         assert_eq!(task.owns, vec!["docs/".to_owned()]);
         assert_eq!(task.depends_on, vec!["x".to_owned()]);
         assert!(task.labels.is_empty());
+    }
+
+    /// A remote workspace's board, read and written through a fake node's
+    /// API: the folder on the node in the query, the token sent, the JSON
+    /// the API takes.
+    #[tokio::test]
+    async fn a_remote_board_goes_through_the_nodes_api() {
+        use crate::nodes::testing::{TOKEN, answer, listen, read_request};
+
+        let (listener, client) = listen().await;
+        let server = tokio::spawn(async move {
+            let mut seen = Vec::new();
+            for reply in [
+                serde_json::json!({ "tasks": [
+                    { "id": "t1", "title": "Ship it", "column": "doing", "priority": 1,
+                      "created_at": 1, "updated_at": 2 }
+                ], "columns": [] }),
+                serde_json::json!({ "task": {} }),
+                serde_json::json!({ "task": {} }),
+            ] {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let request = read_request(&mut stream).await;
+                assert!(
+                    request
+                        .head
+                        .contains(&format!("Authorization: Bearer {TOKEN}"))
+                );
+                seen.push((request.line().to_owned(), request.body));
+                answer(&mut stream, 200, &reply.to_string()).await;
+            }
+            seen
+        });
+        let tasks = read_remote(&client, "/home/hangar/demo").await.unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].title, "Ship it");
+        let edit = Mutation::Update {
+            id: "t1".into(),
+            edit: Edit::Column(Column::Done),
+        };
+        apply_remote(&client, "/home/hangar/demo", edit)
+            .await
+            .unwrap();
+        let create = Mutation::Create(Draft::titled("New", Column::Todo));
+        apply_remote(&client, "/home/hangar/demo", create)
+            .await
+            .unwrap();
+        let seen = server.await.unwrap();
+        assert!(
+            seen[0]
+                .0
+                .starts_with("GET /api/board?cwd=%2Fhome%2Fhangar%2Fdemo ")
+        );
+        assert!(
+            seen[1]
+                .0
+                .starts_with("PATCH /api/tasks/t1?cwd=%2Fhome%2Fhangar%2Fdemo ")
+        );
+        let patch: serde_json::Value = serde_json::from_str(&seen[1].1).unwrap();
+        assert_eq!(patch, serde_json::json!({ "column": "done" }));
+        assert!(seen[2].0.starts_with("POST /api/tasks?cwd="));
+        let made: serde_json::Value = serde_json::from_str(&seen[2].1).unwrap();
+        assert_eq!(made["title"], "New");
+        assert_eq!(made["column"], "todo");
+    }
+
+    /// The JSON patches are what core's `TaskPatch` reads.
+    #[test]
+    fn a_json_patch_reads_as_cores_patch() {
+        let edits = [
+            Edit::Title("t".into()),
+            Edit::Priority(3),
+            Edit::Release,
+            Edit::DependsOn(vec!["a".into()]),
+            Edit::Block {
+                reason: " waits ".into(),
+                recheck: "".into(),
+                human_only: true,
+            },
+            Edit::Unblock { note: "ok".into() },
+        ];
+        for edit in edits {
+            let patch: TaskPatch = serde_json::from_value(edit.json()).expect("a patch");
+            let local = edit.patch();
+            assert_eq!(patch.title, local.title);
+            assert_eq!(patch.priority, local.priority);
+            assert_eq!(patch.release, local.release);
+            assert_eq!(patch.depends_on, local.depends_on);
+            assert_eq!(
+                patch
+                    .block
+                    .as_ref()
+                    .map(|b| (&b.reason, &b.recheck, b.human_only)),
+                local
+                    .block
+                    .as_ref()
+                    .map(|b| (&b.reason, &b.recheck, b.human_only))
+            );
+            assert_eq!(
+                patch.unblock.as_ref().map(|u| &u.note),
+                local.unblock.as_ref().map(|u| &u.note)
+            );
+        }
+        let task: NewTask =
+            serde_json::from_value(Draft::titled("x", Column::Doing).json()).expect("a task");
+        assert_eq!(task.column.as_deref(), Some("doing"));
     }
 }

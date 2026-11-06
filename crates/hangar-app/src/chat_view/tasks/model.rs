@@ -304,7 +304,7 @@ impl Cache {
     pub fn panel(&self, m: &Model, ws: &Workspace) -> Arc<Panel> {
         let inputs = Inputs {
             ws: ws.id.clone(),
-            board: m.live.board.shared(&ws.cwd),
+            board: m.live.board.shared(&crate::board::cache::board_key(ws)),
             revision: m.revision(),
             waiting: waiting_panes(m, ws),
         };

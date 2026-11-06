@@ -187,8 +187,35 @@ pub fn dialog<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
         ),
     ));
 
+    // Where a folder's workspace runs, while a node is connected (or was
+    // chosen and dropped since: the choice stays on screen).
+    let nodes = crate::nodes::connected(ctx.model);
+    let chosen = st.place.node.as_ref();
+    if st.source == Source::Folder && (!nodes.is_empty() || chosen.is_some()) {
+        let mut options = vec![(None, ctx.t(Key::NodesCreateLocal).into_owned())];
+        let mut listed: Vec<(String, String)> = nodes;
+        if let Some(node) = chosen
+            && !listed.iter().any(|(id, _)| id == node)
+        {
+            listed.push((node.clone(), crate::nodes::label(ctx.model, node)));
+        }
+        for (id, label) in listed {
+            let words = ctx
+                .i18n
+                .t_with(Key::NodesCreateOnNode, &args!("node" => label.as_str()))
+                .into_owned();
+            options.push((Some(id), words));
+        }
+        form = form.push(labelled(
+            ctx,
+            Some(ctx.t(Key::NodesCreateWhere).into_owned()),
+            input::segmented_labels(t, options, &st.place.node, |node| msg(Msg::Place(node))),
+        ));
+    }
+
     match st.source {
         Source::Git => form = git_fields(form, st, ctx, status),
+        Source::Folder if st.place.node.is_some() => form = node_folder_fields(form, st, ctx),
         Source::Folder => form = folder_fields(form, st, ctx),
     }
 
@@ -447,6 +474,78 @@ fn folder_fields<'a>(
     form.push(labelled(
         ctx,
         Some(ctx.t(Key::CreateFolder).into_owned()),
+        folder_column,
+    ))
+}
+
+/// The folder of a workspace on a node: the folder listed is the one
+/// picked; its sub-folders open with a click, its parent with the button.
+fn node_folder_fields<'a>(
+    form: iced::widget::Column<'a, Message>,
+    st: &'a State,
+    ctx: Ctx<'a>,
+) -> iced::widget::Column<'a, Message> {
+    let t = ctx.theme;
+    let empty = ctx.t(Key::CreateFolderEmpty);
+    let path = field(ctx, &empty, &st.folder.cwd, false)
+        .on_input(|cwd| msg(Msg::Cwd(cwd)))
+        .on_submit(msg(Msg::NodeFolder(Some(st.folder.cwd.clone()))));
+    let parent = st
+        .place
+        .listing
+        .as_ref()
+        .and_then(|listing| listing.parent.clone());
+    let mut folder_column = column![picker(
+        ctx,
+        path,
+        vec![
+            ui_button::secondary(t, ctx.t(Key::NodesCreateUp))
+                .on_press_maybe(parent.map(|parent| msg(Msg::NodeFolder(Some(parent)))))
+                .into(),
+        ],
+    )]
+    .spacing(tokens::space::SM);
+
+    if let Some(error) = &st.place.error {
+        let said = ctx
+            .i18n
+            .t_with(Key::NodesCreateFailed, &args!("error" => error.as_str()))
+            .into_owned();
+        folder_column = folder_column.push(notice(
+            ctx,
+            text(said).size(tokens::font_size::UI).into(),
+            true,
+        ));
+    }
+    if st.place.listing_asked.is_some() {
+        folder_column = folder_column.push(typography::hint(t, ctx.t(Key::NodesCreateLoading)));
+    } else if let Some(listing) = &st.place.listing {
+        if listing.folders.is_empty() {
+            folder_column = folder_column.push(typography::hint(t, ctx.t(Key::NodesCreateEmpty)));
+        }
+        let mut list = column![].spacing(2);
+        for name in &listing.folders {
+            let path = if listing.path.ends_with('/') {
+                format!("{}{name}", listing.path)
+            } else {
+                format!("{}/{name}", listing.path)
+            };
+            list = list.push(
+                ui_button::ghost(t, format!("{name}/"))
+                    .small()
+                    .on_press(msg(Msg::NodeFolder(Some(path)))),
+            );
+        }
+        folder_column = folder_column.push(
+            iced::widget::scrollable(list)
+                .height(Length::Fixed(140.0))
+                .width(Length::Fill),
+        );
+    }
+    folder_column = folder_column.push(typography::hint(t, ctx.t(Key::NodesCreateHint)));
+    form.push(labelled(
+        ctx,
+        Some(ctx.t(Key::NodesCreateFolder).into_owned()),
         folder_column,
     ))
 }

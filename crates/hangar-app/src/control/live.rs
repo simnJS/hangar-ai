@@ -128,6 +128,10 @@ impl AppPort for LivePort {
     }
 
     fn write(&self, pane: &PaneId, data: &str) -> BoxFuture<Result<(), String>> {
+        // A pane of a remote workspace is typed into on its node.
+        if let Some(written) = crate::nodes::remote::write(pane, data.to_string()) {
+            return Box::pin(async move { written });
+        }
         let pty = self.services.core().pty().clone();
         let (pane, data) = (pane.clone(), data.to_string());
         Box::pin(
@@ -136,6 +140,9 @@ impl AppPort for LivePort {
     }
 
     fn alive(&self, pane: &PaneId) -> BoxFuture<bool> {
+        if let Some(alive) = crate::nodes::remote::alive(pane) {
+            return Box::pin(async move { alive });
+        }
         let pty = self.services.core().pty().clone();
         let pane = pane.clone();
         Box::pin(async move {
@@ -149,6 +156,9 @@ impl AppPort for LivePort {
         let pty = self.services.core().pty().clone();
         let pane = pane.clone();
         Box::pin(async move {
+            if let Some(killed) = crate::nodes::remote::kill_pane(&pane).await {
+                return killed;
+            }
             blocking(move || hangar_core::pty::pty_kill(&pty, pane, Some(true))).await?
         })
     }

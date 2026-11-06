@@ -2166,6 +2166,24 @@ pub enum Key {
     NodesClaudeMissing,
     /// `nodes.connect`
     NodesConnect,
+    /// `nodes.create.empty`
+    NodesCreateEmpty,
+    /// `nodes.create.failed`
+    NodesCreateFailed,
+    /// `nodes.create.folder`
+    NodesCreateFolder,
+    /// `nodes.create.hint`
+    NodesCreateHint,
+    /// `nodes.create.loading`
+    NodesCreateLoading,
+    /// `nodes.create.local`
+    NodesCreateLocal,
+    /// `nodes.create.onNode`
+    NodesCreateOnNode,
+    /// `nodes.create.up`
+    NodesCreateUp,
+    /// `nodes.create.where`
+    NodesCreateWhere,
     /// `nodes.disconnect`
     NodesDisconnect,
     /// `nodes.error.api`
@@ -2190,6 +2208,12 @@ pub enum Key {
     NodesGitMissing,
     /// `nodes.info`
     NodesInfo,
+    /// `nodes.pane.away`
+    NodesPaneAway,
+    /// `nodes.pane.connecting`
+    NodesPaneConnecting,
+    /// `nodes.pane.reconnect`
+    NodesPaneReconnect,
     /// `nodes.remove`
     NodesRemove,
     /// `nodes.settings.empty`
@@ -3805,7 +3829,7 @@ pub enum Key {
 }
 
 /// How many keys there are.
-pub const KEY_COUNT: usize = 1894;
+pub const KEY_COUNT: usize = 1906;
 
 impl Key {
     /// Every key, in the order of their ids.
@@ -4886,6 +4910,15 @@ impl Key {
         Key::NodesClaudeFound,
         Key::NodesClaudeMissing,
         Key::NodesConnect,
+        Key::NodesCreateEmpty,
+        Key::NodesCreateFailed,
+        Key::NodesCreateFolder,
+        Key::NodesCreateHint,
+        Key::NodesCreateLoading,
+        Key::NodesCreateLocal,
+        Key::NodesCreateOnNode,
+        Key::NodesCreateUp,
+        Key::NodesCreateWhere,
         Key::NodesDisconnect,
         Key::NodesErrorApi,
         Key::NodesErrorLocal,
@@ -4898,6 +4931,9 @@ impl Key {
         Key::NodesGitFound,
         Key::NodesGitMissing,
         Key::NodesInfo,
+        Key::NodesPaneAway,
+        Key::NodesPaneConnecting,
+        Key::NodesPaneReconnect,
         Key::NodesRemove,
         Key::NodesSettingsEmpty,
         Key::NodesSettingsIntro,
@@ -6785,6 +6821,15 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "nodes.claudeFound", en: Text::plain("Claude Code"), fr: Text::plain("Claude Code") },
     Message { id: "nodes.claudeMissing", en: Text::plain("No Claude Code"), fr: Text::plain("Pas de Claude Code") },
     Message { id: "nodes.connect", en: Text::plain("Connect"), fr: Text::plain("Connecter") },
+    Message { id: "nodes.create.empty", en: Text::plain("No sub-folder here."), fr: Text::plain("Aucun sous-dossier ici.") },
+    Message { id: "nodes.create.failed", en: Text::plain("The node could not list this folder: {error}"), fr: Text::plain("Le nœud n’a pas pu lister ce dossier\u{202f}: {error}") },
+    Message { id: "nodes.create.folder", en: Text::plain("Folder on the node"), fr: Text::plain("Dossier sur le nœud") },
+    Message { id: "nodes.create.hint", en: Text::plain("The workspace’s terminals, board and agents live on the node; this window shows them."), fr: Text::plain("Les terminaux, le tableau et les agents du workspace vivent sur le nœud\u{202f}; cette fenêtre les montre.") },
+    Message { id: "nodes.create.loading", en: Text::plain("Reading the node’s folders…"), fr: Text::plain("Lecture des dossiers du nœud…") },
+    Message { id: "nodes.create.local", en: Text::plain("This computer"), fr: Text::plain("Cet ordinateur") },
+    Message { id: "nodes.create.onNode", en: Text::plain("On node {node}"), fr: Text::plain("Sur le nœud {node}") },
+    Message { id: "nodes.create.up", en: Text::plain("Parent folder"), fr: Text::plain("Dossier parent") },
+    Message { id: "nodes.create.where", en: Text::plain("Runs on"), fr: Text::plain("S’exécute sur") },
     Message { id: "nodes.disconnect", en: Text::plain("Disconnect"), fr: Text::plain("Déconnecter") },
     Message { id: "nodes.error.api", en: Text::plain("The node did not answer through the tunnel: {detail}"), fr: Text::plain("Le nœud n’a pas répondu par le tunnel\u{202f}: {detail}") },
     Message { id: "nodes.error.local", en: Text::plain("{detail}"), fr: Text::plain("{detail}") },
@@ -6797,6 +6842,9 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "nodes.gitFound", en: Text::plain("git"), fr: Text::plain("git") },
     Message { id: "nodes.gitMissing", en: Text::plain("No git"), fr: Text::plain("Pas de git") },
     Message { id: "nodes.info", en: Text::plain("hangar-node {version} on {hostname} ({target})"), fr: Text::plain("hangar-node {version} sur {hostname} ({target})") },
+    Message { id: "nodes.pane.away", en: Text::plain("Node {node} is not connected"), fr: Text::plain("Le nœud {node} n’est pas connecté") },
+    Message { id: "nodes.pane.connecting", en: Text::plain("Connecting to node {node}…"), fr: Text::plain("Connexion au nœud {node}…") },
+    Message { id: "nodes.pane.reconnect", en: Text::plain("Reconnect"), fr: Text::plain("Reconnecter") },
     Message { id: "nodes.remove", en: Text::plain("Remove"), fr: Text::plain("Retirer") },
     Message { id: "nodes.settings.empty", en: Text::plain("No node yet."), fr: Text::plain("Aucun nœud pour l’instant.") },
     Message { id: "nodes.settings.intro", en: Text::plain("Linux machines Hangar reaches over SSH with your keys. Connecting installs or updates hangar-node there, starts it and keeps a tunnel to it."), fr: Text::plain("Des machines Linux que Hangar joint par SSH avec tes clés. Se connecter y installe ou met à jour hangar-node, le lance et garde un tunnel vers lui.") },

@@ -172,12 +172,30 @@ impl Git {
     }
 }
 
+/// Where a workspace made from a folder runs (experiment `nodes`): this
+/// machine, or a connected node, whose folders are listed through its API
+/// (`GET /node/fs`) instead of the system's folder dialog.
+#[derive(Debug, Default)]
+struct Place {
+    /// The node chosen; `None` is this machine.
+    node: Option<String>,
+    /// The node's folder listed, once its answer came.
+    listing: Option<crate::nodes::remote::Listing>,
+    /// A listing asked for and not answered yet: its number.
+    listing_asked: Option<u64>,
+    error: Option<String>,
+}
+
+/// Numbers of the node folder listings, unique for the whole run.
+static LISTINGS: AtomicU64 = AtomicU64::new(1);
+
 /// The package's UI state; lives in `App.pkg.workspace_dialog`.
 #[derive(Debug, Default)]
 pub struct State {
     source: Source,
     name: String,
     folder: Folder,
+    place: Place,
     git: Git,
     /// The workspace whose kits are open (`Overlay::KitsDialog`).
     kits: Option<kits_dialog::KitsDialog>,
@@ -257,6 +275,16 @@ pub enum Msg {
 
     // The kits dialog.
     KitsHook(HookField, String),
+
+    // Where it runs (experiment `nodes`).
+    /// This machine (`None`) or a connected node.
+    Place(Option<String>),
+    /// A folder of the node to list and pick: `None` is its home.
+    NodeFolder(Option<String>),
+    NodeListed {
+        asked: u64,
+        result: Result<crate::nodes::remote::Listing, String>,
+    },
 }
 
 /// The repository field (`autoFocus` in the web app, when Git is the source).
@@ -358,6 +386,40 @@ fn form(st: &mut State, m: &mut Model, msg: Msg) -> Task<Message> {
             } else {
                 close(m)
             }
+        }
+
+        // ── where it runs ──
+        Msg::Place(node) => {
+            if st.place.node == node {
+                return Task::none();
+            }
+            // A folder of one machine means nothing on another.
+            st.folder = Folder::default();
+            st.place = Place {
+                node,
+                ..Place::default()
+            };
+            if st.place.node.is_some() {
+                list_node_folder(st, m, None)
+            } else {
+                Task::none()
+            }
+        }
+        Msg::NodeFolder(path) => list_node_folder(st, m, path),
+        Msg::NodeListed { asked, result } => {
+            if st.place.listing_asked != Some(asked) {
+                return Task::none();
+            }
+            st.place.listing_asked = None;
+            match result {
+                Ok(listing) => {
+                    st.place.error = None;
+                    st.folder.cwd = listing.path.clone();
+                    st.place.listing = Some(listing);
+                }
+                Err(error) => st.place.error = Some(error),
+            }
+            Task::none()
         }
 
         // ── the folder half ──
@@ -628,7 +690,33 @@ fn read_workspace_file(st: &mut State, path: String) -> Task<Message> {
     )
 }
 
+/// Lists `path` (the home when `None`) of the node chosen; the answer
+/// comes back as `Msg::NodeListed`, and the folder listed is the one picked.
+fn list_node_folder(st: &mut State, m: &Model, path: Option<String>) -> Task<Message> {
+    let Some(node) = st.place.node.clone() else {
+        return Task::none();
+    };
+    let Some(client) = crate::nodes::client(m, &node) else {
+        let label = crate::nodes::label(m, &node);
+        st.place.error = Some(
+            Translator::new(m.locale())
+                .t_with(Key::NodesPaneAway, &args!("node" => label.as_str()))
+                .into_owned(),
+        );
+        return Task::none();
+    };
+    let asked = LISTINGS.fetch_add(1, Ordering::Relaxed);
+    st.place.listing_asked = Some(asked);
+    Task::perform(
+        async move { crate::nodes::remote::list_folder(&client, path.as_deref()).await },
+        move |result| Message::WorkspaceDialog(Msg::NodeListed { asked, result }),
+    )
+}
+
 fn submit_folder(st: &mut State, m: &mut Model, kits: &[WorkspaceKit]) -> Task<Message> {
+    let remote = st.place.node.clone();
+    // A workspace on a node takes no kit: kits of remote files come later.
+    let kits: &[WorkspaceKit] = if remote.is_some() { &[] } else { kits };
     let Some(draft) = folder::draft_of(&FolderForm {
         name: &st.name,
         cwd: &st.folder.cwd,
@@ -644,6 +732,15 @@ fn submit_folder(st: &mut State, m: &mut Model, kits: &[WorkspaceKit]) -> Task<M
     let made = m.apply(StoreAction::AddWorkspace(draft));
     let mut tasks = vec![close(m)];
     if let Some(id) = made.workspace {
+        // Before its terminals start: they start on the node.
+        if let Some(node) = remote {
+            m.apply(StoreAction::UpdateWorkspace(
+                id.clone(),
+                Patch::new(move |workspace: &mut crate::state::Workspace| {
+                    workspace.node = Some(node.clone());
+                }),
+            ));
+        }
         if let Some(hooks) = folder::hooks_of(&st.folder.hooks) {
             m.apply(StoreAction::UpdateWorkspace(
                 id.clone(),

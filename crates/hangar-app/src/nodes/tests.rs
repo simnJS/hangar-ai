@@ -403,11 +403,12 @@ async fn a_status_from_an_older_connection_is_dropped() {
             generation: 2,
             task: tokio::spawn(async {}),
             tunnel: Arc::new(Mutex::new(None)),
+            events: None,
         },
     );
     let mut live = Live::default();
     apply_status(
-        &st,
+        &mut st,
         &mut live,
         "n1".into(),
         1,
@@ -415,7 +416,7 @@ async fn a_status_from_an_older_connection_is_dropped() {
     );
     assert_eq!(live.status("n1"), NodeStatus::Disconnected);
     apply_status(
-        &st,
+        &mut st,
         &mut live,
         "n1".into(),
         2,
@@ -423,7 +424,7 @@ async fn a_status_from_an_older_connection_is_dropped() {
     );
     assert_eq!(live.status("n1"), NodeStatus::Connecting(Step::Start));
     apply_status(
-        &st,
+        &mut st,
         &mut live,
         "other".into(),
         2,

@@ -232,6 +232,12 @@ pub struct Workspace {
     /// experiment turned off leaves the grid without touching the file.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub chat_view: Option<bool>,
+    /// The node it lives on (experiment `nodes`, docs/native/nodes.md §5):
+    /// the id of one of `settings.nodes`. Its `cwd` is then a folder of that
+    /// machine, its terminals run there and its board is the node's. Absent
+    /// for a workspace of this machine.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node: Option<String>,
     #[serde(flatten)]
     pub extra: Extra,
 }

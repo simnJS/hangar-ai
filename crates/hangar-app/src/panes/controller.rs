@@ -45,11 +45,13 @@ use crate::state::types::{AgentId, McpMode, Pane, PaneRole, Settings, ShellInfo,
 use crate::state::{Model, PaneId, Patch, StoreAction, WsId};
 
 use super::Msg;
+use super::hub::HubChannel as Channel;
 use super::hub::{Hub, HubChannel};
 use super::launch::{self, Check, Settle};
 use super::look::{self, Look};
-use super::pty_link::PaneLink;
+use super::pty_link::{PaneLink, PtyBackend};
 use super::search::Search;
+use crate::nodes::remote::{self, RemoteMcp, RemoteSpawn, Started};
 
 /// How long a pane waits for its terminal to measure itself before its
 /// shell starts at the default 80×24: a pane of a workspace off screen is
@@ -173,6 +175,18 @@ pub struct SpawnReport {
     pub mcp_arg: Option<(String, bool)>,
     /// The MCP scope's warnings, already worded.
     pub notes: Vec<String>,
+    /// A pane of a remote workspace: how its shell started on the node.
+    pub remote: Option<RemoteStart>,
+}
+
+/// How a remote pane's shell started.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RemoteStart {
+    /// It was running already (the desktop restarted, the workspace was
+    /// opened again): nothing is launched in it, and its history up to
+    /// `replay_until` is drawn as it was.
+    pub attached: bool,
+    pub replay_until: u64,
 }
 
 /// The shell a pane runs: its own, its workspace's, the settings', then the
@@ -297,6 +311,8 @@ struct Spawn {
     mcp: Option<McpLaunch>,
     /// `pane-scopes` is on: the shell goes into a systemd scope of its own.
     scoped: bool,
+    /// The node of a remote workspace: the shell starts there.
+    node: Option<String>,
 }
 
 /// What the MCP scope of a launch is made from (`mcpLaunchConfig`).
@@ -308,6 +324,15 @@ struct McpLaunch {
     role: bool,
     family: Option<ShellFamily>,
     tr: Translator,
+}
+
+/// What the panes of `ws` reach their shells through: core's PTY manager
+/// `pty`, or the node the workspace lives on.
+pub fn backend_for(ws: &Workspace, pty: &Arc<hangar_core::pty::PtyManager>) -> PtyBackend {
+    match &ws.node {
+        Some(node) => PtyBackend::Remote { node: node.clone() },
+        None => PtyBackend::Local(pty.clone()),
+    }
 }
 
 /// Mounts `pane`: its terminal and its writer. The shell starts once the
@@ -325,9 +350,10 @@ pub fn mount(
     let mut terminal = Terminal::new(look.config.clone(), 80, 24);
     terminal.set_palette(look.palette.clone());
     terminal.set_font(look.font.clone());
-    let link = PaneLink::new(pane.id.clone(), terminal, sv.core().pty().clone());
+    let link = PaneLink::new(pane.id.clone(), terminal, backend_for(ws, sv.core().pty()));
     hub.insert(link.clone());
 
+    let remote = ws.node.is_some();
     let login = pane.agent == AgentId::Claude && pane.login == Some(true);
     let account = (pane.agent == AgentId::Claude).then(|| AccountChoice {
         default: settings.claude_account.clone(),
@@ -347,7 +373,7 @@ pub fn mount(
         name: pane.name.clone(),
         bridge: settings.claude_bridge,
         port_base: pane.port_base.and_then(|port| u16::try_from(port).ok()),
-        build_env: if pane.port_base.is_some() {
+        build_env: if pane.port_base.is_some() && !remote {
             hangar_core::build_cache::env_for(
                 std::path::Path::new(&ws.cwd),
                 &ws.id,
@@ -362,9 +388,11 @@ pub fn mount(
         // (`loadPaneKits(null, settings)`); the comment is followed here.
         // Every other pane gets the kits, a shell pane too: a `claude` typed
         // into it loads them, like the bridge.
-        kits: (!login).then(|| KitChoice::of(settings, ws)),
+        // The kits and the Claude accounts are this machine's files: a pane
+        // on a node starts without them (kits of remote files come later).
+        kits: (!login && !remote).then(|| KitChoice::of(settings, ws)),
         agent: pane.agent,
-        account,
+        account: account.filter(|_| !remote),
         mcp: (pane.agent == AgentId::Claude && !login).then(|| McpLaunch {
             mode: scope.mode,
             enabled: scope.enabled,
@@ -372,10 +400,12 @@ pub fn mount(
             family: shell_family(shell.as_ref()),
             tr: Translator::new(m.locale()),
         }),
-        scoped: crate::settings::experiments::enabled(
-            settings,
-            crate::settings::experiments::PANE_SCOPES,
-        ),
+        scoped: !remote
+            && crate::settings::experiments::enabled(
+                settings,
+                crate::settings::experiments::PANE_SCOPES,
+            ),
+        node: ws.node.clone(),
     };
 
     let id = pane.id.clone();
@@ -440,8 +470,17 @@ pub fn start(
     let Some(mut spawn) = rt.pending.take() else {
         return Task::none();
     };
-    spawn.resolve_shell(m, &rt.ws);
     let (columns, rows) = rt.link.lock().size();
+    if let Some(node) = spawn.node.clone() {
+        let id = spawn.id.clone();
+        let asked = spawn.remote(columns, rows);
+        let tr = Translator::new(m.locale());
+        let label = crate::nodes::label(m, &node);
+        return Task::perform(start_remote(node, label, asked, tr), move |result| {
+            Message::Panes(Msg::Spawned(id.clone(), result))
+        });
+    }
+    spawn.resolve_shell(m, &rt.ws);
     let sink = rt.link.sink(channel.waker());
     let pty = sv.core().pty().clone();
     let host = sv.core().host().clone();
@@ -457,7 +496,130 @@ pub fn start(
     )
 }
 
+/// How often a pane of a remote workspace looks again for its node, while
+/// the node is not connected.
+const NODE_WAIT: Duration = Duration::from_secs(1);
+
+/// Starts the shell of a remote pane on its node, once the node is
+/// connected (waiting for it as long as it takes: the pane says meanwhile
+/// that its node is away), or finds it still running there.
+async fn start_remote(
+    node: String,
+    label: String,
+    spawn: RemoteSpawn,
+    tr: Translator,
+) -> Result<SpawnReport, String> {
+    let client = loop {
+        if let Some(client) = remote::directory(&node) {
+            break client;
+        }
+        tokio::time::sleep(NODE_WAIT).await;
+    };
+    let started = remote::start(&client, &spawn)
+        .await
+        .map_err(|error| format!("{label}: {error}"))?;
+    Ok(remote_report(&spawn, started, tr))
+}
+
+/// What a remote start says, as a local spawn says it.
+fn remote_report(spawn: &RemoteSpawn, started: Started, tr: Translator) -> SpawnReport {
+    let mut report = SpawnReport {
+        kit_issues: Vec::new(),
+        resolved: None,
+        missing: None,
+        account: None,
+        mcp: None,
+        mcp_arg: None,
+        notes: Vec::new(),
+        remote: None,
+    };
+    match started {
+        Started::Attached { seq } => {
+            report.remote = Some(RemoteStart {
+                attached: true,
+                replay_until: seq,
+            });
+        }
+        Started::Spawned { mcp } => {
+            report.remote = Some(RemoteStart {
+                attached: false,
+                replay_until: 0,
+            });
+            let Some(asked) = &spawn.mcp else {
+                // Claude Code with its own servers, as an `inherit` launch.
+                if spawn.agent == AgentId::Claude.as_str() {
+                    report.mcp = Some(PaneMcp {
+                        mode: PaneMcpMode::Inherit,
+                        hangar: Some(false),
+                    });
+                }
+                return report;
+            };
+            let Some(file) = mcp.filter(|file| !file.path.is_empty()) else {
+                return report;
+            };
+            if !file.missing.is_empty() {
+                report.notes.push(
+                    tr.t_with(
+                        Key::McpScopeWarnMissing,
+                        &args!("names" => file.missing.join(", ")),
+                    )
+                    .into_owned(),
+                );
+            }
+            // The node runs a POSIX shell: the variable its spawn sets,
+            // never the path, is what the command names.
+            report.mcp_arg =
+                mcp_config_arg(&file.path, Some(ShellFamily::Posix)).map(|arg| (arg, asked.strict));
+            report.mcp = Some(PaneMcp {
+                mode: if asked.strict {
+                    PaneMcpMode::Custom {
+                        servers: file.servers.clone(),
+                    }
+                } else {
+                    PaneMcpMode::Inherit
+                },
+                hangar: Some(report.mcp_arg.is_some()),
+            });
+        }
+    }
+    report
+}
+
 impl Spawn {
+    /// What the node is asked for: the parameters that mean something
+    /// there, the MCP scope as the workspace chose it (`mcp_scope`'s rules:
+    /// nothing for an `inherit` pane without a role).
+    fn remote(&self, columns: u16, rows: u16) -> RemoteSpawn {
+        let mcp = self.mcp.as_ref().and_then(|launch| {
+            let inherit = launch.mode == McpMode::Inherit;
+            if inherit && !launch.role {
+                return None;
+            }
+            Some(RemoteMcp {
+                workspace_id: self.workspace_id.clone(),
+                workspace_cwd: self.workspace_cwd.clone(),
+                enabled: if inherit {
+                    Vec::new()
+                } else {
+                    launch.enabled.clone()
+                },
+                strict: !inherit,
+            })
+        });
+        RemoteSpawn {
+            id: self.id.clone(),
+            cwd: self.cwd.clone(),
+            cols: columns,
+            rows,
+            name: self.name.clone(),
+            agent: self.agent.as_str().to_owned(),
+            bridge: self.bridge,
+            port_base: self.port_base,
+            mcp,
+        }
+    }
+
     /// The pane's shell, resolved against the shells detected by now, and
     /// the quoting of its MCP argument with it.
     fn resolve_shell(&mut self, m: &Model, ws: &str) {
@@ -525,6 +687,7 @@ impl Spawn {
             mcp,
             mcp_arg: scope.map(|(_, arg, strict)| (arg, strict)),
             notes,
+            remote: None,
         })
     }
 
@@ -627,6 +790,7 @@ fn status(pane: &PaneId, status: PaneStatus) -> Task<Message> {
 pub fn spawned(
     rt: &mut PaneRt,
     m: &mut Model,
+    channel: &Channel,
     result: Result<SpawnReport, String>,
 ) -> Task<Message> {
     let tr = Translator::new(m.locale());
@@ -646,6 +810,11 @@ pub fn spawned(
         }
     };
     rt.status = PaneStatus::Running;
+    // A remote pane's output is followed from now on: its stream exists.
+    if let Some(start) = report.remote {
+        rt.link.set_remote_alive(true);
+        rt.link.follow_remote(channel.waker(), start.replay_until);
+    }
     // The terminal may have been measured again while the shell started.
     let (columns, rows) = rt.link.lock().size();
     rt.link.resize(columns, rows);
@@ -707,7 +876,9 @@ pub fn spawned(
     }
     rt.notes = notes;
     let running = status(&id, PaneStatus::Running);
-    if rt.agent == AgentId::Shell {
+    // A shell found running on its node already runs whatever it was given.
+    let attached = report.remote.is_some_and(|start| start.attached);
+    if rt.agent == AgentId::Shell || attached {
         return running;
     }
 
@@ -748,15 +919,25 @@ pub fn spawned(
     // known before the launch are read then too, so a brand new one stands
     // out to the session hunt.
     let link = rt.link.clone();
+    // The transcripts of a remote pane are the node's: none is looked for
+    // here, and its sessions are not followed (the chat view of a remote
+    // workspace comes later).
+    let local = link.node().is_none();
     let (task, handle) = Task::perform(
         async move {
             let exists = async {
-                match saved {
+                match saved.filter(|_| local) {
                     Some(id) => transcript_exists(id).await,
                     None => None,
                 }
             };
-            let known = known_session_ids(agent, cwd);
+            let known = async move {
+                if local {
+                    known_session_ids(agent, cwd).await
+                } else {
+                    HashSet::new()
+                }
+            };
             let (exists, known, ()) = iced::futures::join!(exists, known, shell_ready(link, delay));
             (exists, known)
         },
@@ -817,7 +998,11 @@ fn check_launch(rt: &mut PaneRt, sv: &Services, attempt: u8) -> Task<Message> {
                 tokio::time::sleep(launch::RUN_WAIT).await;
             }
             // Unreadable is not "nothing runs": the command is not typed
-            // into an agent that may have started.
+            // into an agent that may have started. A remote shell's children
+            // are not asked of its node, which is "unreadable" too.
+            if link.node().is_some() {
+                return true;
+            }
             hangar_core::pty::pty_has_children(pty, vec![link.id.clone()])
                 .await
                 .map_or(true, |running| !running.is_empty())
@@ -942,7 +1127,8 @@ pub fn launch_ready(
     }
     // Followed for as long as the pane lives, resumed or not: /new inside
     // the agent opens another transcript, and the pane has to follow it.
-    let watch = if is_resumable(rt.agent) {
+    // Not a remote pane's, whose transcripts are on its node.
+    let watch = if is_resumable(rt.agent) && rt.link.node().is_none() {
         let mut known = known;
         known.extend(resume);
         Task::done(Message::PanesLogic(Logic::WatchSession {
@@ -978,6 +1164,7 @@ pub fn unmount(hub: &Hub, sv: &Services, m: &mut Model, rt: PaneRt) -> Task<Mess
     hub.remove(&rt.link.id);
     let pty = sv.core().pty().clone();
     let id = rt.link.id.clone();
+    let node = rt.link.node().map(str::to_owned);
     drop(rt);
     // Closed, restarted under a new id, or put to sleep: not counted against
     // its account any more.
@@ -986,11 +1173,30 @@ pub fn unmount(hub: &Hub, sv: &Services, m: &mut Model, rt: PaneRt) -> Task<Mess
         pane: id.clone(),
         handing_over: false,
     }));
-    let kill = Task::perform(
-        tokio::task::spawn_blocking(move || hangar_core::pty::pty_kill(&pty, id, None)),
-        |_| Message::Noop,
-    );
+    let kill = match node {
+        Some(node) => kill_remote(node, id),
+        None => Task::perform(
+            tokio::task::spawn_blocking(move || hangar_core::pty::pty_kill(&pty, id, None)),
+            |_| Message::Noop,
+        ),
+    };
     Task::batch([unmounted, kill])
+}
+
+/// A remote pane's shell killed on its node. A node away keeps it: the
+/// shell is found again under its id if the pane comes back, and ends with
+/// the node otherwise.
+pub fn kill_remote(node: String, pane: PaneId) -> Task<Message> {
+    Task::perform(
+        async move {
+            if let Some(client) = remote::directory(&node)
+                && let Err(error) = remote::kill(&client, &pane).await
+            {
+                eprintln!("pane {pane}: not killed on its node: {error}");
+            }
+        },
+        |()| Message::Noop,
+    )
 }
 
 /// The shell ended by itself: P4 and the orchestration engine hear of it
@@ -1091,7 +1297,7 @@ pub(crate) fn mounted(ws: &Workspace, pane: &Pane) -> PaneRt {
     let link = PaneLink::new(
         pane.id.clone(),
         Terminal::new(hangar_term::Config::default(), 80, 24),
-        Arc::new(hangar_core::pty::PtyManager::default()),
+        backend_for(ws, &Arc::new(hangar_core::pty::PtyManager::default())),
     );
     PaneRt {
         ws: ws.id.clone(),
@@ -1190,6 +1396,7 @@ mod tests {
             mcp: None,
             mcp_arg: None,
             notes: Vec::new(),
+            remote: None,
         }
     }
 
@@ -1252,7 +1459,12 @@ mod tests {
             ..AppState::default()
         });
         let mut rt = mounted(&ws, &pane);
-        let _ = spawned(&mut rt, &mut m, Ok(report(kit_issues(&kits.held, &[]))));
+        let _ = spawned(
+            &mut rt,
+            &mut m,
+            &HubChannel::default(),
+            Ok(report(kit_issues(&kits.held, &[]))),
+        );
         let warning = Translator::new(Locale::En)
             .t_with(Key::KitsManageWarnHooks, &args!("id" => "studio"))
             .into_owned();
@@ -1305,6 +1517,7 @@ mod tests {
                 tr: Translator::new(Locale::En),
             }),
             scoped: false,
+            node: None,
         };
         assert!(spawn.shell.is_none());
 
@@ -1342,7 +1555,12 @@ mod tests {
 
         let revision = m.revision();
         let mut rt = mounted(&ws, &bob);
-        let _ = spawned(&mut rt, &mut m, Ok(report(Vec::new())));
+        let _ = spawned(
+            &mut rt,
+            &mut m,
+            &HubChannel::default(),
+            Ok(report(Vec::new())),
+        );
         let note = Translator::new(Locale::En)
             .t_with(Key::PaneAgentRetired, &args!("agent" => "Codex"))
             .into_owned();
@@ -1355,7 +1573,12 @@ mod tests {
 
         // Restarted or woken up: nothing more to say.
         let mut again = mounted(&ws, saved);
-        let _ = spawned(&mut again, &mut m, Ok(report(Vec::new())));
+        let _ = spawned(
+            &mut again,
+            &mut m,
+            &HubChannel::default(),
+            Ok(report(Vec::new())),
+        );
         assert!(again.notes.is_empty());
 
         // The French says the same, in French.

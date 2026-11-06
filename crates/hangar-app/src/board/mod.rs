@@ -258,7 +258,7 @@ fn focused_cwd(m: &Model) -> Option<String> {
         Some(window) => m.window_workspace(window),
         None => m.active_workspace().filter(|ws| ws.detached != Some(true)),
     };
-    workspace.map(|ws| ws.cwd.clone())
+    workspace.map(cache::board_key)
 }
 
 /// The workspaces whose board is on screen now, one per window that draws
@@ -722,11 +722,14 @@ pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
 /// clock.
 fn clock_running(m: &Model) -> bool {
     boards_on_screen(m).into_iter().any(|workspace| {
-        m.live.board.tasks(&workspace.cwd).is_some_and(|tasks| {
-            tasks
-                .iter()
-                .any(|task| task.column == "doing" && task.doing_since.is_some())
-        })
+        m.live
+            .board
+            .tasks(&cache::board_key(workspace))
+            .is_some_and(|tasks| {
+                tasks
+                    .iter()
+                    .any(|task| task.column == "doing" && task.doing_since.is_some())
+            })
     })
 }
 
@@ -839,12 +842,15 @@ pub fn view<'a>(st: &'a State, ctx: Ctx<'a>, variant: BoardVariant) -> Element<'
     let Some(workspace) = ctx.workspace() else {
         return Space::new().into();
     };
+    // The board's key: its folder, or its node and folder for a workspace
+    // on a node.
+    let key = ctx.model.live.board.key_of(workspace);
     match variant {
-        BoardVariant::Full => view::board(st, ctx, &workspace.cwd, None),
+        BoardVariant::Full => view::board(st, ctx, key, None),
         BoardVariant::Dock { width, .. } => {
             // The room the shell placed the panel in, for this window.
             let max = ctx.panels().dock.max;
-            view::board(st, ctx, &workspace.cwd, Some((width, max)))
+            view::board(st, ctx, key, Some((width, max)))
         }
     }
 }

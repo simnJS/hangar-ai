@@ -1956,5 +1956,17 @@
   "nodes.error.tunnel": "Le tunnel s’est fermé : {detail}",
   "nodes.error.api": "Le nœud n’a pas répondu par le tunnel : {detail}",
   "nodes.error.local": "{detail}",
-  "nodes.error.retrying": "Nouvel essai dans {seconds} s."
+  "nodes.error.retrying": "Nouvel essai dans {seconds} s.",
+  "nodes.pane.away": "Le nœud {node} n’est pas connecté",
+  "nodes.pane.connecting": "Connexion au nœud {node}…",
+  "nodes.pane.reconnect": "Reconnecter",
+  "nodes.create.where": "S’exécute sur",
+  "nodes.create.local": "Cet ordinateur",
+  "nodes.create.onNode": "Sur le nœud {node}",
+  "nodes.create.folder": "Dossier sur le nœud",
+  "nodes.create.up": "Dossier parent",
+  "nodes.create.loading": "Lecture des dossiers du nœud…",
+  "nodes.create.empty": "Aucun sous-dossier ici.",
+  "nodes.create.failed": "Le nœud n’a pas pu lister ce dossier : {error}",
+  "nodes.create.hint": "Les terminaux, le tableau et les agents du workspace vivent sur le nœud ; cette fenêtre les montre."
 }

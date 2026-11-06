@@ -212,7 +212,7 @@ pub fn parse_response(raw: &[u8]) -> Result<String, String> {
     String::from_utf8(body).map_err(|err| err.to_string())
 }
 
-fn dechunk(mut body: &[u8]) -> Result<Vec<u8>, String> {
+pub(crate) fn dechunk(mut body: &[u8]) -> Result<Vec<u8>, String> {
     let mut out = Vec::new();
     loop {
         let end = body

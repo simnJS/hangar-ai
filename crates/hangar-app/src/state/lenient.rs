@@ -592,6 +592,27 @@ mod tests {
         );
     }
 
+    /// The node a workspace lives on reads, writes back, and a value that is
+    /// not a node id is set aside, the workspace kept as one of this machine.
+    #[test]
+    fn a_workspaces_node_reads_leniently() {
+        let (state, _) = read(json!({
+            "workspaces": [
+                {"id": "remote", "cwd": "/home/hangar/demo", "node": "n1"},
+                {"id": "local", "cwd": "/home/me"},
+                {"id": "odd", "cwd": "/srv", "node": 5}
+            ]
+        }));
+        assert_eq!(state.workspaces[0].node.as_deref(), Some("n1"));
+        assert_eq!(state.workspaces[1].node, None);
+        assert_eq!(state.workspaces[2].node, None);
+        assert_eq!(state.workspaces[2].cwd, "/srv", "the rest of it reads");
+        let written = serde_json::to_value(&state.workspaces[0]).unwrap();
+        assert_eq!(written["node"], "n1");
+        let written = serde_json::to_value(&state.workspaces[1]).unwrap();
+        assert!(written.get("node").is_none(), "absent for this machine's");
+    }
+
     #[test]
     fn a_list_keeps_the_entries_that_read_and_sets_the_others_aside() {
         let (state, kept) = read(json!({

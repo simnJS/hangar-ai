@@ -30,6 +30,17 @@
 //! is busy) and holds core's registry lock while it does, so a write on the
 //! UI thread could freeze the whole window, every pane with it. The thread
 //! hop costs a few microseconds.
+//!
+//! # Local and remote panes
+//!
+//! A pane talks to a [`PtyBackend`]: core's PTY manager for a workspace of
+//! this machine, or the node a remote workspace lives on (docs/native/
+//! nodes.md §5). A remote pane's output comes over the node's stream
+//! WebSocket, read by a tokio task ([`PaneLink::follow_remote`]) that feeds
+//! the terminal through the very [`Feeder`] the local sink is made of, so
+//! the terminal, the hub and the frames do not know the difference; its
+//! writer thread hands what is typed to that task, which sends it on the
+//! same socket.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, mpsc};
@@ -40,7 +51,27 @@ use hangar_term::{Event, Terminal};
 use tokio::sync::mpsc as tokio_mpsc;
 
 use super::launch::Echo;
+use crate::nodes::NodeClient;
+use crate::nodes::remote::{self, Backoff, Outgoing, StreamEvent};
 use crate::state::PaneId;
+
+/// What a pane's process is reached through.
+#[derive(Clone)]
+pub enum PtyBackend {
+    /// Core's PTY manager: a pane of this machine.
+    Local(Arc<PtyManager>),
+    /// The node of id `node`: a pane of a remote workspace.
+    Remote { node: String },
+}
+
+impl std::fmt::Debug for PtyBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PtyBackend::Local(_) => f.write_str("Local"),
+            PtyBackend::Remote { node } => write!(f, "Remote({node})"),
+        }
+    }
+}
 
 /// What a pane's reader thread tells the window.
 #[derive(Debug, Clone)]
@@ -84,6 +115,12 @@ enum Job {
     Resize(u16, u16),
 }
 
+/// Where the writer thread sends what it is given.
+enum Sink {
+    Local(Arc<PtyManager>),
+    Remote(tokio_mpsc::UnboundedSender<Outgoing>),
+}
+
 /// One pane's terminal, its writer, and the flag that says it printed since
 /// the window last looked.
 pub struct PaneLink {
@@ -92,6 +129,33 @@ pub struct PaneLink {
     jobs: mpsc::Sender<Job>,
     woken: Arc<AtomicBool>,
     launch: Arc<Mutex<LaunchWatch>>,
+    /// The remote side, for a pane of a remote workspace.
+    remote: Option<RemoteSide>,
+}
+
+/// A remote pane's stream: what the writer thread sends it, until the task
+/// that follows the stream takes it, and that task, stopped with the link.
+struct RemoteSide {
+    node: String,
+    inbox: Mutex<Option<tokio_mpsc::UnboundedReceiver<Outgoing>>>,
+    stream: Mutex<Option<tokio::task::AbortHandle>>,
+    alive: Arc<AtomicBool>,
+}
+
+impl Drop for PaneLink {
+    fn drop(&mut self) {
+        if let Some(side) = &self.remote {
+            if let Some(stream) = side
+                .stream
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .take()
+            {
+                stream.abort();
+            }
+            remote::unregister(&self.id);
+        }
+    }
 }
 
 /// What the launch of the pane's agent reads of its output: when the shell
@@ -111,12 +175,27 @@ impl std::fmt::Debug for PaneLink {
 impl PaneLink {
     /// The terminal of pane `id`, and its writer thread. The thread ends when
     /// the last handle on the link goes.
-    pub fn new(id: PaneId, terminal: Terminal, pty: Arc<PtyManager>) -> Arc<PaneLink> {
+    pub fn new(id: PaneId, terminal: Terminal, backend: PtyBackend) -> Arc<PaneLink> {
         let (jobs, inbox) = mpsc::channel();
         let writer_id = id.clone();
+        let (sink, remote) = match backend {
+            PtyBackend::Local(pty) => (Sink::Local(pty), None),
+            PtyBackend::Remote { node } => {
+                let (outgoing, stream_inbox) = tokio_mpsc::unbounded_channel();
+                let alive = Arc::new(AtomicBool::new(false));
+                remote::register(&id, &node, outgoing.clone(), alive.clone());
+                let side = RemoteSide {
+                    node,
+                    inbox: Mutex::new(Some(stream_inbox)),
+                    stream: Mutex::new(None),
+                    alive,
+                };
+                (Sink::Remote(outgoing), Some(side))
+            }
+        };
         let spawned = std::thread::Builder::new()
             .name(format!("pane-writer-{id}"))
-            .spawn(move || write_loop(&pty, &writer_id, &inbox));
+            .spawn(move || write_loop(&sink, &writer_id, &inbox));
         if let Err(error) = spawned {
             // Typing into this pane will go nowhere; the rest of the window
             // goes on. A machine out of threads has bigger problems.
@@ -128,7 +207,73 @@ impl PaneLink {
             jobs,
             woken: Arc::new(AtomicBool::new(false)),
             launch: Arc::default(),
+            remote,
         })
+    }
+
+    /// The node of a remote pane; `None` for a pane of this machine.
+    pub fn node(&self) -> Option<&str> {
+        self.remote.as_ref().map(|side| side.node.as_str())
+    }
+
+    /// A remote pane's shell runs (it started or was found on its node), or
+    /// ended.
+    pub fn set_remote_alive(&self, alive: bool) {
+        if let Some(side) = &self.remote {
+            side.alive.store(alive, Ordering::Release);
+        }
+    }
+
+    /// Follows a remote pane's stream from now on, its node reached through
+    /// the directory of connected nodes. `replay_until`: the bytes it had
+    /// printed before (a shell found running on the node), drawn without
+    /// being answered. Nothing for a local pane, or one already followed.
+    pub fn follow_remote(&self, waker: Waker, replay_until: u64) {
+        self.follow_remote_with(waker, replay_until, Backoff::default(), remote::directory);
+    }
+
+    /// [`Self::follow_remote`], with the node found by `resolve`.
+    pub fn follow_remote_with(
+        &self,
+        waker: Waker,
+        replay_until: u64,
+        backoff: Backoff,
+        resolve: impl Fn(&str) -> Option<NodeClient> + Send + 'static,
+    ) {
+        let Some(side) = &self.remote else {
+            return;
+        };
+        let Some(outgoing) = side
+            .inbox
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .take()
+        else {
+            return;
+        };
+        let mut feeder = self.feeder(waker);
+        let alive = side.alive.clone();
+        let emit = move |event| match event {
+            StreamEvent::Output { data, replay, .. } => feeder.output(&data, replay),
+            StreamEvent::Reset => feeder.reset(),
+            StreamEvent::Exit => {
+                alive.store(false, Ordering::Release);
+                feeder.exit();
+            }
+        };
+        let task = tokio::spawn(remote::follow(
+            side.node.clone(),
+            self.id.clone(),
+            replay_until,
+            outgoing,
+            emit,
+            backoff,
+            resolve,
+        ));
+        *side
+            .stream
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner()) = Some(task.abort_handle());
     }
 
     /// The terminal, for as long as the guard lives. Held briefly: the
@@ -184,71 +329,116 @@ impl PaneLink {
     /// The sink `pty_spawn` is handed: it feeds the terminal on the reader
     /// thread and wakes the window, unless it is awake already.
     pub fn sink(&self, waker: Waker) -> PtySink {
-        let terminal = self.terminal.clone();
-        let jobs = self.jobs.clone();
-        let woken = self.woken.clone();
-        let launch = self.launch.clone();
-        let id = self.id.clone();
-        let Waker { sender: hub, awake } = waker;
+        let mut feeder = self.feeder(waker);
         Box::new(move |event| match event {
-            PtyEvent::Output(output) => {
-                {
-                    let mut watch = launch.lock().unwrap_or_else(|poison| poison.into_inner());
-                    watch.last_output = Some(Instant::now());
-                    if let Some(echo) = &mut watch.echo {
-                        echo.feed(&output.data);
-                    }
-                }
-                let events = terminal
-                    .lock()
-                    .unwrap_or_else(|poison| poison.into_inner())
-                    .feed(output.data.as_bytes());
-                for event in events {
-                    let kind = match event {
-                        Event::Write(bytes) => {
-                            let _ = jobs.send(Job::Write(bytes));
-                            continue;
-                        }
-                        Event::Bell => HubKind::Bell,
-                        Event::Notification { title, body } => {
-                            HubKind::Notification { title, body }
-                        }
-                        // Titles stay unused, as in the web app (inventory
-                        // §4/1.12). The clipboard is not offered to
-                        // programs (`OSC 52`, off in `look::config`), as
-                        // xterm.js without its clipboard addon never did.
-                        _ => continue,
-                    };
-                    let _ = hub.send(HubEvent {
-                        pane: id.clone(),
-                        kind,
-                    });
-                }
-                // After the feed, so a window that looks draws at least this
-                // chunk. The pane's own flag first: the window clears the
-                // shared one before it looks at the panes' (`Msg::Frame`), so
-                // a chunk it did not see either finds the shared one clear
-                // and wakes it, or is seen by its last look.
-                if !woken.swap(true, Ordering::AcqRel) && !awake.swap(true, Ordering::AcqRel) {
-                    let _ = hub.send(HubEvent {
-                        pane: id.clone(),
-                        kind: HubKind::Output,
-                    });
-                }
-            }
-            PtyEvent::Exit(_) => {
-                let _ = hub.send(HubEvent {
-                    pane: id.clone(),
-                    kind: HubKind::Exit,
-                });
-            }
+            PtyEvent::Output(output) => feeder.output(&output.data, false),
+            PtyEvent::Exit(_) => feeder.exit(),
         })
+    }
+
+    /// What feeds the terminal, for the sink of a local pane or the stream
+    /// of a remote one.
+    fn feeder(&self, waker: Waker) -> Feeder {
+        Feeder {
+            terminal: self.terminal.clone(),
+            jobs: self.jobs.clone(),
+            woken: self.woken.clone(),
+            launch: self.launch.clone(),
+            id: self.id.clone(),
+            waker,
+        }
+    }
+}
+
+/// Feeds a pane's terminal on the thread its output arrives on, and wakes
+/// the window, unless it is awake already.
+struct Feeder {
+    terminal: Arc<Mutex<Terminal>>,
+    jobs: mpsc::Sender<Job>,
+    woken: Arc<AtomicBool>,
+    launch: Arc<Mutex<LaunchWatch>>,
+    id: PaneId,
+    waker: Waker,
+}
+
+impl Feeder {
+    /// A chunk of output. `replay`: printed before the pane was followed (a
+    /// remote shell's history), drawn without answering its queries nor
+    /// ringing its bells again.
+    fn output(&mut self, data: &str, replay: bool) {
+        {
+            let mut watch = self
+                .launch
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            watch.last_output = Some(Instant::now());
+            if let Some(echo) = &mut watch.echo {
+                echo.feed(data);
+            }
+        }
+        let events = {
+            let mut terminal = self
+                .terminal
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            if replay {
+                terminal.replay(data.as_bytes())
+            } else {
+                terminal.feed(data.as_bytes())
+            }
+        };
+        let hub = &self.waker.sender;
+        for event in events {
+            let kind = match event {
+                Event::Write(bytes) => {
+                    let _ = self.jobs.send(Job::Write(bytes));
+                    continue;
+                }
+                Event::Bell => HubKind::Bell,
+                Event::Notification { title, body } => HubKind::Notification { title, body },
+                // Titles stay unused, as in the web app (inventory §4/1.12).
+                // The clipboard is not offered to programs (`OSC 52`, off in
+                // `look::config`), as xterm.js without its clipboard addon
+                // never did.
+                _ => continue,
+            };
+            let _ = hub.send(HubEvent {
+                pane: self.id.clone(),
+                kind,
+            });
+        }
+        // After the feed, so a window that looks draws at least this chunk.
+        // The pane's own flag first: the window clears the shared one before
+        // it looks at the panes' (`Msg::Frame`), so a chunk it did not see
+        // either finds the shared one clear and wakes it, or is seen by its
+        // last look.
+        if !self.woken.swap(true, Ordering::AcqRel)
+            && !self.waker.awake.swap(true, Ordering::AcqRel)
+        {
+            let _ = hub.send(HubEvent {
+                pane: self.id.clone(),
+                kind: HubKind::Output,
+            });
+        }
+    }
+
+    /// The history the terminal holds is no longer the node's: wiped (a full
+    /// reset, `ESC c`), for the history that follows to be drawn again.
+    fn reset(&mut self) {
+        self.output("\x1bc", true);
+    }
+
+    fn exit(&mut self) {
+        let _ = self.waker.sender.send(HubEvent {
+            pane: self.id.clone(),
+            kind: HubKind::Exit,
+        });
     }
 }
 
 /// The writer thread: jobs in order, consecutive writes joined into one call
 /// so a burst of keys or a long paste costs one lock of core's registry.
-fn write_loop(pty: &PtyManager, id: &str, inbox: &mpsc::Receiver<Job>) {
+fn write_loop(pty: &Sink, id: &str, inbox: &mpsc::Receiver<Job>) {
     while let Ok(job) = inbox.recv() {
         match job {
             Job::Write(mut bytes) => {
@@ -264,12 +454,21 @@ fn write_loop(pty: &PtyManager, id: &str, inbox: &mpsc::Receiver<Job>) {
                 }
                 write(pty, id, bytes);
                 if let Some(Job::Resize(columns, rows)) = next {
-                    let _ = hangar_core::pty::pty_resize(pty, id.to_owned(), columns, rows);
+                    resize(pty, id, columns, rows);
                 }
             }
-            Job::Resize(columns, rows) => {
-                let _ = hangar_core::pty::pty_resize(pty, id.to_owned(), columns, rows);
-            }
+            Job::Resize(columns, rows) => resize(pty, id, columns, rows),
+        }
+    }
+}
+
+fn resize(pty: &Sink, id: &str, columns: u16, rows: u16) {
+    match pty {
+        Sink::Local(pty) => {
+            let _ = hangar_core::pty::pty_resize(pty, id.to_owned(), columns, rows);
+        }
+        Sink::Remote(stream) => {
+            let _ = stream.send(Outgoing::Resize(columns, rows));
         }
     }
 }
@@ -278,12 +477,19 @@ fn write_loop(pty: &PtyManager, id: &str, inbox: &mpsc::Receiver<Job>) {
 /// legacy X10 mouse encoding, which puts raw bytes past 127 for columns past
 /// 95; those are replaced, which only a program that asked for that encoding
 /// (and not the SGR one every current TUI uses) would see.
-fn write(pty: &PtyManager, id: &str, bytes: Vec<u8>) {
+fn write(pty: &Sink, id: &str, bytes: Vec<u8>) {
     let text = String::from_utf8(bytes)
         .unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned());
     // A pane not spawned yet, or already gone, drops what was typed, as the
     // web app's `ptyWrite` did.
-    let _ = hangar_core::pty::pty_write(pty, id.to_owned(), text);
+    match pty {
+        Sink::Local(pty) => {
+            let _ = hangar_core::pty::pty_write(pty, id.to_owned(), text);
+        }
+        Sink::Remote(stream) => {
+            let _ = stream.send(Outgoing::Input(text));
+        }
+    }
 }
 
 #[cfg(all(test, unix))]
@@ -305,7 +511,7 @@ mod tests {
         let link = PaneLink::new(
             id.clone(),
             Terminal::new(Config::default(), 80, 24),
-            pty.clone(),
+            PtyBackend::Local(pty.clone()),
         );
         let (hub, mut wakes) = tokio_mpsc::unbounded_channel();
         let awake = Arc::new(AtomicBool::new(false));
@@ -423,5 +629,143 @@ mod tests {
         assert!(link.echoed(), "the command's echo was seen");
         assert!(ran(), "the command ran, without the keys typed before it");
         let _ = hangar_core::pty::pty_kill(&pty, id, None);
+    }
+}
+
+#[cfg(test)]
+mod remote_tests {
+    use std::time::{Duration, Instant};
+
+    use hangar_term::Config;
+    use serde_json::json;
+
+    use super::*;
+    use crate::nodes::testing::{accept_ws, listen, read_text, send_text};
+    use crate::panes::controller::backend_for;
+    use crate::state::Workspace;
+
+    #[test]
+    fn a_workspace_on_a_node_gets_the_remote_backend() {
+        let pty = Arc::new(PtyManager::default());
+        let local = Workspace::default();
+        assert!(matches!(backend_for(&local, &pty), PtyBackend::Local(_)));
+        let remote = Workspace {
+            node: Some("n1".into()),
+            ..Workspace::default()
+        };
+        match backend_for(&remote, &pty) {
+            PtyBackend::Remote { node } => assert_eq!(node, "n1"),
+            other => panic!("a remote workspace got {other:?}"),
+        }
+        let id = format!("backend-test-{}", std::process::id());
+        let link = PaneLink::new(
+            id.clone(),
+            Terminal::new(Config::default(), 80, 24),
+            backend_for(&remote, &pty),
+        );
+        assert_eq!(link.node(), Some("n1"));
+        assert_eq!(remote::node_of(&id).as_deref(), Some("n1"));
+        drop(link);
+        assert_eq!(remote::node_of(&id), None, "forgotten with its link");
+    }
+
+    async fn until(what: &str, done: impl Fn() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !done() {
+            assert!(Instant::now() < deadline, "timed out waiting: {what}");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    /// A remote pane end to end against a fake node: its output lands in the
+    /// terminal through the sink's own feeding (the window woken once), what
+    /// is typed and the size go out on the stream, a drop resumes from the
+    /// last byte, a reset clears, and the shell's end reaches the window.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_remote_panes_stream_feeds_its_terminal() {
+        let (listener, client) = listen().await;
+        let id = format!("remote-link-{}", std::process::id());
+        let link = PaneLink::new(
+            id.clone(),
+            Terminal::new(Config::default(), 80, 24),
+            PtyBackend::Remote { node: "n".into() },
+        );
+        let (hub, mut wakes) = tokio_mpsc::unbounded_channel();
+        let waker = Waker {
+            sender: hub,
+            awake: Arc::new(AtomicBool::new(false)),
+        };
+        let fast = Backoff {
+            first: Duration::from_millis(10),
+            max: Duration::from_millis(50),
+        };
+        link.follow_remote_with(waker, 0, fast, move |_| Some(client.clone()));
+
+        let (mut first, request) = accept_ws(&listener).await;
+        assert!(request.line().contains("/stream?from=0 "));
+        send_text(
+            &mut first,
+            &json!({ "seq": 13, "data": "hello-remote\r\n" }).to_string(),
+        )
+        .await;
+        until("the output in the terminal", || {
+            link.lock()
+                .read_lines(10)
+                .iter()
+                .any(|line| line.contains("hello-remote"))
+        })
+        .await;
+        assert!(link.take_output(), "the pane printed");
+        let woken = wakes.recv().await.unwrap();
+        assert_eq!((woken.pane, woken.kind), (id.clone(), HubKind::Output));
+
+        // Typing and resizing go out through the writer thread to the stream.
+        link.write(b"uname -a\r".to_vec());
+        link.resize(100, 30);
+        let mut buf = Vec::new();
+        assert_eq!(
+            read_text(&mut first, &mut buf).await,
+            json!({ "input": "uname -a\r" }).to_string()
+        );
+        assert_eq!(
+            read_text(&mut first, &mut buf).await,
+            json!({ "resize": { "cols": 100, "rows": 30 } }).to_string()
+        );
+        drop(first);
+
+        // The drop: resumed from the last byte, the size said again.
+        let (mut second, request) = accept_ws(&listener).await;
+        assert!(
+            request.line().contains("/stream?from=13 "),
+            "{}",
+            request.line()
+        );
+        let mut buf = Vec::new();
+        assert!(read_text(&mut second, &mut buf).await.contains("resize"));
+        send_text(&mut second, &json!({ "reset": { "start": 0 } }).to_string()).await;
+        send_text(
+            &mut second,
+            &json!({ "seq": 30, "data": "after-reset\r\n" }).to_string(),
+        )
+        .await;
+        until("the history after the reset", || {
+            let lines = link.lock().read_lines(10);
+            lines.iter().any(|line| line.contains("after-reset"))
+                && !lines.iter().any(|line| line.contains("hello-remote"))
+        })
+        .await;
+        link.set_remote_alive(true);
+        send_text(&mut second, &json!({ "exit": { "code": 0 } }).to_string()).await;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let event = tokio::time::timeout_at(deadline.into(), wakes.recv())
+                .await
+                .expect("the exit reached the window")
+                .unwrap();
+            if event.kind == HubKind::Exit {
+                break;
+            }
+        }
+        assert_eq!(remote::alive(&id), Some(false), "its shell ended");
     }
 }

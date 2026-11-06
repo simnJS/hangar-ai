@@ -1956,5 +1956,17 @@
   "nodes.error.tunnel": "The tunnel closed: {detail}",
   "nodes.error.api": "The node did not answer through the tunnel: {detail}",
   "nodes.error.local": "{detail}",
-  "nodes.error.retrying": "Retrying in {seconds} s."
+  "nodes.error.retrying": "Retrying in {seconds} s.",
+  "nodes.pane.away": "Node {node} is not connected",
+  "nodes.pane.connecting": "Connecting to node {node}…",
+  "nodes.pane.reconnect": "Reconnect",
+  "nodes.create.where": "Runs on",
+  "nodes.create.local": "This computer",
+  "nodes.create.onNode": "On node {node}",
+  "nodes.create.folder": "Folder on the node",
+  "nodes.create.up": "Parent folder",
+  "nodes.create.loading": "Reading the node’s folders…",
+  "nodes.create.empty": "No sub-folder here.",
+  "nodes.create.failed": "The node could not list this folder: {error}",
+  "nodes.create.hint": "The workspace’s terminals, board and agents live on the node; this window shows them."
 }

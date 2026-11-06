@@ -949,6 +949,14 @@ fn after_sleep(sv: &Services, kills: Vec<PaneId>, shown: Vec<WsId>) -> Task<Mess
         let manager = sv.core().pty().clone();
         tasks.push(Task::perform(
             async move {
+                // A remote workspace's shells are killed on their node.
+                let mut local = Vec::new();
+                for id in kills {
+                    if crate::nodes::remote::kill_pane(&id).await.is_none() {
+                        local.push(id);
+                    }
+                }
+                let kills = local;
                 // The whole tree under each shell, so the agents' helpers go
                 // too; the unmount ends the shells again, which costs nothing.
                 let _ = tokio::task::spawn_blocking(move || {
@@ -1035,7 +1043,7 @@ fn decide_next(
             Task::batch([
                 io,
                 Task::perform(
-                    hangar_core::pty::pty_has_children(manager, pane_ids),
+                    crate::nodes::remote::has_children(manager, pane_ids),
                     move |answer| {
                         Message::PanesLogic(Msg::Probed {
                             workspace: Box::new(workspace.clone()),

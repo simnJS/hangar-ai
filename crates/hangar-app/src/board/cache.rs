@@ -74,6 +74,15 @@ impl Live {
             .collect()
     }
 
+    /// The key of workspace `ws`'s board as the cache holds it, borrowed
+    /// for as long as the cache: what a view that keeps it is given. Its
+    /// folder while the board is not held yet.
+    pub fn key_of<'a>(&'a self, ws: &'a Workspace) -> &'a str {
+        self.boards
+            .get_key_value(&board_key(ws))
+            .map_or(ws.cwd.as_str(), |(key, _)| key.as_str())
+    }
+
     /// Whether the first read of this folder's board has answered.
     pub fn is_loaded(&self, cwd: &str) -> bool {
         self.tasks(cwd).is_some()
@@ -89,7 +98,7 @@ impl Live {
         active_workspace_id: Option<&str>,
     ) -> Option<&Task> {
         pane_task::task_for_pane(
-            self.tasks(&workspace.cwd),
+            self.tasks(&board_key(workspace)),
             pane_id,
             workspaces,
             active_workspace_id,
@@ -191,9 +200,37 @@ fn recheck_day(task: &Task) -> Option<&str> {
     task.blocked.as_ref()?.recheck.as_deref()
 }
 
-/// The folders of the workspaces, each once, sorted: the boards to hold.
+/// What the key of a remote workspace's board starts with: the node, then
+/// the folder on it (docs/native/nodes.md §5).
+const REMOTE_BOARD: &str = "hangar-node://";
+
+/// What the cache holds a workspace's board under: its folder, or for a
+/// workspace on a node (`Workspace.node`) the node and the folder there,
+/// which may well be a folder of this machine too and is not its board.
+pub fn board_key(ws: &Workspace) -> String {
+    match &ws.node {
+        Some(node) if !ws.cwd.is_empty() => format!("{REMOTE_BOARD}{node}{}", ws.cwd),
+        _ => ws.cwd.clone(),
+    }
+}
+
+/// The node and the folder on it of a remote workspace's board key; `None`
+/// for a board of this machine.
+pub fn remote_board(key: &str) -> Option<(&str, &str)> {
+    let rest = key.strip_prefix(REMOTE_BOARD)?;
+    let slash = rest.find('/')?;
+    Some((&rest[..slash], &rest[slash..]))
+}
+
+/// The keys of the workspaces' boards, each once, sorted: the boards to
+/// hold ([`board_key`]).
 pub fn folders_of(state: &AppState) -> Vec<String> {
-    let mut folders: Vec<String> = state.workspaces.iter().map(|ws| ws.cwd.clone()).collect();
+    let mut folders: Vec<String> = state
+        .workspaces
+        .iter()
+        .filter(|ws| !ws.cwd.is_empty())
+        .map(board_key)
+        .collect();
     folders.retain(|cwd| !cwd.is_empty());
     folders.sort_unstable();
     folders.dedup();
@@ -203,6 +240,32 @@ pub fn folders_of(state: &AppState) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_remote_workspaces_board_is_kept_apart_from_this_machines() {
+        let local = Workspace {
+            cwd: "/home/hangar/demo".into(),
+            ..Workspace::default()
+        };
+        let remote = Workspace {
+            node: Some("n1".into()),
+            ..local.clone()
+        };
+        assert_eq!(board_key(&local), "/home/hangar/demo");
+        let key = board_key(&remote);
+        assert_ne!(key, board_key(&local), "the same folder, another board");
+        assert_eq!(remote_board(&key), Some(("n1", "/home/hangar/demo")));
+        assert_eq!(remote_board("/home/hangar/demo"), None);
+        let state = AppState {
+            workspaces: vec![local, remote],
+            ..AppState::default()
+        };
+        assert_eq!(folders_of(&state).len(), 2);
+        let mut live = Live::default();
+        live.hold(&key, vec![]);
+        assert!(live.is_loaded(&key));
+        assert_eq!(live.key_of(&state.workspaces[1]), key);
+    }
     use crate::board::model::{Blocked, test_task};
 
     /// A read that answered.

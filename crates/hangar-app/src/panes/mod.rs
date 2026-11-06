@@ -290,9 +290,16 @@ fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Messag
             None => Task::none(),
         },
         Msg::Spawned(pane, result) => match st.panes.get_mut(&pane) {
-            Some(rt) => controller::spawned(rt, m, result),
+            Some(rt) => controller::spawned(rt, m, &st.channel, result),
             // The pane went while its shell was starting: the shell would
             // outlive it.
+            None if result.as_ref().is_ok_and(|report| report.remote.is_some()) => {
+                match m.find_pane(&pane).and_then(|(ws, _)| ws.node.clone()) {
+                    Some(node) => controller::kill_remote(node, pane),
+                    // Its workspace is gone too: its node is not known.
+                    None => Task::none(),
+                }
+            }
             None if result.is_ok() => {
                 let pty = sv.core().pty().clone();
                 Task::perform(

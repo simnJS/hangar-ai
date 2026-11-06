@@ -1049,3 +1049,101 @@ fn the_end_of_the_flow_releases_its_stop() {
     assert!(ended.load(Ordering::SeqCst));
     assert!(st.git.ended.is_none());
 }
+
+/// With the `nodes` experiment on and a node connected, the folder form
+/// offers it; its folders are the node's, and the workspace made lives on it.
+#[test]
+fn a_workspace_can_be_made_on_a_connected_node() {
+    use crate::nodes::NodeStatus;
+    use crate::nodes::model::NodeInfo;
+    use crate::nodes::remote::Listing;
+    use crate::state::types::NodeConfig;
+
+    let mut h = Harness::new(Locale::En, "graphite").edit(|state| {
+        state.settings.experiments = vec![crate::settings::experiments::NODES.into()];
+        state.settings.nodes = vec![NodeConfig {
+            id: "n1".into(),
+            label: "GPU box".into(),
+            ssh_target: "me@gpu".into(),
+            ..NodeConfig::default()
+        }];
+    });
+    let st = State::default();
+    {
+        // Not connected: nothing to offer.
+        let mut ui = h.show(view(&st, h.ctx()));
+        assert!(ui.find("On node GPU box").is_err());
+    }
+    h.model.live.nodes.statuses.insert(
+        "n1".into(),
+        NodeStatus::Connected {
+            info: NodeInfo::default(),
+            local_port: 21011,
+            token: "tok".into(),
+        },
+    );
+    {
+        let mut ui = h.show(view(&st, h.ctx()));
+        assert!(ui.find("Runs on").is_ok());
+        assert!(ui.find("This computer").is_ok());
+        ui.click("On node GPU box").expect("the node is offered");
+        assert!(sent(&messages(ui), |msg| matches!(
+            msg,
+            Msg::Place(Some(node)) if node == "n1"
+        )));
+    }
+
+    let mut st = State::default();
+    st.folder.cwd = "/home/me/local".into();
+    let _ = form(&mut st, &mut h.model, Msg::Place(Some("n1".into())));
+    assert_eq!(
+        st.folder.cwd, "",
+        "a folder of this machine means nothing there"
+    );
+    let asked = st.place.listing_asked.expect("the node's home is listed");
+    let listing = Listing {
+        path: "/home/hangar".into(),
+        parent: Some("/home".into()),
+        folders: vec!["demo".into()],
+    };
+    // An answer to an older listing is not believed.
+    let _ = form(
+        &mut st,
+        &mut h.model,
+        Msg::NodeListed {
+            asked: asked + 1000,
+            result: Ok(listing.clone()),
+        },
+    );
+    assert_eq!(st.folder.cwd, "");
+    let _ = form(
+        &mut st,
+        &mut h.model,
+        Msg::NodeListed {
+            asked,
+            result: Ok(listing),
+        },
+    );
+    assert_eq!(st.folder.cwd, "/home/hangar");
+    {
+        let mut ui = h.show(view(&st, h.ctx()));
+        assert!(ui.find("Folder on the node").is_ok());
+        assert!(ui.find("Browse…").is_err(), "not this machine's dialog");
+        ui.click("demo/").expect("a sub-folder of the node");
+        assert!(sent(&messages(ui), |msg| matches!(
+            msg,
+            Msg::NodeFolder(Some(path)) if path == "/home/hangar/demo"
+        )));
+    }
+
+    st.folder.cwd = "/home/hangar/demo".into();
+    let before = h.model.state().workspaces.len();
+    let _ = form(&mut st, &mut h.model, Msg::Submit(Vec::new()));
+    let workspaces = &h.model.state().workspaces;
+    assert_eq!(workspaces.len(), before + 1);
+    let made = workspaces
+        .iter()
+        .find(|ws| ws.cwd == "/home/hangar/demo")
+        .expect("the workspace is made");
+    assert_eq!(made.node.as_deref(), Some("n1"));
+}

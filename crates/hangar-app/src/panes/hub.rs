@@ -178,7 +178,7 @@ mod tests {
         let link = PaneLink::new(
             id.into(),
             Terminal::new(Config::default(), 40, 10),
-            Arc::new(PtyManager::default()),
+            crate::panes::pty_link::PtyBackend::Local(Arc::new(PtyManager::default())),
         );
         hub.insert(link.clone());
         (hub, link)

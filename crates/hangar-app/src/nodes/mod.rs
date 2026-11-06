@@ -14,8 +14,14 @@ pub mod commands;
 pub mod connect;
 pub mod model;
 mod page;
+pub mod remote;
 pub mod runner;
+pub mod wire;
 
+#[cfg(test)]
+mod remote_tests;
+#[cfg(test)]
+pub(crate) mod testing;
 #[cfg(test)]
 mod tests;
 
@@ -63,6 +69,8 @@ struct Conn {
     generation: u64,
     task: tokio::task::JoinHandle<()>,
     tunnel: TunnelSlot<SystemTunnel>,
+    /// The node's events followed (`/node/events`), once it connected.
+    events: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl std::fmt::Debug for Conn {
@@ -78,6 +86,9 @@ impl Conn {
     /// next polled.
     fn stop(self) {
         self.task.abort();
+        if let Some(events) = &self.events {
+            events.abort();
+        }
         if let Some(mut tunnel) = locked(&self.tunnel).take() {
             tunnel.kill();
         }
@@ -125,7 +136,6 @@ pub fn available(m: &Model) -> bool {
 
 /// How to talk to node `node_id`, while it is connected: its API through the
 /// tunnel and the token it asks for.
-#[allow(dead_code)] // Read by the remote workspaces, which come next.
 pub fn client(m: &Model, node_id: &str) -> Option<NodeClient> {
     match m.live.nodes.statuses.get(node_id)? {
         NodeStatus::Connected {
@@ -138,24 +148,95 @@ pub fn client(m: &Model, node_id: &str) -> Option<NodeClient> {
     }
 }
 
+/// The label node `node_id` goes by: its name, else its SSH target, else
+/// its id (a node removed from the settings that a workspace still names).
+pub fn label(m: &Model, node_id: &str) -> String {
+    m.settings()
+        .nodes
+        .iter()
+        .find(|node| node.id == node_id)
+        .map(|node| {
+            if node.label.trim().is_empty() {
+                node.ssh_target.clone()
+            } else {
+                node.label.clone()
+            }
+        })
+        .unwrap_or_else(|| node_id.to_owned())
+}
+
+/// The nodes connected now, by id and label: where a workspace can be made.
+pub fn connected(m: &Model) -> Vec<(String, String)> {
+    if !available(m) {
+        return Vec::new();
+    }
+    m.settings()
+        .nodes
+        .iter()
+        .filter(|node| client(m, &node.id).is_some())
+        .map(|node| (node.id.clone(), label(m, &node.id)))
+        .collect()
+}
+
 /// Every tunnel killed: the app is quitting.
 pub fn shutdown(st: &mut State) {
-    for (_, conn) in st.conns.drain() {
+    for (id, conn) in st.conns.drain() {
         conn.stop();
+        remote::publish(&id, None);
     }
 }
 
-/// A status a connection reported, kept when it is the current one's.
-fn apply_status(st: &State, live: &mut Live, id: String, generation: u64, status: NodeStatus) {
-    if st.conns.get(&id).map(|conn| conn.generation) == Some(generation) {
-        live.statuses.insert(id, status);
-    }
+/// A status a connection reported, kept when it is the current one's. The
+/// node's client goes to the directory the remote panes reach it through.
+/// `true` when its events are to be followed now: it connected, and they
+/// are not yet.
+fn apply_status(
+    st: &mut State,
+    live: &mut Live,
+    id: String,
+    generation: u64,
+    status: NodeStatus,
+) -> bool {
+    let Some(conn) = st
+        .conns
+        .get_mut(&id)
+        .filter(|conn| conn.generation == generation)
+    else {
+        return false;
+    };
+    let client = match &status {
+        NodeStatus::Connected {
+            local_port, token, ..
+        } => Some(NodeClient {
+            base_url: format!("http://127.0.0.1:{local_port}"),
+            token: token.clone(),
+        }),
+        _ => None,
+    };
+    let follow = client.is_some() && conn.events.is_none();
+    remote::publish(&id, client);
+    live.statuses.insert(id, status);
+    follow
+}
+
+/// What the node says changed: its boards are read again (`board:changed`,
+/// or events lost). The memory of a remote workspace is not drawn yet.
+async fn follow_events(sv: Services, node: String) {
+    let emit = move |event: serde_json::Value| {
+        let board = event.get("event").and_then(serde_json::Value::as_str) == Some("board:changed")
+            || event.get("lagged").is_some();
+        if board {
+            sv.send(Message::Board(crate::board::Msg::Reload));
+        }
+    };
+    remote::follow_events(node, emit, remote::Backoff::default(), remote::directory).await;
 }
 
 fn disconnect(st: &mut State, live: &mut Live, id: &str) {
     if let Some(conn) = st.conns.remove(id) {
         conn.stop();
     }
+    remote::publish(id, None);
     live.statuses.remove(id);
 }
 
@@ -192,6 +273,7 @@ fn connect(st: &mut State, m: &mut Model, sv: &Services, id: &str) {
             generation,
             task,
             tunnel,
+            events: None,
         },
     );
     m.live
@@ -221,7 +303,13 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
             id,
             generation,
             status,
-        } => apply_status(st, &mut m.live.nodes, id, generation, status),
+        } => {
+            if apply_status(st, &mut m.live.nodes, id.clone(), generation, status)
+                && let Some(conn) = st.conns.get_mut(&id)
+            {
+                conn.events = Some(tokio::spawn(follow_events(sv.clone(), id)));
+            }
+        }
         Msg::Connect(id) => connect(st, m, sv, &id),
         Msg::Disconnect(id) => disconnect(st, &mut m.live.nodes, &id),
         Msg::Remove(id) => {

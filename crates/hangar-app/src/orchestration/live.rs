@@ -237,6 +237,10 @@ impl WorkerPort for LivePort {
     /// the panes' readers hold, and an async thread waiting on it stalls
     /// every task scheduled behind it.
     async fn kill_pane(&self, pane: &str) -> Result<(), String> {
+        // A pane of a remote workspace is its node's to kill.
+        if let Some(killed) = crate::nodes::remote::kill_pane(pane).await {
+            return killed;
+        }
         let (pty, pane) = (
             self.handle.services().core().pty().clone(),
             pane.to_string(),
@@ -248,6 +252,9 @@ impl WorkerPort for LivePort {
     }
 
     async fn alive(&self, pane: &str) -> bool {
+        if let Some(alive) = crate::nodes::remote::alive(pane) {
+            return alive;
+        }
         let (pty, pane) = (
             self.handle.services().core().pty().clone(),
             pane.to_string(),
