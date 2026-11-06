@@ -23,7 +23,8 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 /// The slice the user manager keeps applications in, Hangar's own scope
-/// included.
+/// included. Only the D-Bus request reads it, and that exists on Linux alone.
+#[cfg(target_os = "linux")]
 pub(crate) const SLICE: &str = "app.slice";
 
 /// What a unit name may hold besides ASCII letters and digits
