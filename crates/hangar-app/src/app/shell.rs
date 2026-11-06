@@ -682,11 +682,6 @@ impl App {
             .apply(StoreAction::UpdateSettings(Patch::new(edit)));
     }
 
-    /// The workspace window `w` shows, by id.
-    fn window_ws(&self, w: window::Id) -> Option<WsId> {
-        self.model.window_workspace(w).map(|ws| ws.id.clone())
-    }
-
     // Side panels and drawers (App.tsx:541–686)
 
     /// Without room, the inspector's toggle opens or closes its drawer and

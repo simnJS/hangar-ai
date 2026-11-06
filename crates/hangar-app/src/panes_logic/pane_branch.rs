@@ -132,11 +132,6 @@ impl BranchCache {
     pub fn peek(&self, folder: &str) -> Option<&PaneBranch> {
         self.entries.get(&folder_key(folder))?.branch.as_ref()
     }
-
-    /// Forgets every answer. For tests.
-    pub fn reset(&mut self) {
-        self.entries.clear();
-    }
 }
 
 #[cfg(test)]

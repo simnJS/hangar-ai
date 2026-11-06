@@ -231,7 +231,6 @@ pub struct Asked {
 /// One open native tab.
 pub struct NativeTab {
     pub tab: KitTab,
-    pub api: Arc<TabApi>,
     /// What it was started from: the entry's revision (a reload starts it
     /// anew) and its module as it was then.
     pub revision: u64,
@@ -295,7 +294,6 @@ impl NativeTab {
         (
             NativeTab {
                 tab,
-                api,
                 revision,
                 module: path,
                 modified,

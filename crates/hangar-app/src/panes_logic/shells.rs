@@ -24,6 +24,7 @@ pub fn resolve_shell<'a>(
 /// The label of the shell with this id, or `None` when none has it (nothing
 /// chosen, or an id that no longer exists). The TS answered "Auto" in that
 /// case; the caller words it, because no literal text lives in the logic.
+#[cfg(test)]
 pub fn shell_label<'a>(shells: &'a [ShellInfo], id: Option<&str>) -> Option<&'a str> {
     let id = id?;
     shells

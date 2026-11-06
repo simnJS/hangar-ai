@@ -20,7 +20,6 @@ use hangar_core::sessions::AgentSession;
 
 use super::agents::Claims;
 use crate::state::live::EpochMs;
-use crate::state::types::AgentId;
 
 /// Brisk while hunting the first id...
 pub const HUNT_MS: u64 = 1500;
@@ -52,7 +51,6 @@ pub const FRESH_MS: u64 = 15_000;
 
 #[derive(Debug)]
 pub struct SessionWatch {
-    pub agent: AgentId,
     pub cwd: String,
     /// The sessions the pane knew when it launched, and every one it adopted
     /// since, so the next round hunts the one after it.
@@ -70,9 +68,8 @@ pub struct SessionWatch {
 }
 
 impl SessionWatch {
-    pub fn new(agent: AgentId, cwd: String, known: HashSet<String>, now: EpochMs) -> SessionWatch {
+    pub fn new(cwd: String, known: HashSet<String>, now: EpochMs) -> SessionWatch {
         SessionWatch {
-            agent,
             cwd,
             known,
             interval_ms: HUNT_MS,
@@ -164,7 +161,7 @@ mod tests {
     }
 
     fn watch(known_ids: &[&str]) -> SessionWatch {
-        SessionWatch::new(AgentId::Claude, "/work".into(), known(known_ids), 0)
+        SessionWatch::new("/work".into(), known(known_ids), 0)
     }
 
     #[test]

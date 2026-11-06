@@ -118,6 +118,7 @@ pub trait PreviewAccess: Send + Sync {
     }
 
     /// The kit tabs open in the workspace (P16).
+    #[cfg(test)]
     fn tabs(&self, ws: &WsId) -> Vec<PreviewEntry> {
         let _ = ws;
         Vec::new()

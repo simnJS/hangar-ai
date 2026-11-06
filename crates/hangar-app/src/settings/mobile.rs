@@ -715,7 +715,6 @@ fn step_view<'a>(st: &'a State, ctx: Ctx<'a>, r: Row) -> Element<'a, Message> {
         Row::Text { text, tone } => match tone {
             Tone::Plain => Element::from(typography::body(t, text)),
             Tone::Note => typography::hint(t, text).into(),
-            Tone::Error => typography::danger(t, text).into(),
             Tone::Ok => row![dot(ctx), typography::body(t, text)]
                 .spacing(space::LG)
                 .align_y(Alignment::Center)

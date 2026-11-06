@@ -255,7 +255,7 @@ pub fn save_state(host: &Host, state: serde_json::Value) -> Result<(), String> {
 }
 
 fn write_state(path: &Path, state: &serde_json::Value) -> Result<(), String> {
-    let body = serde_json::to_string_pretty(state).map_err(|e| e.to_string())?;
+    let body = serde_json::to_string(state).map_err(|e| e.to_string())?;
     // Write-then-rename so a crash mid-save cannot truncate the real file.
     write_atomic(path, body.as_bytes(), Access::Private)
 }

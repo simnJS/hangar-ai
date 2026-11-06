@@ -224,7 +224,7 @@ fn the_dock_grip_takes_a_press_and_a_double_click() {
 fn a_detached_window_draws_and_names_its_own_workspaces_board() {
     // The person is in the detached `site` window; the main window's active
     // workspace is another one. What the site's board sends names the site.
-    let (m, main, site) = two_windows();
+    let (m, _, site) = two_windows();
     let st = State::default();
     let mut ui = simulator_in(&m, site, Size::new(1200.0, 760.0), |ctx| {
         super::view(&st, ctx, BoardVariant::Full)

@@ -58,7 +58,6 @@ pub struct Want {
     pub ws: WsId,
     pub path: String,
     pub revision: u64,
-    pub modified_ms: u64,
     pub status: Status,
     /// Its pane is on screen.
     pub front: bool,
@@ -77,7 +76,6 @@ pub fn wants(shared: &Shared) -> Vec<Want> {
                 ws: entry.workspace_id.clone(),
                 path: entry.path.clone(),
                 revision: entry.revision,
-                modified_ms: entry.modified_ms,
                 status: entry.status,
                 front: store.view().shows(&entry.id),
                 on_screen: store.view().on_screen(&entry.workspace_id),

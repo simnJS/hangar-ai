@@ -94,7 +94,6 @@ use crate::preview::access::Shared;
 use crate::preview::parts::{self, Notice};
 use crate::preview::store::Body;
 use crate::services::{CoreEvent, Inbox, Services};
-use crate::shell::Region;
 use crate::state::{Model, WsId};
 
 /// How often the view looks again at what the store and the shell say, with
@@ -581,12 +580,6 @@ fn animating_in_front(st: &State) -> bool {
                 && store.view().shows(id)
         })
     })
-}
-
-/// What takes the focus when F6 reaches a region this package owns. It owns
-/// none (region `model` is the preview's), so the shell never calls it.
-pub fn focus_entry(_st: &State, _m: &Model, _region: Region) -> Option<Task<Message>> {
-    None
 }
 
 /// Every intent, after the shell's own handling of it: `Some` when this

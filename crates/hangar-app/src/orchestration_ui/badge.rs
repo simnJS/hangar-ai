@@ -34,17 +34,6 @@ const NO_TASK: f32 = 408.0;
 const NO_ROLE_WORD: f32 = 480.0;
 const NONE: f32 = 186.0;
 
-/// Whether the pane has a badge at all, for a header that lays its parts out
-/// by what is there.
-pub fn has_badge(pane: &Pane) -> bool {
-    pane.role.is_some()
-}
-
-/// The badge of a pane, for a header of any width.
-pub fn pane_badge<'a>(ctx: Ctx<'a>, ws: &'a WsId, pane: &'a PaneId) -> Element<'a, Message> {
-    pane_badge_in(ctx, ws, pane, f32::INFINITY)
-}
-
 /// The badge of a pane in a header `bar_width` wide: a narrower header drops
 /// the task's title, then the orchestrator's word, then the badge, before the
 /// pane's name has to give way to it.

@@ -259,10 +259,6 @@ impl TabApi {
         TabApi { cx, deps }
     }
 
-    pub fn context(&self) -> &Arc<dyn TabContext> {
-        &self.cx
-    }
-
     /// The workspace, still there.
     fn workspace_now(&self) -> Result<Workspace, KitError> {
         self.cx.workspace().ok_or_else(|| {
@@ -651,10 +647,6 @@ impl PageHost {
     /// The tab closed, or its page left: nothing is answered any more.
     pub fn close(&mut self) {
         self.closed = true;
-    }
-
-    pub fn is_closed(&self) -> bool {
-        self.closed
     }
 }
 

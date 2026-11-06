@@ -404,7 +404,6 @@ fn viewer_view<'a>(
             let kind_of: Kind = kind.kind();
             let bar = windowed::Bar {
                 kind,
-                entry,
                 notice,
                 source: viewer.source,
                 wrap: st.wrap,

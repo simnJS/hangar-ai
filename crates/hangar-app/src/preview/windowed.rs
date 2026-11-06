@@ -67,7 +67,6 @@ pub fn speed_label(locale: hangar_i18n::Locale, value: f32) -> String {
 /// What the bar of a kind holds.
 pub struct Bar<'a> {
     pub kind: FileKind,
-    pub entry: &'a Entry,
     pub notice: Option<&'a Notice>,
     /// A page or an SVG shown as its source.
     pub source: bool,

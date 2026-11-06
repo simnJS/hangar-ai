@@ -15,11 +15,6 @@ pub fn write(text: String) -> Task<Message> {
     iced::clipboard::write(text)
 }
 
-/// The clipboard's text, if it holds any.
-pub fn read(then: fn(Option<String>) -> Message) -> Task<Message> {
-    iced::clipboard::read().map(then)
-}
-
 /// The process's `arboard` clipboard. On Linux the contents are only served
 /// while the `Clipboard` that set them is alive, so one is kept for the whole
 /// run instead of one per copy.

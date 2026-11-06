@@ -40,7 +40,7 @@ use hangar_core::kits::{Inspection, KitInfo, StepStatus, UpdateInfo};
 use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::services::{CoreEvent, Services};
-use crate::shell::{Overlay, Region, SettingsCategory};
+use crate::shell::{Overlay, SettingsCategory};
 use crate::state::types::WorkspaceKit;
 use crate::state::{Model, PaneId, WsId};
 
@@ -342,7 +342,7 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
 
 /// Reads the kits once at start, and the library while Settings › Kits is
 /// open (the web app read it when the page mounted).
-pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
+pub fn subscription(_st: &State, m: &Model) -> Subscription<Message> {
     let mut subscriptions = vec![Subscription::run(first_read)];
     if m.ui
         .overlays
@@ -365,18 +365,12 @@ fn read_gallery() -> impl iced::futures::Stream<Item = Message> {
     })
 }
 
-/// What takes the focus when F6 reaches a region this package owns. It owns
-/// none, so the shell never calls it.
-pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message>> {
-    None
-}
-
 /// Every intent, after the shell's own handling of it: `Some` when this
 /// package acted on it.
 pub fn on_intent(
     st: &mut State,
     m: &mut Model,
-    sv: &Services,
+    _sv: &Services,
     intent: &Intent,
 ) -> Option<Task<Message>> {
     update::on_intent(st, m, intent)
@@ -384,9 +378,9 @@ pub fn on_intent(
 
 /// Every core event, after the shell's own handling of it.
 pub fn on_event(
-    st: &mut State,
-    m: &mut Model,
-    sv: &Services,
+    _st: &mut State,
+    _m: &mut Model,
+    _sv: &Services,
     event: &CoreEvent,
 ) -> Option<Task<Message>> {
     match event {

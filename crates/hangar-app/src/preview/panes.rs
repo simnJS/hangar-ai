@@ -39,11 +39,6 @@ pub struct Synced {
 }
 
 impl Synced {
-    /// Something changed in workspace `ws`'s grid.
-    pub fn moved(&self, ws: &str) -> bool {
-        self.placed.iter().any(|(at, _)| at == ws) || self.removed.iter().any(|(at, _)| at == ws)
-    }
-
     /// What the person is told of the entries a full grid refused.
     pub fn notice(&self, m: &Model) -> Option<String> {
         if self.refused.is_empty() {

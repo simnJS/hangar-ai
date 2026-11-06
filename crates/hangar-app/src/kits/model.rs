@@ -15,6 +15,7 @@
 
 use std::future::Future;
 
+#[cfg(test)]
 use serde_json::Value;
 
 use hangar_core::kits::{KitInfo, LaunchIssue, Source};
@@ -214,6 +215,7 @@ fn read_kit_entries(kits: Option<&[WorkspaceKit]>) -> Vec<WorkspaceKit> {
 /// `{ id, granted: [..] }`, reads as no kit. The state loader types the file
 /// first, so the app itself goes through [`workspace_kits`]; this one is for
 /// whoever is handed raw JSON (an agent's call, a file read by hand).
+#[cfg(test)]
 pub fn read_kit_entries_json(kits: &Value) -> Vec<WorkspaceKit> {
     let Some(list) = kits.as_array() else {
         return Vec::new();
@@ -257,6 +259,7 @@ pub fn effective_kits(ws: Option<&Workspace>, settings: Option<&Settings>) -> Ve
 }
 
 /// The kits enabled on a workspace, by id.
+#[cfg(test)]
 pub fn workspace_kit_ids(ws: Option<&Workspace>, settings: Option<&Settings>) -> Vec<String> {
     effective_kits(ws, settings)
         .into_iter()
@@ -346,11 +349,6 @@ where
     pane_kits(ws, installed.as_deref(), settings)
 }
 
-/// [`load_pane_kits_with`] on the real index.
-pub async fn load_pane_kits(ws: Option<&Workspace>, settings: Option<&Settings>) -> PaneKits {
-    load_pane_kits_with(ws, settings, hangar_core::kits::kits_list).await
-}
-
 /// Why a kit stays out of a pane: `pty_spawn`'s `kit_issues`, and `held` from
 /// [`pane_kits`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -428,17 +426,20 @@ pub fn kit_issue_notes(issues: &[KitLaunchIssue], t: Translator) -> Vec<String> 
 // The tab message protocol (docs/kits.md)
 // ---------------------------------------------------------------------------
 //
-// A kit's tab talks to Hangar by messages and the host answers. The table and
-// the limits are here, with the model, because the permission names are; the
-// host that answers (P16, `kit_tabs`) builds on them.
+// A kit's tab talks to Hangar by messages and the host answers. The host
+// (hangar-kit-host, through `kit_tabs`) checks the calls itself; this table,
+// ported from the TS, is what the tests hold its answers against.
 
 /// How [`KIT_METHODS`] writes the permission of a call that names its port.
+#[cfg(test)]
 pub const KIT_LOOPBACK_PATTERN: &str = "loopback:<port>";
 
 /// How [`KIT_METHODS`] writes the permission of a call that names its command.
+#[cfg(test)]
 pub const KIT_COMMAND_PATTERN: &str = "command:<name>";
 
 /// The method a tab calls, and the permission it needs.
+#[cfg(test)]
 pub const KIT_METHODS: [(&str, &str); 14] = [
     ("workspace.info", "workspace.read"),
     ("panes.list", "panes.read"),
@@ -457,33 +458,13 @@ pub const KIT_METHODS: [(&str, &str); 14] = [
 ];
 
 /// The events a tab can listen to, and the permission each needs.
+#[cfg(test)]
 pub const KIT_EVENTS: [(&str, &str); 1] = [("panes.changed", "panes.read")];
-
-/// The most `files.read` returns, in bytes.
-pub const KIT_FILE_MAX_BYTES: usize = 1024 * 1024;
-/// The most `files.readBinary` reads and `files.writeBinary` takes, in bytes
-/// (kits/files.rs).
-pub const KIT_BINARY_MAX_BYTES: usize = 10 * 1024 * 1024;
-/// The most files `files.list` gives (kits/files.rs).
-pub const KIT_LIST_MAX_FILES: usize = 2000;
-/// The longest glob `files.list` takes (kits/files.rs).
-pub const KIT_LIST_PATTERN_MAX_CHARS: usize = 256;
-/// The most `data.read` returns and `data.write` takes, in bytes.
-pub const KIT_DATA_MAX_BYTES: usize = 1024 * 1024;
-/// The most a `loopback.fetch` answer may hold, in bytes (kits/loopback.rs).
-pub const KIT_LOOPBACK_MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
-/// The most a `loopback.fetch` may send, in bytes (kits/loopback.rs).
-pub const KIT_LOOPBACK_MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
-/// How long a `loopback.fetch` waits unless it says otherwise.
-pub const KIT_LOOPBACK_TIMEOUT_MS: u64 = 5_000;
-pub const KIT_LOOPBACK_MAX_TIMEOUT_MS: u64 = 15_000;
-
-/// The error code of a call the tab has no permission for.
-pub const KIT_DENIED: &str = "denied";
 
 /// Whether a tab granted `granted` may call `method`; unknown methods never.
 /// `loopback.fetch` needs the permission of the very port its `params` name,
 /// and `command.run` that of the very command.
+#[cfg(test)]
 pub fn kit_may_call<S: AsRef<str>>(method: &str, granted: &[S], params: Option<&Value>) -> bool {
     let Some((_, permission)) = KIT_METHODS.iter().find(|(name, _)| *name == method) else {
         return false;

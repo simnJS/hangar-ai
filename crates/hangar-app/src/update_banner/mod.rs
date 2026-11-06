@@ -29,7 +29,7 @@ use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::navigator::skin;
 use crate::services::{CoreEvent, Services};
-use crate::shell::{Region, WindowKind};
+use crate::shell::WindowKind;
 use crate::state::Model;
 
 /// Where the banner is (`Stage` of the TS).
@@ -97,6 +97,7 @@ pub struct State {
 }
 
 impl State {
+    #[cfg(test)]
     pub fn stage(&self) -> Phase {
         self.stage
     }
@@ -323,12 +324,6 @@ fn check_once() -> impl iced::futures::Stream<Item = Message> {
     use iced::futures::StreamExt;
     iced::futures::stream::once(async { Message::UpdateBanner(Msg::Check) })
         .chain(iced::futures::stream::pending())
-}
-
-/// What takes the focus when F6 reaches a region this package owns. It owns
-/// none, so the shell never calls it.
-pub fn focus_entry(_st: &State, _m: &Model, _region: Region) -> Option<Task<Message>> {
-    None
 }
 
 /// Every intent, after the shell's own handling of it: `Some` when this

@@ -27,7 +27,7 @@ use hangar_i18n::{Key as Text, Translator, args};
 use crate::ctx::Ctx;
 use crate::message::{Intent, Message};
 use crate::services::{CoreEvent, Services};
-use crate::shell::{Notice, Region};
+use crate::shell::Notice;
 use crate::state::Model;
 use crate::state::types::{Settings, VoiceEngine};
 
@@ -403,12 +403,6 @@ fn recovery(_: &u8) -> impl iced::futures::Stream<Item = Message> + use<> {
     use iced::futures::StreamExt;
     iced::futures::stream::once(async { Message::Voice(Msg::Recover) })
         .chain(iced::futures::stream::pending())
-}
-
-/// What takes the focus when F6 reaches a region this package owns. It owns
-/// none, so the shell never calls it.
-pub fn focus_entry(_st: &State, _m: &Model, _region: Region) -> Option<Task<Message>> {
-    None
 }
 
 /// Every intent, after the shell's own handling of it: `Some` when this

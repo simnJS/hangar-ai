@@ -180,6 +180,7 @@ pub fn delivery_state(port: &Port, task: &str) -> Option<DeliveryState> {
 }
 
 /// Whether a delivery of the workspace is under way, for hibernation.
+#[cfg(test)]
 pub fn delivering_in(port: &Port, ws: &str) -> bool {
     port.deliveries().delivering_in(ws)
 }

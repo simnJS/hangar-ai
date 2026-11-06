@@ -39,7 +39,7 @@ use crate::ctx::Ctx;
 use crate::git_flow::consent::{self, ConsentRequest};
 use crate::message::{Intent, Message};
 use crate::services::{CoreEvent, Services};
-use crate::shell::{Notification, Region, WindowKind};
+use crate::shell::{Notification, WindowKind};
 use crate::state::Model;
 
 /// The card's width, shrunk to fit a narrow window (`min(420px, 100vw - 32px)`).
@@ -208,12 +208,6 @@ pub fn subscription(_st: &State, _m: &Model) -> Subscription<Message> {
         Subscription::run(pending_stream),
         iced::event::listen_with(focus_events),
     ])
-}
-
-/// What takes the focus when F6 reaches a region this package owns. It owns
-/// none, so the shell never calls it.
-pub fn focus_entry(_st: &State, _m: &Model, _region: Region) -> Option<Task<Message>> {
-    None
 }
 
 /// Every intent, after the shell's own handling of it: `Some` when this

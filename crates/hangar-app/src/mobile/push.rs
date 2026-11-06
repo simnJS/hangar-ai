@@ -454,12 +454,14 @@ impl Push {
         self.set_subscribers(answer.unwrap_or(0));
     }
 
+    #[cfg(test)]
     pub fn stop(&mut self) {
         self.stopped = true;
         self.slots.clear();
     }
 
     /// Timers waiting to fire.
+    #[cfg(test)]
     pub fn pending(&self) -> usize {
         self.slots
             .values()

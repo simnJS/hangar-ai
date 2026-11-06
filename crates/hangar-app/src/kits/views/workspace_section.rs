@@ -275,6 +275,7 @@ impl SectionModel {
     }
 
     /// Every sentence the section shows, one per line.
+    #[cfg(test)]
     pub fn text(&self) -> String {
         let mut out = vec![self.hint.clone()];
         out.extend(self.error.clone());

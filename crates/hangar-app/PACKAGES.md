@@ -49,7 +49,7 @@ cargo test -p hangar-app && cargo clippy -p hangar-app --all-targets -- -D warni
    #[derive(Debug, Clone)] pub enum Msg {}       // routed as Message::<Route>(Msg)
    pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message>;
    pub fn subscription(st: &State, m: &Model) -> Subscription<Message>;
-   pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message>>;
+   pub fn focus_entry(st: &State, m: &Model, region: Region) -> Option<Task<Message>>; // region owners only
    pub fn on_intent(st: &mut State, m: &mut Model, sv: &Services, intent: &Intent) -> Option<Task<Message>>;
    pub fn on_event(st: &mut State, m: &mut Model, sv: &Services, event: &CoreEvent) -> Option<Task<Message>>;
    ```
@@ -99,7 +99,7 @@ to the code as `#[cfg(test)]`; comments are full sentences that explain why.
 | Shell types | `shell/` | `View`, `Region`, `Focus`, `Drawer`, `Overlay`, `SettingsCategory`, `Notice`, `Notification`, `BoardVariant`, and the stand-ins `CloseReason`, `MenuEntry` until hangar-ui has them. |
 | Commands | `commands/` | `CommandId` (the 88, `as_str`/`FromStr`, `section`, `label_key`, `label_n`, `in_palette`), `available(m, w)` (the live ones, in keymap order), `is_available(m, w, id)`, `run(m, w, id)` (nothing when not live). |
 | Shell intents | `message.rs` | The shell sends `Intent::PaneRespawned` after every `RespawnPane`, whoever applied it (P4 carries the resume, P5 respawns the PTY). The command table sends `TerminalAction` (P5), `Dictate` (P6), `ClosePreviews` (P15). |
-| Placeholders | `shell/placeholder.rs` | `stub`, `stub_inline`, `stub_modal`: what the stubs draw. Delete their calls as you replace them. |
+| Placeholders | `shell/placeholder.rs` | `boot`, `no_workspace`, `elsewhere`: what a window shows when there is nothing else to. |
 
 Dependencies: `hangar-core`, `hangar-theme`, `hangar-i18n`, `hangar-term`,
 `iced`, `tokio`, `serde`, `serde_json`, `rfd`, `open`, `png` are in. The
@@ -118,7 +118,7 @@ keep them cheap and cache what is costly in `State`.
 
 "Shell calls" lists what the router and the frame call beyond the common
 surface. Regions: your `focus_entry` is called when F6 or a focus command
-reaches it. Overlays: the shell pushes the `Overlay` and wraps your view so
+reaches it; a package that owns no region has none. Overlays: the shell pushes the `Overlay` and wraps your view so
 clicks do not reach the window; you draw the whole overlay, backdrop
 included, and set up its state in `on_intent(Intent::OpenOverlay(…))`.
 

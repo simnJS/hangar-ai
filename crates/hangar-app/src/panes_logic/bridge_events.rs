@@ -86,6 +86,7 @@ pub fn short_session_id(id: &str) -> String {
 
 /// The short id, with an ellipsis saying there is more of it
 /// (`sessionIdLabel`).
+#[cfg(test)]
 pub fn session_id_label(id: &str) -> String {
     let short = short_session_id(id);
     if short.chars().count() < id.chars().count() {

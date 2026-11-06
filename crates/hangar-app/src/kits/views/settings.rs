@@ -485,6 +485,7 @@ impl PageModel {
 
     /// Every sentence the page shows, one per line, for the tests to look
     /// through the way the web app's looked through its markup.
+    #[cfg(test)]
     pub fn text(&self) -> String {
         let mut out = vec![self.intro.clone()];
         out.extend(self.error.clone());

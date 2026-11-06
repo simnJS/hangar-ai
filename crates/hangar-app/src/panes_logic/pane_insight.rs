@@ -105,6 +105,7 @@ pub struct Insights {
 }
 
 impl Insights {
+    #[cfg(test)]
     pub fn version(&self) -> u64 {
         self.version
     }
@@ -114,6 +115,7 @@ impl Insights {
         self.panes.get(pane).unwrap_or(&EMPTY_INSIGHT)
     }
 
+    #[cfg(test)]
     pub fn contains(&self, pane: &str) -> bool {
         self.panes.contains_key(pane)
     }

@@ -13,8 +13,10 @@
 //! rule those events follow, shared edge included, and is what the tests hold
 //! the behaviour to.
 
+use iced::Point;
+#[cfg(test)]
+use iced::Rectangle;
 use iced::mouse::Button;
-use iced::{Point, Rectangle};
 
 use super::model::Column;
 
@@ -29,6 +31,7 @@ pub fn moved_beyond(from: Point, to: Point, threshold: f32) -> bool {
 
 /// The column whose box holds the point, or `None` when it is over none. A
 /// point on the edge shared by two boxes belongs to the second.
+#[cfg(test)]
 pub fn column_at_point<C: Copy>(point: Point, columns: &[(C, Rectangle)]) -> Option<C> {
     let mut found = None;
     for (column, box_) in columns {

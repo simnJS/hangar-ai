@@ -497,6 +497,7 @@ pub struct Win {
 
 impl Win {
     /// The helper has the window on screen.
+    #[cfg(test)]
     pub fn is_shown(&self) -> bool {
         self.presence.is_shown()
     }
@@ -756,6 +757,7 @@ impl Windows {
     }
 
     /// The entry a window belongs to.
+    #[cfg(test)]
     pub fn entry_of(&self, window: &str) -> Option<&str> {
         self.wins
             .iter()

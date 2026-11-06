@@ -535,6 +535,7 @@ impl PreviewAccess for Shared {
         })
     }
 
+    #[cfg(test)]
     fn tabs(&self, ws: &WsId) -> Vec<PreviewEntry> {
         self.read(|store| {
             store

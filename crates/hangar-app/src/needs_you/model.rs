@@ -114,6 +114,7 @@ impl NeedsYouItem {
         }
     }
 
+    #[cfg(test)]
     pub fn task(&self) -> Option<&Task> {
         match self {
             NeedsYouItem::Waiting { .. } => None,

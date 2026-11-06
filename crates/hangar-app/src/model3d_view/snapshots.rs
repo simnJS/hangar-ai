@@ -140,6 +140,7 @@ impl Registry {
     }
 
     /// Whether anything is held for the entry.
+    #[cfg(test)]
     pub fn holds(&self, id: &str) -> bool {
         self.lock().held.contains_key(id)
     }

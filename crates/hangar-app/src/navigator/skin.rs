@@ -38,17 +38,6 @@ pub fn capsule(t: &Theme) -> impl Fn(&iced::Theme) -> container::Style + '_ {
     }
 }
 
-/// The well the toolbar's centre capsule sits in (`.activity`): a hairline's
-/// tint with a hairline around it.
-pub fn well(t: &Theme) -> impl Fn(&iced::Theme) -> container::Style + '_ {
-    move |_| container::Style {
-        background: Some(Background::Color(t.colors.line)),
-        text_color: Some(t.colors.fg),
-        border: border(t.colors.line, 7.0),
-        ..container::Style::default()
-    }
-}
-
 /// What a row of the navigator is drawn on: the selected one on the
 /// selection's colour, the one under the pointer a step lighter, the others on
 /// the navigator's own surface. `dragged` fades the row being dragged, and

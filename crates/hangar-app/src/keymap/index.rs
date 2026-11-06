@@ -299,11 +299,13 @@ impl KeymapIndex {
 }
 
 /// `findConflicts` of a keymap that is not the live one.
+#[cfg(test)]
 pub fn find_conflicts(keymap: &Keymap, platform: Platform) -> Vec<Conflict> {
     KeymapIndex::of(platform, Overrides::default(), keymap.clone()).conflicts()
 }
 
 /// `commandsFor` of a keymap that is not the live one.
+#[cfg(test)]
 pub fn commands_for(
     keymap: &Keymap,
     chords: &[Chord],

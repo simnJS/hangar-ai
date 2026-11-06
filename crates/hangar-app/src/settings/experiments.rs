@@ -19,6 +19,7 @@ use crate::state::Settings;
 
 /// How far along a feature is; the page says so beside its title.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // No experiment ships yet, so no stage is used; the first one will.
 pub enum Stage {
     Experimental,
     Beta,

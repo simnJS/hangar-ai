@@ -29,7 +29,9 @@ use std::sync::Arc;
 use iced::window;
 
 #[allow(unused_imports)]
-pub use lenient::{app_state as read_state, read as read_state_keeping, read_checked};
+pub use lenient::read_checked;
+#[cfg(test)]
+pub use lenient::{app_state as read_state, read as read_state_keeping};
 
 /// What the boot read from `state.json`: the state, and the values it held
 /// that no field could read (`hydrate_read`).

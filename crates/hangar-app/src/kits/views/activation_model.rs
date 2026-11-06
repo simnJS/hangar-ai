@@ -778,6 +778,7 @@ impl ActivationModel {
 
     /// Every sentence and command the view shows, one per line, for the tests
     /// to look through the way the web app's looked through its markup.
+    #[cfg(test)]
     pub fn text(&self) -> String {
         let mut out: Vec<String> = vec![self.title.clone()];
         out.extend(self.target.clone());
@@ -909,6 +910,7 @@ impl ActivationModel {
     }
 
     /// How many of the tags that flag something new the view shows.
+    #[cfg(test)]
     pub fn new_tags(&self) -> usize {
         let mut count = 0;
         let mut see = |tag: &Option<Tag>| {
@@ -938,6 +940,7 @@ impl ActivationModel {
     }
 
     /// Every text a code block shows: what the view makes copyable.
+    #[cfg(test)]
     pub fn commands_shown(&self) -> Vec<String> {
         let mut shown = Vec::new();
         if let Loadable::Ready((_, steps)) = &self.setup.body {
