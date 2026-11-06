@@ -250,6 +250,14 @@ impl Live {
         });
     }
 
+    /// Whether the pane shows a context read from its transcript, which a
+    /// clear would take away (a clear of nothing changes nothing).
+    pub(super) fn has_transcript_context(&self, pane: &str) -> bool {
+        self.machines
+            .get(pane)
+            .is_some_and(|machine| machine.transcript_context.is_some())
+    }
+
     /// What the transcript says of the pane's context (`None`: nothing to
     /// show, no gauge beats a made-up zero).
     pub(super) fn set_transcript_context(&mut self, pane: &str, gauge: Option<ContextGauge>) {
@@ -323,7 +331,7 @@ impl Live {
     pub(super) fn note_printed(&mut self, pane: &str, first: EpochMs, last: EpochMs) {
         self.hibernation.note_pane_output(pane, last);
         if let Some(watch) = self.watches.get_mut(pane) {
-            watch.note_output();
+            watch.note_output(last);
         }
         let Some(machine) = self.machines.get_mut(pane) else {
             return;
@@ -360,8 +368,8 @@ impl Live {
         effects
     }
 
-    /// The watcher's checks that came due (the host calls it about every
-    /// `activity::TICK_MS` while some pane `is_ticking`).
+    /// The watcher's checks that came due (the host calls it once
+    /// `next_check` is due, every `activity::TICK_MS` during a burst).
     pub(super) fn poll_pane(
         &mut self,
         info: &PaneInfo,
@@ -420,6 +428,21 @@ impl Live {
         self.machines.get(pane).is_some_and(|machine| {
             !machine.bridged && machine.trust_look_at.is_some_and(|at| at <= now)
         })
+    }
+
+    /// When the next check of `poll_pane` or look of `trust_look_due` comes
+    /// due, over every pane: the host sleeps until then (`None`: nothing to
+    /// look at until a pane prints). A bridged pane's trust look is never due,
+    /// so it waits for nothing.
+    pub(super) fn next_check(&self) -> Option<EpochMs> {
+        self.machines
+            .values()
+            .flat_map(|machine| {
+                let look = machine.trust_look_at.filter(|_| !machine.bridged);
+                [machine.watcher.next_check(), look]
+            })
+            .flatten()
+            .min()
     }
 
     /// The screen, read when `trust_look_due`.

@@ -18,7 +18,8 @@ use iced::{Alignment, Element, Length, Padding, Radians};
 
 use crate::ctx::Ctx;
 use crate::message::Message;
-use crate::panes_logic::find_agent_pane;
+use crate::panes_logic::agent_pane::Finding;
+use crate::panes_logic::with_finder;
 use crate::state::GlyphState;
 
 use super::card;
@@ -66,12 +67,16 @@ impl<'a> View<'a> {
         let tasks = ctx.model.live.board.tasks(cwd);
         let all: &'a [Task] = tasks.unwrap_or(&[]);
         let shown = select::shown(all, &st.filters);
+        // Built with every frame of the board: the names are resolved from
+        // the memo (`panes_logic::with_finder`), not split again per assignee.
         let mut panes = HashMap::new();
-        for assignee in all.iter().filter_map(|task| task.assignee.as_deref()) {
-            panes
-                .entry(assignee)
-                .or_insert_with(|| pane_for(ctx, assignee));
-        }
+        with_finder(&ctx.model.state().workspaces, |finder| {
+            for assignee in all.iter().filter_map(|task| task.assignee.as_deref()) {
+                panes
+                    .entry(assignee)
+                    .or_insert_with(|| pane_for(ctx, finder, assignee));
+            }
+        });
         View {
             st,
             ctx,
@@ -97,10 +102,9 @@ impl<'a> View<'a> {
 
 /// `paneFor`: the pane an assignee's name leads to, if one clearly does. The
 /// workspace looked in first is the window's own.
-pub(super) fn pane_for(ctx: Ctx<'_>, assignee: &str) -> Option<AssigneePane> {
-    let state = ctx.model.state();
+fn pane_for(ctx: Ctx<'_>, finder: &mut Finding<'_>, assignee: &str) -> Option<AssigneePane> {
     let here = ctx.workspace().map(|workspace| workspace.id.as_str());
-    let target = find_agent_pane(assignee, &state.workspaces, here)?;
+    let target = finder.find(assignee, here)?;
     let workspace = ctx.model.workspace(&target.workspace_id)?;
     let pane = workspace.panes.iter().find(|p| p.id == target.pane_id)?;
     Some(AssigneePane {

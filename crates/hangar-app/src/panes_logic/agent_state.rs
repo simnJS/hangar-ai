@@ -141,8 +141,14 @@ impl AgentStates {
             .map(|conflict| conflict.by.as_str())
     }
 
+    #[cfg(test)]
     pub fn has_conflicts(&self) -> bool {
         !self.conflicts.is_empty()
+    }
+
+    /// When the first mark wears off (`expire` drops it from then on).
+    pub fn next_expiry(&self) -> Option<EpochMs> {
+        self.conflicts.values().map(|conflict| conflict.until).min()
     }
 
     /// Drops the marks that have been shown long enough. Whether any went.

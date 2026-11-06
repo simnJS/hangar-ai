@@ -128,7 +128,7 @@ async fn the_hunt_and_the_gauge_of_a_remote_pane_ask_its_node() {
     let mut m = remote_model(node);
     // A hunt due, the pane having printed since.
     let mut watch = SessionWatch::new("/home/hangar/demo".into(), HashSet::new(), 0);
-    watch.note_output();
+    watch.note_output(0);
     m.live.panes_logic.watches.insert("p1".into(), watch);
     let mut st = State {
         // The branches are not this test's.
