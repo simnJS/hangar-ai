@@ -340,6 +340,15 @@ impl PaneLink {
         self.watch().echo.as_ref().is_some_and(Echo::found)
     }
 
+    /// Whether the program the command last typed started printed
+    /// something of its own after its echo ([`Echo::program_printed`]).
+    pub fn program_printed(&self) -> bool {
+        self.watch()
+            .echo
+            .as_ref()
+            .is_some_and(Echo::program_printed)
+    }
+
     fn watch(&self) -> MutexGuard<'_, LaunchWatch> {
         self.launch
             .lock()
@@ -696,6 +705,12 @@ mod tests {
         }
         assert!(link.echoed(), "the command's echo was seen");
         assert!(ran(), "the command ran, without the keys typed before it");
+        // What it printed, on the line after its echo, is the program's.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline && !link.program_printed() {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(link.program_printed(), "the program's output was seen");
         let _ = hangar_core::pty::pty_kill(&pty, id, None);
     }
 }

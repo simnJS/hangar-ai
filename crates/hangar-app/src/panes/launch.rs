@@ -104,12 +104,29 @@ pub fn check(running: bool, attempt: u8) -> Check {
 /// what a terminal does not show as text: escape sequences, carriage returns
 /// and line feeds (a long command wraps), backspaces (a line editor that
 /// redraws steps back over what it printed).
+///
+/// Past the echo it reads on, for the program the command started: whether
+/// it printed a visible character of its own on a line after the echo's
+/// ([`Echo::program_printed`]). What the shell prints as it hands over (the
+/// line ending, a mode or a title set in escapes) is no such character.
 #[derive(Debug, Clone)]
 pub struct Echo {
     needle: Vec<char>,
     seen: Vec<char>,
     escape: Escape,
     found: bool,
+    after: After,
+}
+
+/// Where the output stands after the echo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum After {
+    /// Still on the echo's line.
+    Echo,
+    /// On a line after it, nothing visible yet.
+    Line,
+    /// The program printed.
+    Program,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -134,7 +151,14 @@ impl Echo {
             needle,
             escape: Escape::None,
             found: false,
+            after: After::Echo,
         }
+    }
+
+    /// Whether the program started by the command printed something visible
+    /// on a line after its echo.
+    pub fn program_printed(&self) -> bool {
+        self.after == After::Program
     }
 
     /// Whether the echo went by.
@@ -144,22 +168,31 @@ impl Echo {
 
     /// Reads what the shell printed next.
     pub fn feed(&mut self, text: &str) {
-        if self.found() {
+        if self.after == After::Program {
             return;
         }
         for c in text.chars() {
+            let past = self.found();
             self.escape = match (self.escape, c) {
                 (Escape::None, '\x1b') => Escape::Start,
-                (Escape::None, '\x08') => {
+                (Escape::None, '\n') if past => {
+                    self.after = After::Line;
+                    Escape::None
+                }
+                (Escape::None, '\x08') if !past => {
                     self.seen.pop();
                     Escape::None
                 }
                 (Escape::None, c) if c.is_control() => Escape::None,
-                (Escape::None, c) => {
-                    self.push(c);
-                    if self.found {
+                (Escape::None, c) if past => {
+                    if self.after == After::Line && !c.is_whitespace() {
+                        self.after = After::Program;
                         return;
                     }
+                    Escape::None
+                }
+                (Escape::None, c) => {
+                    self.push(c);
                     Escape::None
                 }
                 (Escape::Start, '[') => Escape::Csi,
@@ -285,6 +318,44 @@ mod tests {
         echo.feed(&"x".repeat(10_000));
         echo.feed(COMMAND);
         assert!(echo.found());
+    }
+
+    #[test]
+    fn the_program_printed_once_a_visible_line_follows_the_echo() {
+        let mut echo = Echo::new(COMMAND);
+        echo.feed("$ ");
+        echo.feed(COMMAND);
+        assert!(echo.found() && !echo.program_printed());
+        // What bash prints as it hands over: no output of the program.
+        echo.feed("\r\n\x1b[?2004l\r");
+        assert!(!echo.program_printed());
+        // A title, a mode, blank lines: still nothing of its own.
+        echo.feed("\x1b]0;claude\x07\x1b[?25l\r\n  \r\n");
+        assert!(!echo.program_printed());
+        echo.feed("\x1b[2m╭─ resumed\x1b[0m");
+        assert!(echo.program_printed());
+    }
+
+    #[test]
+    fn the_rest_of_the_echo_is_not_the_programs_output() {
+        let mut echo = Echo::new(COMMAND);
+        // The needle is the command's head: the tail of a long command, on
+        // the echo's line, comes after it is found.
+        echo.feed(&format!("$ {COMMAND}"));
+        assert!(echo.found());
+        echo.feed(" --more-arguments");
+        assert!(!echo.program_printed());
+        // In one chunk with the echo, the program's first line counts.
+        let mut echo = Echo::new(COMMAND);
+        echo.feed(&format!("$ {COMMAND}\r\nfake claude --resume x\r\n❯ "));
+        assert!(echo.program_printed());
+    }
+
+    #[test]
+    fn nothing_printed_before_the_echo_counts_as_the_programs() {
+        let mut echo = Echo::new(COMMAND);
+        echo.feed("banner\r\nmore\r\n$ ");
+        assert!(!echo.found() && !echo.program_printed());
     }
 
     #[test]

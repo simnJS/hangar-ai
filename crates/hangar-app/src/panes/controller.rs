@@ -51,6 +51,7 @@ use super::launch::{self, Check, Settle};
 use super::look::{self, Look};
 use super::pty_link::{PaneLink, PtyBackend};
 use super::search::Search;
+use super::waves;
 use crate::nodes::remote::{self, RemoteMcp, RemoteSpawn, Started};
 
 /// How long a pane waits for its terminal to measure itself before its
@@ -136,6 +137,13 @@ impl PaneRt {
     /// Whether the command typed was checked: it runs, or was lost.
     pub fn launch_checked(&self) -> bool {
         self.typed.is_none()
+    }
+
+    /// Where the resume typed stands, for the waves behind it
+    /// (`waves::settling`).
+    pub fn settling(&self) -> waves::Settling {
+        let quiet = self.link.last_output().map(|at| at.elapsed());
+        waves::settling(self.launch_checked(), self.link.program_printed(), quiet)
     }
 
     /// The launch waits its wave, with what the shell's readiness answered.
