@@ -23,8 +23,73 @@ download page and `latest.json` link to them.
 | `Hangar.AI_<v>_x64-setup.exe` | `makensis` | `windows-x86_64`, `windows-x86_64-nsis` | run with `/P /R /UPDATE /ARGS …` |
 | `Hangar.AI_universal.app.tar.gz` | tar, from the cargo-packager `.app` | `darwin-{aarch64,x86_64}`, and the same with `-app` | the bundle swapped for the new one |
 | `Hangar.AI_<v>_universal.dmg` | cargo-packager | none: a download only | |
+| `hangar-node-<v>-linux-x86_64`, `hangar-node-<v>-linux-aarch64` | `cargo build -p hangar-node`, stripped | none: a download only (see "hangar-node" below) | |
 | `<each of the above but the .dmg>.sig` | `cargo packager signer sign` | | |
 | `latest.json` | `packaging/latest-json.sh` | | |
+
+### hangar-node
+
+Every desktop package also carries the headless node daemon for Linux x86_64 and
+arm64, as two files **beside the executable**: `hangar-node-x86_64` and
+`hangar-node-aarch64`. The desktop uploads the one that matches a node's
+`uname -m` over SSH (`crates/hangar-app/src/nodes/model.rs`, `BinarySource`:
+`HANGAR_NODE_BINARY`, else `hangar-node-<arch>` in the running `hangar-ai`'s
+folder), and a Mac or a Windows desktop drives Linux nodes too, so all three
+platforms carry both:
+
+| Package | Where |
+| --- | --- |
+| `.deb`, `.rpm` | `/usr/bin/hangar-node-{x86_64,aarch64}` |
+| AppImage | `usr/bin/` in the image |
+| macOS `.app` | `Contents/MacOS/` |
+| Windows installer | the install folder, removed by the uninstaller |
+
+They are not programs the desktop's own system runs. On macOS they sit in `Contents/MacOS` with the
+other executables: cargo-packager (`package/app`) codesigns only the files that
+have a Mach-O header, so these ELF files are copied and neither signed nor
+refused (read in 0.11.8's source; a signed build has not been run here). The same two files are on
+the release as `hangar-node-<v>-linux-x86_64` and `-linux-aarch64`, for a node
+set up by hand (`chmod +x`, then `hangar-node serve`); not in `latest.json`, not
+signed.
+
+The release workflow's `node` job builds them, before the build jobs, which
+download them into `target/node` (`actions/download-artifact`) and whose
+packaging scripts refuse to run without them: `common.sh`'s
+`stage_node_binaries` checks that each is an ELF file of the right machine and
+copies it to where the packager reads binaries (`target/release`, or
+`target/universal-apple-darwin/release`); the `binaries` and `generate-rpm`
+assets of `crates/hangar-app/Cargo.toml` list them; the Windows script hands
+them to `installer.nsi`. The job:
+
+- builds on `ubuntu-22.04`, so the binary wants glibc 2.35 at most (checked, and
+  the job fails otherwise), like the AppImage;
+- builds arm64 by **cross-compiling** on that same x86_64 runner
+  (`gcc-aarch64-linux-gnu`, `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER`)
+  and not on `ubuntu-22.04-arm`: arm runners are not offered to every
+  repository, a job waiting for one would hold the release, and hangar-node has
+  no native dependency beyond C that a cross compiler cannot do. No linker is
+  set in `.cargo/config.toml`, because one named there would break a build on a
+  real arm64 machine, where the compiler is called `gcc`;
+- strips both and uploads them as artifacts, and to the draft by id.
+
+`ci.yml` cross-builds the arm64 one on every push, so a break shows before a tag.
+
+By hand (the two files into `target/node`, then the platform's script as in
+section 3):
+
+```bash
+rustup target add aarch64-unknown-linux-gnu           # and apt install gcc-aarch64-linux-gnu
+mkdir -p target/node
+cargo build --release --locked -p hangar-node
+strip -o target/node/hangar-node-x86_64 target/release/hangar-node
+CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
+  cargo build --release --locked -p hangar-node --target aarch64-unknown-linux-gnu
+aarch64-linux-gnu-strip -o target/node/hangar-node-aarch64 target/aarch64-unknown-linux-gnu/release/hangar-node
+```
+
+(Run on the host's own glibc, the result wants that glibc: it is the workflow's
+22.04 that makes it 2.35.) `qemu-user-binfmt` and Docker run the arm64 one:
+`docker run --rm --platform linux/arm64 -v target/node:/n:ro debian:trixie-slim /n/hangar-node-aarch64 version`.
 
 `latest.json` is `{ version, notes, pub_date, platforms: { key: { signature, url } } }`,
 the shape `hangar-update` parses (`crates/hangar-update/src/manifest.rs`) and
@@ -167,14 +232,16 @@ AppImage runs on the glibc of the machine that built it or newer, so the
 release notes' "glibc 2.35 or later" is that runner's.
 
 1. **draft** creates the release once, as a draft, and passes its id on.
-2. **build** (three at once): Defender exclusion on Windows; build dependencies
+2. **node** (x86_64 and arm64, at once; see "hangar-node" in section 1) builds
+   the node daemon the packages carry, and puts it on the draft.
+3. **build** (three at once, after `node`): Defender exclusion on Windows; build dependencies
    on Linux; `pnpm mobile:build` and `check-mobile.sh`; the Apple secrets and
    whisper.cpp's portable-AVX2 pins as before; `MACOSX_DEPLOYMENT_TARGET=10.15`
    (what `minimumSystemVersion` did for the Tauri build); the two cargo builds;
-   `check-mobile.sh` again on the executable; the packaging script of the
+   `check-mobile.sh` again on the executable; the `hangar-node` files downloaded; the packaging script of the
    platform; upload to the draft by id (`upload-assets.sh`, which replaces an
    asset of the same name, so a re-run is harmless).
-3. **publish** downloads the updater artifacts from the draft, **signs** them
+4. **publish** downloads the updater artifacts from the draft, **signs** them
    (the only job that sees `TAURI_SIGNING_PRIVATE_KEY`), writes `latest.json`,
    runs **`verify_feed`**, uploads the `.sig` files and the feed, and only then
    makes the release public. `verify_feed` is new: it fails the release if a

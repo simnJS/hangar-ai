@@ -10,7 +10,8 @@
 # The names are the Tauri build's, because the download page links to them and
 # the feed's URLs are made from them. Needs cargo-packager (the AppImage and the
 # .deb), cargo-generate-rpm (the .rpm), jq, and `cargo build --release --locked
-# -p hangar-app -p hangar-webview --features hangar-webview/engine` done first.
+# -p hangar-app -p hangar-webview --features hangar-webview/engine` done first,
+# and hangar-node-x86_64 and hangar-node-aarch64 in <target dir>/node.
 # docs/native/PACKAGING.md explains each choice.
 set -euo pipefail
 
@@ -29,6 +30,10 @@ for binary in hangar-ai hangar-webview; do
     exit 1
   fi
 done
+
+# hangar-node for x86_64 and arm64 beside the executables, where the packager
+# (the `binaries` of the manifest, and the .rpm's assets) takes them from.
+stage_node_binaries "$target_dir" "$target_dir/release"
 
 # The packager's own AppRun, which it downloads, exports PYTHONHOME, PYTHONPATH
 # and friends pointing into the image, and so breaks every Python that a Hangar

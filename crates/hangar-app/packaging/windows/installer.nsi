@@ -903,6 +903,12 @@ Section Install
   ; register.
   File /a "/oname=${HELPERBINARYNAME}" "${HELPERBINARYNAME}"
 
+  ; Custom: hangar-node for Linux x86_64 and arm64, which the app uploads to a
+  ; node over SSH (hangar_app::nodes::model::BinarySource looks for these two
+  ; names next to its own executable). They are not programs this system runs.
+  File /a "/oname=hangar-node-x86_64" "hangar-node-x86_64"
+  File /a "/oname=hangar-node-aarch64" "hangar-node-aarch64"
+
   ; Create uninstaller
   WriteUninstaller "$INSTDIR\uninstall.exe"
 
@@ -1018,6 +1024,8 @@ Section Uninstall
 
   ; Custom: the webview helper (see the install section).
   Delete "$INSTDIR\${HELPERBINARYNAME}"
+  Delete "$INSTDIR\hangar-node-x86_64"
+  Delete "$INSTDIR\hangar-node-aarch64"
 
   ; Delete uninstaller
   Delete "$INSTDIR\uninstall.exe"
