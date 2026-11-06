@@ -53,6 +53,8 @@ pub struct State {
     /// had in flight is told from the new one's.
     generation: u64,
     pub(crate) form: AddForm,
+    /// `HANGAR_DEV_NODES_CONNECT` was acted on.
+    dev_connected: bool,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -127,6 +129,17 @@ pub enum Msg {
     /// Connections whose node left the settings, or whose experiment was
     /// turned off, are stopped (every second while any runs).
     Reconcile,
+    /// `HANGAR_DEV_NODES_CONNECT`: every node connected as the app starts.
+    DevConnectAll,
+}
+
+/// Debug builds started with `HANGAR_DEV_NODES_CONNECT=1` connect every
+/// node of the settings once the state is loaded, as if Connect was pressed
+/// on each: the end-to-end runs of the remote workspaces, which no one
+/// clicks through.
+fn dev_connect_requested() -> bool {
+    cfg!(debug_assertions)
+        && std::env::var("HANGAR_DEV_NODES_CONNECT").is_ok_and(|value| value == "1")
 }
 
 /// The experiment is on.
@@ -331,6 +344,15 @@ pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Me
             }
         }
         Msg::Reconcile => reconcile(st, m),
+        Msg::DevConnectAll => {
+            if !st.dev_connected {
+                st.dev_connected = true;
+                let ids: Vec<String> = m.settings().nodes.iter().map(|n| n.id.clone()).collect();
+                for id in ids {
+                    connect(st, m, sv, &id);
+                }
+            }
+        }
     }
     Task::none()
 }
@@ -348,7 +370,12 @@ fn reconcile(st: &mut State, m: &mut Model) {
     }
 }
 
-pub fn subscription(st: &State, _m: &Model) -> Subscription<Message> {
+pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
+    if !st.dev_connected && m.live.hydrated && dev_connect_requested() {
+        return Subscription::run_with("hangar dev nodes connect", |_| {
+            iced::futures::stream::once(async { Message::Nodes(Msg::DevConnectAll) })
+        });
+    }
     if st.conns.is_empty() {
         return Subscription::none();
     }
