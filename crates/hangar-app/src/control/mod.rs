@@ -75,7 +75,9 @@ pub struct State {
 }
 
 impl State {
-    fn port(&mut self, sv: &Services) -> Port {
+    /// The port the operations run against, made on first use: what
+    /// `mobile::desk`'s calls take, as the agents' requests do.
+    pub fn port(&mut self, sv: &Services) -> Port {
         self.port
             .get_or_insert_with(|| {
                 Arc::new(live::LivePort::new(sv.clone(), self.shared.clone())) as Port

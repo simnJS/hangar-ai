@@ -1886,3 +1886,135 @@ async fn stats_places_sessions_by_the_workspace_s_own_folders_when_git_cannot_li
     let answer = r.ok("remote_stats", json!({"period": "7d"})).await;
     assert_eq!(labels(&answer["projects"]), ["Shop", "feature"]);
 }
+
+/* ── desk, the window's typed calls ───────────────────────────── */
+
+use super::super::contract::{ChatPending, RemoteAnswered, RemoteSent};
+use super::super::desk;
+
+#[tokio::test]
+async fn desk_send_types_text_then_enter_and_nothing_while_an_answer_is_typed() {
+    let r = rig(vec![shop()], vec![], true);
+    r.mobile.book().answering.insert("w1".into());
+    assert_eq!(
+        desk::send_text(&r.port, &r.mobile, "shop", "w1", "hello").await,
+        Err("An answer is being typed into \"Ben\": wait for it. Nothing was sent.".into())
+    );
+    assert!(r.typed().is_empty());
+    r.mobile.book().answering.remove("w1");
+    assert_eq!(
+        desk::send_text(&r.port, &r.mobile, "shop", "w1", "hello").await,
+        Ok(RemoteSent::SENT)
+    );
+    assert_eq!(r.typed(), ["paste:w1:hello", r#"write:w1:"\r""#]);
+}
+
+#[tokio::test]
+async fn desk_send_refuses_blank_text_and_a_pane_not_in_the_workspace() {
+    let r = rig(vec![shop()], vec![], true);
+    r.err(
+        desk::send_text(&r.port, &r.mobile, "shop", "w1", "  ")
+            .await
+            .map(|_| Value::Null),
+        "Nothing to send",
+    );
+    r.err(
+        desk::send_text(&r.port, &r.mobile, "shop", "pm", "hi")
+            .await
+            .map(|_| Value::Null),
+        "No pane \"pm\" in \"Shop\"",
+    );
+    r.err(
+        desk::send_text(&r.port, &r.mobile, "nowhere", "w1", "hi")
+            .await
+            .map(|_| Value::Null),
+        "No workspace with id \"nowhere\"",
+    );
+    assert!(r.typed().is_empty());
+}
+
+#[tokio::test]
+async fn desk_permit_is_typed_only_on_the_prompt_the_chat_showed() {
+    let r = rig(vec![chat_shop()], vec![], true);
+    reads(&r, Some(page()));
+    let first = json!({"command": "pnpm test"});
+    started(&r, "toolu_a", "Bash", first.clone(), 5000);
+    dialog(&r, true, Some(("Bash", first)));
+    r.act("w1", "shop", AgentActivity::Waiting);
+    let prompt = |chat: desk::ChatView| match chat.pending {
+        Some(ChatPending::Permission { prompt, .. }) => prompt,
+        other => panic!("no permission pending: {other:?}"),
+    };
+    let shown = prompt(
+        desk::chat(&r.port, &r.mobile, "shop", "w1", None, None)
+            .await
+            .unwrap(),
+    );
+
+    // Claude Code moved on to its next call before the click.
+    ended(&r, "toolu_a");
+    let next = json!({"command": "rm -rf build"});
+    started(&r, "toolu_b", "Bash", next.clone(), 6000);
+    dialog(&r, true, Some(("Bash", next)));
+    r.err(
+        desk::permit(&r.port, &r.mobile, "shop", "w1", true, Some(&shown))
+            .await
+            .map(|_| Value::Null),
+        "changed since the phone showed it",
+    );
+    assert!(r.typed().is_empty());
+
+    let current = prompt(
+        desk::chat(&r.port, &r.mobile, "shop", "w1", None, None)
+            .await
+            .unwrap(),
+    );
+    assert_eq!(
+        desk::permit(&r.port, &r.mobile, "shop", "w1", false, Some(&current)).await,
+        Ok(RemoteAnswered {
+            answered: true,
+            queued: None
+        })
+    );
+    assert_eq!(r.typed(), [r#"write:w1:"\u001b""#]);
+}
+
+#[tokio::test]
+async fn desk_chat_merges_the_question_the_mod_reports_and_the_calls_running_into_the_page() {
+    let r = rig(vec![chat_shop()], vec![], true);
+    reads(&r, Some(page()));
+    let asked = json!({"questions": [{"question": "Which color?", "header": "Color", "multiSelect": false,
+        "options": [{"label": "Red", "description": "Warm"}, {"label": "Blue", "description": "Cold"}]}]});
+    started(&r, "toolu_q", "AskUserQuestion", asked, 5000);
+    started(
+        &r,
+        "toolu_r",
+        "Bash",
+        json!({"command": "pnpm build"}),
+        6000,
+    );
+    r.act("w1", "shop", AgentActivity::Working);
+    let chat = desk::chat(&r.port, &r.mobile, "shop", "w1", None, Some(20))
+        .await
+        .unwrap();
+    assert_eq!(
+        chat.pending,
+        Some(ChatPending::Question {
+            tool_use_id: "toolu_q".into(),
+            questions: vec![color()],
+        })
+    );
+    let ids: Vec<&str> = chat.items.iter().map(|item| item.id.as_str()).collect();
+    assert_eq!(ids, ["u1", "t1", "toolu_r"]);
+    assert_eq!(chat.cursor.as_deref(), Some("4096"));
+    assert_eq!(
+        *locked(&r.fakes.chats),
+        [read_of("sess-1", "C:\\wt\\ben", None, Some(20))]
+    );
+
+    // An older page: the transcript's alone.
+    let older = desk::chat(&r.port, &r.mobile, "shop", "w1", Some("4096".into()), None)
+        .await
+        .unwrap();
+    assert_eq!(older.items, items());
+}

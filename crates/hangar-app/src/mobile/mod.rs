@@ -15,6 +15,7 @@
 //! - `chat_live` and `calls`: a pane's conversation, with what its mod
 //!   reports before the transcript has it;
 //! - `answer`: answering an AskUserQuestion through its dialog;
+//! - `desk`: the same calls typed, for the window's own chat view;
 //! - `delivery`: a delivery that waits for the person, landed or sent back;
 //! - `apps`: the agents' dev servers the phone may open;
 //! - `stats`: the statistics, summed up the page's way;
@@ -36,6 +37,7 @@ pub mod calls;
 pub mod chat_live;
 pub mod contract;
 pub mod delivery;
+pub mod desk;
 pub mod engine;
 mod live;
 pub mod ops;
@@ -61,6 +63,15 @@ use crate::state::live::BridgeEvent;
 #[derive(Debug, Default)]
 pub struct State {
     runtime: Option<live::Runtime>,
+}
+
+impl State {
+    /// Hangar Mobile's runtime state, for `desk`'s calls: `None` until the
+    /// state is in and the orchestration runtime runs (`Msg::Start`).
+    #[allow(dead_code)] // The chat view (chat_view/) calls it; nothing does yet.
+    pub fn mobile(&self) -> Option<Arc<engine::Mobile>> {
+        self.runtime.as_ref().map(|runtime| runtime.mobile.clone())
+    }
 }
 
 /// The package's shared read-model; lives in `Model.live.mobile`. Nothing of

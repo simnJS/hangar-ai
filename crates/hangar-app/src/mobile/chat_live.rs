@@ -307,16 +307,34 @@ fn cwd_of(ws: &Workspace, pane: &Pane) -> String {
 }
 
 /// `remote_chat {pane, before?, limit?}`: a page of a Claude Code pane's
-/// conversation, the newest unless `before` asks for an older one.
+/// conversation, the newest unless `before` asks for an older one
+/// (`chat_pane`).
 pub async fn remote_chat(port: &Port, mobile: &Mobile, args: &Value) -> Result<RemoteChat, String> {
-    let snapshot = port.snapshot();
-    let (ws, pane) = find_pane(&snapshot.state, args.get("pane"))?;
+    let (ws, pane) = find_pane(&port.snapshot().state, args.get("pane"))?;
     let before = match args.get("before") {
         None => None,
         Some(Value::String(cursor)) => Some(cursor.clone()),
         Some(_) => return Err("\"before\" is a cursor from an earlier answer.".into()),
     };
-    let activity = activity_of(&snapshot, &pane.id).map(|entry| entry.activity);
+    let limit = args
+        .get("limit")
+        .and_then(Value::as_f64)
+        .map(|limit| limit.max(0.0).floor() as usize);
+    chat_pane(port, mobile, &ws, &pane, before, limit).await
+}
+
+/// A page of a pane's conversation, the newest unless `before` (a cursor
+/// from an earlier page) asks for an older one, with what the pane waits on
+/// the person for and, on the newest page, the calls it runs now.
+pub async fn chat_pane(
+    port: &Port,
+    mobile: &Mobile,
+    ws: &Workspace,
+    pane: &Pane,
+    before: Option<String>,
+    limit: Option<usize>,
+) -> Result<RemoteChat, String> {
+    let activity = activity_of(&port.snapshot(), &pane.id).map(|entry| entry.activity);
     let chat = |items, older, cursor, pending, reason| RemoteChat {
         pane_id: pane.id.clone(),
         pane: pane.name.clone(),
@@ -337,11 +355,7 @@ pub async fn remote_chat(port: &Port, mobile: &Mobile, args: &Value) -> Result<R
     let Some(session_id) = pane.session_id.clone().filter(|id| !id.is_empty()) else {
         return Ok(empty(ChatReason::NoSession));
     };
-    let cwd = cwd_of(&ws, &pane);
-    let limit = args
-        .get("limit")
-        .and_then(Value::as_f64)
-        .map(|limit| limit.max(0.0).floor() as usize);
+    let cwd = cwd_of(ws, pane);
     let page = mobile
         .sources()
         .chat(ChatRead {

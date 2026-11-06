@@ -599,9 +599,8 @@ async fn shown_prompt(
     mobile: &Mobile,
     ws: &Workspace,
     pane: &Pane,
-    args: &Value,
+    shown: Option<&str>,
 ) -> Result<(), String> {
-    let shown = args.get("prompt").and_then(Value::as_str);
     let changed = || {
         format!(
             "What \"{}\" asks has changed since the phone showed it: look again. Nothing was sent.",
@@ -621,7 +620,7 @@ async fn shown_prompt(
 }
 
 /// `remote_permission {pane, allow, prompt?}`: Enter or Escape to a pane
-/// that waits, on the prompt the phone showed (`shown_prompt`).
+/// that waits, on the prompt the phone showed (`permit_pane`).
 pub async fn remote_permission(
     port: &Port,
     mobile: &Mobile,
@@ -630,13 +629,27 @@ pub async fn remote_permission(
     let Some(allow) = args.get("allow").and_then(Value::as_bool) else {
         return Err("Say whether to allow: \"allow\" is true or false.".into());
     };
+    let (ws, pane) = find_pane(&port.snapshot().state, args.get("pane"))?;
+    let shown = args.get("prompt").and_then(Value::as_str);
+    permit_pane(port, mobile, &ws, &pane, allow, shown).await
+}
+
+/// Enter (`allow`) or Escape to a pane that waits, on the prompt shown
+/// (`shown`, `ChatPending::Permission`'s `prompt`; see `shown_prompt`).
+pub async fn permit_pane(
+    port: &Port,
+    mobile: &Mobile,
+    ws: &Workspace,
+    pane: &Pane,
+    allow: bool,
+    shown: Option<&str>,
+) -> Result<super::contract::RemoteAnswered, String> {
     let snapshot = port.snapshot();
-    let (ws, pane) = find_pane(&snapshot.state, args.get("pane"))?;
     if activity(&snapshot, &pane.id) != Some(AgentActivity::Waiting) {
         // A sleep stops the agents: no dialog outlives it, and Enter or
         // Escape typed while it resumes would reach the shell.
         if is_asleep(&snapshot, &ws.id) {
-            wake(port, mobile, &ws).await;
+            wake(port, mobile, ws).await;
             return Err(format!(
                 "\"{}\" was asleep, so \"{}\" no longer waits for a permission. It is waking up now; nothing was sent.",
                 ws.name, pane.name
@@ -647,13 +660,13 @@ pub async fn remote_permission(
             pane.name
         ));
     }
-    shown_prompt(port, mobile, &ws, &pane, args).await?;
+    shown_prompt(port, mobile, ws, pane, shown).await?;
     let key = if allow { "enter" } else { "escape" };
     let input = Input {
         keys: vec![key.into()],
         ..Input::default()
     };
-    type_into(port, mobile, &ws, &pane, input).await?;
+    type_into(port, mobile, ws, pane, input).await?;
     Ok(super::contract::RemoteAnswered {
         answered: true,
         queued: None,
