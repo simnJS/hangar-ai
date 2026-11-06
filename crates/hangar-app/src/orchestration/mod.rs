@@ -30,6 +30,7 @@ pub mod manager_feed;
 pub mod port;
 pub mod projects;
 pub mod runtime;
+mod sweep;
 pub mod text;
 pub mod worker;
 

@@ -1564,6 +1564,8 @@ pub async fn stop_worker(
         (Some(tree), Some(cwd)) => Some(root_of(tree, cwd)),
         _ => pane.cwd.clone(),
     };
+    // Another pane, of any workspace, works in it: never removed under it.
+    let other = tree.and_then(|tree| pane_in(&port.state(), &pane.id, &tree.path));
 
     // Its processes first: nothing writes in the worktree once it is looked
     // at, and a process still standing in it would keep it from being removed.
@@ -1602,6 +1604,12 @@ pub async fn stop_worker(
         }
         (Some(_), Some(_)) if keep_worktree => {
             worktree.kept = Some("keepWorktree was asked for".into())
+        }
+        (Some(_), Some(_)) if other.is_some() => {
+            worktree.kept = Some(format!(
+                "the pane \"{}\" works in it",
+                other.unwrap_or_default()
+            ));
         }
         (Some(path), Some(tree)) => {
             port.sleep(SETTLE_MS).await;
@@ -1662,6 +1670,21 @@ pub async fn stop_worker(
         }),
         worktree,
     }
+}
+
+/// The name of a pane other than `except`, in any workspace, whose folder is
+/// `root` or inside it.
+fn pane_in(state: &AppState, except: &str, root: &str) -> Option<String> {
+    state.workspaces.iter().find_map(|ws| {
+        ws.panes
+            .iter()
+            .filter(|pane| pane.id != except && ws.node.is_none())
+            .find(|pane| {
+                let folder = pane.cwd.as_deref().unwrap_or(&ws.cwd);
+                !folder.is_empty() && inside(root, folder).is_some()
+            })
+            .map(|pane| pane.name.clone())
+    })
 }
 
 /// A worker of `ws` by pane name or id.

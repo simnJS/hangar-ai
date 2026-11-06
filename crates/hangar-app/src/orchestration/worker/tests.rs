@@ -2051,6 +2051,32 @@ async fn keeps_the_worktree_when_asked_to() {
 }
 
 #[tokio::test]
+async fn keeps_a_worktree_another_pane_works_in() {
+    let (app, _, path) = started().await;
+    // A shell the person opened in a folder of the worker's worktree.
+    let inside = format!("{path}/src");
+    app.map_shop(|ws| {
+        ws.panes.push(Pane {
+            cwd: Some(inside),
+            ..pane("p9", "Shell", None)
+        })
+    });
+
+    let stopped = app
+        .call("worker_stop", json!({"worker": "Mia"}))
+        .await
+        .unwrap();
+    assert_eq!(stopped["worktree"]["removed"], false);
+    assert_eq!(stopped["worktree"]["branchDeleted"], false);
+    assert_eq!(
+        stopped["worktree"]["kept"],
+        "the pane \"Shell\" works in it"
+    );
+    assert!(!app.log().iter().any(|line| line.starts_with("unworktree:")));
+    assert!(!app.log().iter().any(|line| line.starts_with("unbranch:")));
+}
+
+#[tokio::test]
 async fn only_stops_workers() {
     let (app, _, _) = started().await;
     assert!(

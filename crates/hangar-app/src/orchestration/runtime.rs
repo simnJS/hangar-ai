@@ -343,6 +343,8 @@ impl OrchestrationHandle {
     /// Removes the worktrees nobody uses in each workspace folder seen for the
     /// first time: the first tick after the state was loaded covers every
     /// workspace of the app, a later one the workspace that was opened since.
+    /// Only the worktrees of tasks done on the workspace's board that no live
+    /// process stands in can go (`sweep::sweep_workspace`).
     async fn sweep_new_workspaces(&self) {
         let state = self.port().state();
         let (fresh, held) = {
@@ -360,12 +362,23 @@ impl OrchestrationHandle {
         if fresh.is_empty() {
             return;
         }
+        // Not a repository, or git is missing: nothing listed, nothing swept.
+        let mut listed = Vec::with_capacity(fresh.len());
+        for cwd in fresh {
+            let trees = hangar_core::git::git_worktree_list(cwd.clone())
+                .await
+                .unwrap_or_default();
+            listed.push((cwd, trees));
+        }
         let swept = tokio::task::spawn_blocking(move || {
+            // Who stands where, once for every workspace: a pane of another
+            // Hangar is in no `held` of this one.
+            let dirs = hangar_core::delivery::occupied::current_dirs();
             let mut seen = Vec::new();
-            for cwd in fresh {
-                // Not a repository, or git is missing: nothing to sweep.
+            for (cwd, trees) in listed {
+                let tasks = hangar_core::board_load(cwd.clone()).tasks;
                 if let Ok(sweep) =
-                    hangar_core::git::sweep_orphan_worktrees(std::path::Path::new(&cwd), &held)
+                    super::sweep::sweep_workspace(&cwd, &trees, &held, &tasks, dirs.as_deref())
                 {
                     // Two workspaces of one repository say it once.
                     for line in sweep.removed.into_iter().chain(sweep.kept) {

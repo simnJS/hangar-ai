@@ -962,6 +962,10 @@ fn remember_passed(request: &Delivery, repo: &str, tree: &str, line: &str) {
 
 pub(crate) mod owns;
 
+/* ── Who stands in a worktree ──────────────────────────────────── */
+
+pub mod occupied;
+
 /* ── The check ─────────────────────────────────────────────────── */
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -2457,6 +2461,27 @@ fn cleanup(worktree: &str, branch: &str, target: &str, task: &str, tries: u32) -
         .iter()
         .skip(1)
         .any(|(path, _, _)| key(path) == key(worktree));
+    // A live process standing in it is a pane of some Hangar, or the
+    // person's: never removed under it. The worker's own pane was just
+    // closed, and its processes may take a moment to go.
+    let main_checkout = !linked && listed.iter().any(|(path, _, _)| key(path) == key(worktree));
+    if !main_checkout && dir.exists() {
+        for attempt in 0..tries.max(1) {
+            match occupied::occupants(dir) {
+                Some(pids) if !pids.is_empty() => {
+                    if attempt + 1 == tries.max(1) {
+                        report.kept.push(format!(
+                            "the worktree {worktree} is the folder of a live process (pid {}): kept",
+                            pids[0]
+                        ));
+                        return report;
+                    }
+                    std::thread::sleep(Duration::from_secs(1));
+                }
+                _ => break,
+            }
+        }
+    }
     // What is left of the folder once git has done what it can.
     let sweep = |report: &mut Cleanup, said: Option<&str>| match crate::git::sweep_leftovers(
         &repo,
@@ -2511,7 +2536,7 @@ fn cleanup(worktree: &str, branch: &str, target: &str, task: &str, tries: u32) -
             sweep(&mut report, Some(&said));
         }
         crate::git::forget_shared_roots();
-    } else if listed.iter().any(|(path, _, _)| key(path) == key(worktree)) {
+    } else if main_checkout {
         report
             .kept
             .push(format!("{worktree} is the main checkout: kept"));
@@ -3788,6 +3813,38 @@ mod tests {
             "{gone:?}"
         );
         assert!(sh(&repo.main, &["branch", "--list", "other"]).is_empty());
+
+        // A worktree a live process stands in is never removed, nor its
+        // branch: a worker of another Hangar, or the person, works there.
+        #[cfg(target_os = "linux")]
+        {
+            let busy = repo.root.join("busy");
+            sh(
+                &repo.main,
+                &[
+                    "worktree",
+                    "add",
+                    "-q",
+                    "-b",
+                    "busy",
+                    &busy.to_string_lossy(),
+                    "main",
+                ],
+            );
+            let mut child = std::process::Command::new("sleep")
+                .arg("30")
+                .current_dir(&busy)
+                .stdin(std::process::Stdio::null())
+                .spawn()
+                .expect("sleep runs");
+            let kept = cleanup(&busy.to_string_lossy(), "busy", "main", &repo.task, 1);
+            let _ = child.kill();
+            let _ = child.wait();
+            assert!(!kept.worktree_removed && !kept.branch_deleted, "{kept:?}");
+            assert!(kept.kept[0].contains("live process"), "{kept:?}");
+            assert!(busy.exists());
+            assert!(!sh(&repo.main, &["branch", "--list", "busy"]).is_empty());
+        }
 
         // The main checkout is never removed.
         let main = cleanup(&repo.main.to_string_lossy(), "main", "main", &repo.task, 1);
