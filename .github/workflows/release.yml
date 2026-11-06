@@ -381,6 +381,20 @@ jobs:
             crates/hangar-app/packaging/check-mobile.sh "target/dist/hangar-ai${{ runner.os == 'Windows' && '.exe' || '' }}"
           fi
 
+      # The runner has the Visual C++ Redistributable, a fresh Windows does not:
+      # an executable that imports its DLLs starts here and nowhere else
+      # (.cargo/config.toml links the C runtime in). The import table names the
+      # DLLs in plain ASCII, so a search of the file finds them.
+      - name: Check the Windows executables need no Visual C++ Redistributable
+        if: runner.os == 'Windows'
+        run: |
+          for exe in target/dist/hangar-ai.exe target/dist/hangar-webview.exe; do
+            if grep -a -i -q -E 'vcruntime140|msvcp140' "$exe"; then
+              echo "$exe imports the Visual C++ Redistributable's DLLs" >&2
+              exit 1
+            fi
+          done
+
       # hangar-node for Linux x86_64 and arm64, from the `node` job, where the
       # packaging scripts take them from (they refuse to package without).
       # After the build, not before: rust-cache restores target/ and would
