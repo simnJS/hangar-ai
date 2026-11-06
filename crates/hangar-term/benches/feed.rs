@@ -29,6 +29,10 @@
 //!   is bounded by the PTY and `cat`; what it tells is the reader thread's
 //!   CPU time (reading, decoding, history, feeding) per MB, and the size of
 //!   the chunks the reader hands out.
+//! - `--ls` (with `--pty`): the shell runs `ls --color=always -la /usr/bin`
+//!   instead of `cat`ting the sample, as each of bench `busy16`'s panes
+//!   does: written to the PTY a line at a time (stdout is line-buffered on
+//!   a terminal), which is what makes the reader hand out small pieces.
 //! - `--no-feed` (with `--pty`): the sink drops the output, so what is left
 //!   is the reader thread's own cost.
 
@@ -118,6 +122,7 @@ struct Options {
     scrollback: usize,
     threads: usize,
     pty: bool,
+    ls: bool,
     feed: bool,
 }
 
@@ -130,6 +135,7 @@ fn options() -> Options {
         scrollback: SCROLLBACK,
         threads: 1,
         pty: false,
+        ls: false,
         feed: true,
     };
     let mut args = std::env::args().skip(1);
@@ -145,6 +151,7 @@ fn options() -> Options {
             "--scrollback" => options.scrollback = number(&mut args, SCROLLBACK),
             "--threads" => options.threads = number(&mut args, 1).max(1),
             "--pty" => options.pty = true,
+            "--ls" => options.ls = true,
             "--no-feed" => options.feed = false,
             // `cargo bench` passes `--bench`; anything else is ignored too.
             _ => {}
@@ -266,10 +273,13 @@ fn run_pty(name: &str, sample: &[u8], options: &Options) -> PtyRun {
     let fed = terminal.clone();
     let feed = options.feed;
     let (mut bytes, mut chunks) = (0usize, 0usize);
+    let writer = match options.ls {
+        true => "command ls --color=always -la /usr/bin".to_string(),
+        false => format!("cat '{}'", file.display()),
+    };
     let script = format!(
-        "i=0; while [ $i -lt {} ]; do cat '{}'; i=$((i+1)); done",
+        "i=0; while [ $i -lt {} ]; do {writer}; i=$((i+1)); done",
         options.passes,
-        file.display()
     );
     let shell = hangar_core::shells::ShellInfo {
         id: "sh".into(),
