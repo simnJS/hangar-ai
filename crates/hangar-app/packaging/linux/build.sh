@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Builds the Linux packages from the release binaries cargo already built:
+# Builds the Linux packages from the binaries cargo already built with the
+# dist profile (the workspace Cargo.toml says why), in target/dist:
 #
 #   Hangar.AI_<version>_amd64.AppImage
 #   Hangar.AI_<version>_amd64.deb
@@ -9,7 +10,7 @@
 #
 # The names are the Tauri build's, because the download page links to them and
 # the feed's URLs are made from them. Needs cargo-packager (the AppImage and the
-# .deb), cargo-generate-rpm (the .rpm), jq, and `cargo build --release --locked
+# .deb), cargo-generate-rpm (the .rpm), jq, and `cargo build --profile dist --locked
 # -p hangar-app -p hangar-webview --features hangar-webview/engine` done first,
 # and hangar-node-x86_64 and hangar-node-aarch64 in <target dir>/node.
 # docs/native/PACKAGING.md explains each choice.
@@ -25,15 +26,15 @@ out="$(absolute_dir "$1")"
 target_dir="$(cd "$repo" && cargo metadata --no-deps --format-version 1 | jq -r .target_directory)"
 
 for binary in hangar-ai hangar-webview; do
-  if [ ! -x "$target_dir/release/$binary" ]; then
-    echo "$target_dir/release/$binary is missing: build it first (see docs/native/PACKAGING.md)" >&2
+  if [ ! -x "$target_dir/dist/$binary" ]; then
+    echo "$target_dir/dist/$binary is missing: build it first (see docs/native/PACKAGING.md)" >&2
     exit 1
   fi
 done
 
 # hangar-node for x86_64 and arm64 beside the executables, where the packager
 # (the `binaries` of the manifest, and the .rpm's assets) takes them from.
-stage_node_binaries "$target_dir" "$target_dir/release"
+stage_node_binaries "$target_dir" "$target_dir/dist"
 
 # The packager's own AppRun, which it downloads, exports PYTHONHOME, PYTHONPATH
 # and friends pointing into the image, and so breaks every Python that a Hangar
@@ -47,7 +48,7 @@ install -m 755 "$packaging/linux/AppRun" "$cache/.cargo-packager/AppImage/AppRun
 rm -rf "$out/.cargo-packager"
 (
   cd "$repo"
-  XDG_CACHE_HOME="$cache" cargo packager --release --formats deb,appimage --out-dir "$out"
+  XDG_CACHE_HOME="$cache" cargo packager --profile dist --formats deb,appimage --out-dir "$out"
 )
 
 # cargo-packager's names (hangar-ai_1.2.3_x86_64.AppImage, hangar-ai_1.2.3_amd64.deb)
@@ -61,7 +62,7 @@ rm -rf "$out/.cargo-packager"
 # Tauri build's Hangar.AI-<version>-1.x86_64.rpm.
 (
   cd "$repo"
-  cargo generate-rpm -p crates/hangar-app -o "$out/"
+  cargo generate-rpm -p crates/hangar-app --profile dist -o "$out/"
 )
 
 ls -la "$out"

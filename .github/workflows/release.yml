@@ -132,10 +132,14 @@ jobs:
         with:
           key: node-${{ matrix.arch }}
 
+      # The dist profile (fat LTO, one codegen unit: the workspace Cargo.toml
+      # says why), as the app's: the file the desktop uploads to every node is
+      # a third smaller for it.
       - name: Build hangar-node
-        run: cargo build --release --locked --target "${{ matrix.target }}" -p hangar-node
+        run: cargo build --profile dist --locked --target "${{ matrix.target }}" -p hangar-node
 
-      # Stripped (the debug symbols are most of the file) and named as the
+      # Stripped (dist builds keep the symbol table, a sixth of this file, for
+      # backtraces; a node has no use for it) and named as the
       # desktop looks for it. `file` and the glibc check are what stand between
       # a wrong binary and a release: one for the wrong machine, or one that
       # wants a newer glibc than 2.35, would only fail on someone's server.
@@ -143,7 +147,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p out
-          src="target/${{ matrix.target }}/release/hangar-node"
+          src="target/${{ matrix.target }}/dist/hangar-node"
           prefix=""
           [ "${{ matrix.arch }}" = "aarch64" ] && prefix="aarch64-linux-gnu-"
           strip="${prefix}strip"
@@ -358,18 +362,26 @@ jobs:
       # helper's engine feature on: the app must not be built with it, so that
       # the main executable links no browser engine at all. The helper is the
       # only thing that links WebKitGTK, WebView2 or WKWebView.
+      #
+      # With the dist profile, not `--release`: fat LTO and one codegen unit,
+      # which make the executable a third smaller and parsing a pane's output a
+      # few percent faster. It is the slowest part of this job: on 32 cores a
+      # cold hangar-app takes 7 minutes instead of 1½, most of it the single
+      # LTO step, so expect the same few extra minutes per build here (no
+      # timeout is set; the job's default is 6 hours). The numbers and the
+      # variants that lost are in docs/native/PACKAGING.md, "The dist profile".
       - name: Build
         run: |
           if [ "$RUNNER_OS" = "macOS" ]; then
             for target in aarch64-apple-darwin x86_64-apple-darwin; do
-              cargo build --release --locked --target "$target" -p hangar-app
-              cargo build --release --locked --target "$target" -p hangar-webview --features engine
-              crates/hangar-app/packaging/check-mobile.sh "target/$target/release/hangar-ai"
+              cargo build --profile dist --locked --target "$target" -p hangar-app
+              cargo build --profile dist --locked --target "$target" -p hangar-webview --features engine
+              crates/hangar-app/packaging/check-mobile.sh "target/$target/dist/hangar-ai"
             done
           else
-            cargo build --release --locked -p hangar-app
-            cargo build --release --locked -p hangar-webview --features engine
-            crates/hangar-app/packaging/check-mobile.sh "target/release/hangar-ai${{ runner.os == 'Windows' && '.exe' || '' }}"
+            cargo build --profile dist --locked -p hangar-app
+            cargo build --profile dist --locked -p hangar-webview --features engine
+            crates/hangar-app/packaging/check-mobile.sh "target/dist/hangar-ai${{ runner.os == 'Windows' && '.exe' || '' }}"
           fi
 
       # Linux and macOS are packaged by cargo-packager. Windows is not: its
@@ -405,7 +417,7 @@ jobs:
           case "$RUNNER_OS" in
             Linux)   crates/hangar-app/packaging/linux/build.sh target/packager ;;
             macOS)   crates/hangar-app/packaging/macos/build.sh target/packager ;;
-            Windows) crates/hangar-app/packaging/windows/build.sh target/release target/packager ;;
+            Windows) crates/hangar-app/packaging/windows/build.sh target/dist target/packager ;;
           esac
 
       # Into the release the `draft` job made. Naming it by id rather than by

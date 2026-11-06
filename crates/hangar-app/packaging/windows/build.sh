@@ -4,7 +4,7 @@
 #   packaging/windows/build.sh <release-dir> <out-dir>
 #
 # <release-dir> holds the two executables cargo built (hangar-ai.exe and
-# hangar-webview.exe, normally target/release) and, in its sibling `node` folder
+# hangar-webview.exe, normally target/dist: the dist profile) and, in its sibling `node` folder
 # (target/node), the Linux hangar-node-x86_64 and hangar-node-aarch64 the
 # installer carries for the app to upload to nodes; the installer lands in
 # <out-dir>.
