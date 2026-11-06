@@ -1047,6 +1047,18 @@ fn placed(m: &Model, ws: &Workspace) -> bool {
     })
 }
 
+/// Whether a terminal of `ws` mounted now is about to measure itself, so that
+/// its shell waits for that measure (`controller::MEASURE_WAIT` at most). A
+/// workspace shown as the chat view lays none of its terminals out: nothing
+/// would measure them, and their shells start right away at the default size
+/// instead of after the whole wait (a resize follows once the grid shows). A
+/// workspace off screen still waits: its window may be on its way (a detached
+/// one at launch), and a pane hidden by a zoom is laid out as soon as the
+/// split that mounted it ends the zoom.
+fn will_measure(m: &Model, ws: &Workspace) -> bool {
+    !(placed(m, ws) && crate::chat_view::shown(m, ws))
+}
+
 /// The pane is on screen: its workspace is, and no other pane is zoomed over
 /// it.
 fn visible(m: &Model, ws: &Workspace, pane: &str) -> bool {
@@ -1301,7 +1313,7 @@ fn sync(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
         let Some((ws, pane)) = controller::find(m, ws_id, pane_id) else {
             continue;
         };
-        let (rt, task) = controller::mount(&st.hub, sv, m, ws, pane);
+        let (rt, task) = controller::mount(&st.hub, sv, m, ws, pane, will_measure(m, ws));
         st.panes.insert(pane_id.clone(), rt);
         tasks.push(task);
     }
@@ -1664,6 +1676,28 @@ mod chat_view_tests {
         // Another workspace stays off screen, chat view or not.
         let other = m.workspace("chat-other").unwrap().clone();
         assert!(!in_front(&m, &other, "mia"));
+    }
+
+    #[test]
+    fn a_terminal_mounted_in_the_chat_view_starts_its_shell_without_waiting_for_a_measure() {
+        let mut m = model(true);
+        // The grid on screen: the shells wait for their terminal's measure.
+        assert!(will_measure(&m, &ws(&m)));
+        chat(&mut m, true);
+        // The chat view lays no terminal out: nothing would measure them.
+        assert!(!will_measure(&m, &ws(&m)));
+        // A workspace off screen still waits, chat view or not: its window
+        // may be on its way.
+        m.apply(StoreAction::SetChatView {
+            ws: "chat-other".into(),
+            on: true,
+        });
+        let other = m.workspace("chat-other").unwrap().clone();
+        assert!(will_measure(&m, &other));
+        // The experiment off, the chat view asked for shows the grid.
+        let mut off = model(false);
+        chat(&mut off, true);
+        assert!(will_measure(&off, &ws(&off)));
     }
 
     #[test]

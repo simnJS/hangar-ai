@@ -337,13 +337,16 @@ pub fn backend_for(ws: &Workspace, pty: &Arc<hangar_core::pty::PtyManager>) -> P
 
 /// Mounts `pane`: its terminal and its writer. The shell starts once the
 /// terminal has measured itself (`MEASURE_WAIT` at most), so that the agent
-/// draws its first screen at the size it will be seen at.
+/// draws its first screen at the size it will be seen at; when nothing is
+/// going to measure it (`measured` false: its workspace is the chat view),
+/// it starts right away, once P4 has heard of the pane.
 pub fn mount(
     hub: &Hub,
     sv: &Services,
     m: &Model,
     ws: &Workspace,
     pane: &Pane,
+    measured: bool,
 ) -> (PaneRt, Task<Message>) {
     let settings = m.settings();
     let look = look::look(settings, ws, pane.agent);
@@ -408,13 +411,7 @@ pub fn mount(
         node: ws.node.clone(),
     };
 
-    let id = pane.id.clone();
-    // P4 hears of the pane before its shell exists, so no report of the mod
-    // is lost; the queue a restart carried over goes back to core there.
-    let mounted = Task::done(Message::PanesLogic(Logic::Mounted { pane: id.clone() }));
-    let due = Task::perform(tokio::time::sleep(MEASURE_WAIT), move |()| {
-        Message::Panes(Msg::SpawnDue(id.clone()))
-    });
+    let task = mounted_then_due(pane.id.clone(), measured);
 
     let rt = PaneRt {
         ws: ws.id.clone(),
@@ -441,7 +438,25 @@ pub fn mount(
         typed: None,
         parked: None,
     };
-    (rt, Task::batch([mounted, due]))
+    (rt, task)
+}
+
+/// What a mount sends: `Mounted`, then `SpawnDue` once `MEASURE_WAIT` is
+/// over, or, when nothing will measure the terminal (`measured` false), right
+/// after `Mounted`.
+fn mounted_then_due(id: PaneId, measured: bool) -> Task<Message> {
+    // P4 hears of the pane before its shell exists, so no report of the mod
+    // is lost; the queue a restart carried over goes back to core there.
+    let mounted = Task::done(Message::PanesLogic(Logic::Mounted { pane: id.clone() }));
+    if measured {
+        let due = Task::perform(tokio::time::sleep(MEASURE_WAIT), move |()| {
+            Message::Panes(Msg::SpawnDue(id.clone()))
+        });
+        Task::batch([mounted, due])
+    } else {
+        // Chained, not batched: `Mounted` is handled before the spawn starts.
+        mounted.chain(Task::done(Message::Panes(Msg::SpawnDue(id))))
+    }
 }
 
 /// Starts the shell, if it has not started: on the terminal's first
@@ -1342,6 +1357,59 @@ mod tests {
             .build()
             .expect("runtime")
             .block_on(future)
+    }
+
+    /// The messages a mount sends, in order, each with when it came.
+    fn mount_messages(measured: bool) -> Vec<(Message, Duration)> {
+        use iced::futures::StreamExt as _;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+            let start = std::time::Instant::now();
+            let Some(stream) =
+                iced_runtime::task::into_stream(mounted_then_due("p1".into(), measured))
+            else {
+                return Vec::new();
+            };
+            stream
+                .filter_map(|action| async move {
+                    match action {
+                        iced_runtime::Action::Output(message) => Some(message),
+                        _ => None,
+                    }
+                })
+                .map(|message| (message, start.elapsed()))
+                .collect()
+                .await
+        })
+    }
+
+    fn is_mounted(message: &Message) -> bool {
+        matches!(message, Message::PanesLogic(Logic::Mounted { pane }) if pane == "p1")
+    }
+
+    fn is_due(message: &Message) -> bool {
+        matches!(message, Message::Panes(Msg::SpawnDue(pane)) if pane == "p1")
+    }
+
+    #[test]
+    fn a_terminal_nothing_will_measure_has_its_shell_due_right_after_p4_hears_of_it() {
+        let sent = mount_messages(false);
+        assert_eq!(sent.len(), 2);
+        assert!(is_mounted(&sent[0].0), "P4 hears of the pane first");
+        assert!(is_due(&sent[1].0), "then the shell is due");
+        assert!(sent[1].1 < MEASURE_WAIT, "without the wait for a measure");
+    }
+
+    #[test]
+    fn a_terminal_about_to_measure_itself_has_its_shell_due_after_the_wait_at_most() {
+        let sent = mount_messages(true);
+        assert_eq!(sent.len(), 2);
+        assert!(is_mounted(&sent[0].0));
+        assert!(is_due(&sent[1].0));
+        assert!(sent[1].1 >= MEASURE_WAIT, "the measure is waited for");
     }
 
     fn entry(id: &str, granted: &[&str]) -> WorkspaceKit {
