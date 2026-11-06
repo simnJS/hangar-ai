@@ -1062,6 +1062,8 @@ async fn a_tunnel_that_dies_is_opened_again_after_a_wait() {
         .unwrap();
 }
 
+// Windows' OpenSSH has no ControlMaster: there the run never asks (Mux::Off).
+#[cfg(unix)]
 #[tokio::test]
 async fn the_run_asks_ssh_its_config_once_when_it_may_share() {
     let dir = tempfile::tempdir().unwrap();
