@@ -728,3 +728,400 @@ pub async fn answer_pane(
         queued: None,
     })
 }
+
+/// The screens of a real three-question prompt replayed, step by step, as
+/// Claude Code 2.1.319 draws them in a 160-column pane: long questions and
+/// descriptions wrapped, French words, a tab bar above each question and the
+/// review at the end. What the window types into them is held against the
+/// keys that dialog takes.
+#[cfg(test)]
+mod replay {
+    use std::sync::Mutex;
+
+    use hangar_core::chat::QuestionOption;
+
+    use super::*;
+    use crate::mobile::engine::locked;
+
+    fn option(label: &str, description: &str) -> QuestionOption {
+        QuestionOption {
+            label: label.into(),
+            description: description.into(),
+        }
+    }
+
+    const Q1: &str = "Le moteur d'un serveur GMod (srcds) et son Lua tournent sur un seul thread, et le jeu ne peut pas être rendu entièrement multithread sans réécrire le moteur. Quelle approche veux-tu ?";
+    const Q2: &str = "Sur quelle plateforme le serveur tourne-t-il ?";
+    const Q3: &str = "Qu'est-ce qui ralentit ton serveur aujourd'hui ? Ça me dit quoi optimiser en premier.";
+
+    /// The person's prompt: long descriptions on the first, a recommended
+    /// option first on the second, several answers on the third.
+    fn questions() -> Vec<Question> {
+        vec![
+            Question {
+                question: Q1.into(),
+                header: "Approche".into(),
+                multi_select: false,
+                options: vec![
+                    option(
+                        "Module workers Lua (Recommandé)",
+                        "Module binaire C++ (gmsv_*.dll/.so) : un pool de threads, chacun avec son propre état Lua isolé, qui échange des messages avec le thread principal (comme les Web Workers). Les addons y délèguent les calculs lourds. Faisable et stable.",
+                    ),
+                    option(
+                        "Opérations async natives",
+                        "Module C++ qui exécute certaines opérations lentes sur des threads (fichiers, SQL, HTTP, JSON, compression) et rappelle un callback Lua. Plus simple, mais limité à ces opérations.",
+                    ),
+                    option(
+                        "Les deux",
+                        "Les workers Lua plus une bibliothèque d'opérations async. Plus long.",
+                    ),
+                    option(
+                        "Patch du moteur",
+                        "Hooker srcds pour paralléliser la physique ou les Think des entités. Il faut faire du reverse engineering, c'est très instable et ça casse à chaque mise à jour de GMod. Déconseillé.",
+                    ),
+                ],
+            },
+            Question {
+                question: Q2.into(),
+                header: "Plateforme".into(),
+                multi_select: false,
+                options: vec![
+                    option(
+                        "Windows et Linux (Recommandé)",
+                        "On compile les deux binaires (win64 et linux64), avec une branche x86-64 de GMod.",
+                    ),
+                    option(
+                        "Linux seulement",
+                        "Serveur dédié Linux (cas le plus courant pour un serveur hébergé).",
+                    ),
+                    option("Windows seulement", "Serveur dédié Windows."),
+                ],
+            },
+            Question {
+                question: Q3.into(),
+                header: "Priorité".into(),
+                multi_select: true,
+                options: vec![
+                    option(
+                        "Calculs Lua lourds",
+                        "Pathfinding, IA, génération, boucles sur beaucoup d'entités.",
+                    ),
+                    option(
+                        "I/O et base de données",
+                        "SQL, fichiers, requêtes HTTP qui bloquent le tick.",
+                    ),
+                    option(
+                        "Rien de précis",
+                        "C'est une bibliothèque générique pour les développeurs d'addons.",
+                    ),
+                ],
+            },
+        ]
+    }
+
+    const WIDTH: usize = 160;
+
+    fn rule() -> String {
+        "─".repeat(WIDTH)
+    }
+
+    /// Words wrapped as Ink wraps them, each line after the first indented.
+    fn wrapped(words: &str, indent: &str, width: usize) -> Vec<String> {
+        let mut lines = Vec::new();
+        let mut line = String::new();
+        for word in words.split(' ') {
+            if !line.is_empty() && line.chars().count() + 1 + word.chars().count() > width {
+                lines.push(std::mem::take(&mut line));
+            }
+            if !line.is_empty() {
+                line.push(' ');
+            }
+            line.push_str(word);
+        }
+        lines.push(line);
+        lines
+            .into_iter()
+            .map(|line| format!("{indent}{line}"))
+            .collect()
+    }
+
+    /// The conversation above the dialog, as the pane shows it.
+    fn above() -> Vec<String> {
+        vec![
+            "● Avant de choisir, trois questions.".into(),
+            String::new(),
+            "● User answered Claude's questions:".into(),
+            "  ⎿  · Une ancienne question → Oui".into(),
+            String::new(),
+        ]
+    }
+
+    fn tabs(done: &[bool]) -> String {
+        let headers = ["Approche", "Plateforme", "Priorité"];
+        let tabs: Vec<String> = headers
+            .iter()
+            .zip(done)
+            .map(|(header, done)| format!(" {} {header} ", if *done { "☒" } else { "☐" }))
+            .collect();
+        format!("← {} ✔ Submit  →", tabs.join(""))
+    }
+
+    /// Question `at` as the dialog draws it: the cursor on row `cursor`
+    /// (0-based), the options of a multi-select question ticked by `ticked`.
+    fn question_screen(
+        questions: &[Question],
+        at: usize,
+        done: &[bool],
+        cursor: usize,
+        ticked: &[usize],
+        typed: &str,
+    ) -> String {
+        let q = &questions[at];
+        let mut lines = above();
+        lines.push(rule());
+        lines.push(tabs(done));
+        lines.push(String::new());
+        lines.extend(wrapped(&q.question, "", WIDTH));
+        lines.push(String::new());
+        let mark = |row: usize| if row == cursor { "❯" } else { " " };
+        for (index, option) in q.options.iter().enumerate() {
+            let boxed = match (q.multi_select, ticked.contains(&index)) {
+                (false, _) => String::new(),
+                (true, true) => "[✔] ".into(),
+                (true, false) => "[ ] ".into(),
+            };
+            lines.push(format!("{} {}. {boxed}{}", mark(index), index + 1, option.label));
+            lines.extend(wrapped(&option.description, "     ", WIDTH - 5));
+        }
+        let type_row = q.options.len();
+        if q.multi_select {
+            let words = if typed.is_empty() { "Type something" } else { typed };
+            lines.push(format!("{} {}. [ ] {words}", mark(type_row), type_row + 1));
+            let next = if at + 1 == questions.len() {
+                "Submit"
+            } else {
+                "Next"
+            };
+            lines.push(format!("{}    {next}", mark(type_row + 1)));
+            lines.push(rule());
+            lines.push(format!("  {}. Chat about this", type_row + 2));
+        } else {
+            let words = if typed.is_empty() { "Type something." } else { typed };
+            lines.push(format!("{} {}. {words}", mark(type_row), type_row + 1));
+            lines.push(rule());
+            lines.push(format!("  {}. Chat about this", type_row + 2));
+        }
+        lines.push(String::new());
+        lines.push("Enter to select · Tab/Arrow keys to navigate · Esc to cancel".into());
+        lines.join("\n")
+    }
+
+    /// The review: each question, wrapped, and its answer.
+    fn review_screen(questions: &[Question], said: &[&str]) -> String {
+        let mut lines = above();
+        lines.push(rule());
+        lines.push(rule());
+        lines.push(tabs(&[true, true, true]));
+        lines.push(String::new());
+        lines.push("Review your answers".into());
+        lines.push(String::new());
+        for (q, said) in questions.iter().zip(said) {
+            let mut asked = wrapped(&q.question, "   ", WIDTH - 3);
+            asked[0] = format!(" ● {}", asked[0].trim_start());
+            lines.extend(asked);
+            lines.push(format!("   → {said}"));
+        }
+        lines.push(String::new());
+        lines.push("Ready to submit your answers?".into());
+        lines.push(String::new());
+        lines.push("❯ 1. Submit answers".into());
+        lines.push("  2. Cancel".into());
+        lines.join("\n")
+    }
+
+    /// The screens replayed: the one shown after each count of steps typed
+    /// (the last one past the end).
+    struct Replay {
+        screens: Vec<(usize, String)>,
+        typed: Mutex<Vec<AnswerStep>>,
+    }
+
+    impl Replay {
+        fn typed(&self) -> Vec<AnswerStep> {
+            locked(&self.typed).clone()
+        }
+    }
+
+    impl AnswerIo for Replay {
+        fn read(&self) -> Io<'_, Result<String, String>> {
+            let count = locked(&self.typed).len();
+            let screen = self
+                .screens
+                .iter()
+                .rev()
+                .find(|(after, _)| *after <= count)
+                .map(|(_, screen)| screen.clone())
+                .unwrap_or_default();
+            Box::pin(async move { Ok(screen) })
+        }
+
+        fn type_step(&self, step: AnswerStep) -> Io<'_, Result<(), String>> {
+            locked(&self.typed).push(step);
+            Box::pin(async { Ok(()) })
+        }
+
+        fn sleep(&self, _ms: u64) -> Io<'_, ()> {
+            Box::pin(async {})
+        }
+    }
+
+    fn keys(names: &[&str]) -> AnswerStep {
+        AnswerStep {
+            text: None,
+            keys: names.iter().map(|name| (*name).to_string()).collect(),
+        }
+    }
+
+    const OWN: &str = "on va réécrire le moteur";
+
+    /// The window's answers: its own words on the first, the recommended
+    /// option on the second, two on the third.
+    fn given() -> Vec<Answer> {
+        vec![
+            Answer {
+                selected: vec![],
+                other: Some(OWN.into()),
+            },
+            Answer {
+                selected: vec!["Windows et Linux (Recommandé)".into()],
+                other: None,
+            },
+            Answer {
+                selected: vec![
+                    "I/O et base de données".into(),
+                    "Calculs Lua lourds".into(),
+                ],
+                other: None,
+            },
+        ]
+    }
+
+    fn replay(review: &str) -> Replay {
+        let questions = questions();
+        let screens = vec![
+            (0, question_screen(&questions, 0, &[false; 3], 0, &[], "")),
+            (1, question_screen(&questions, 0, &[false; 3], 4, &[], "")),
+            (
+                2,
+                question_screen(&questions, 1, &[true, false, false], 0, &[], ""),
+            ),
+            (
+                3,
+                question_screen(&questions, 2, &[true, true, false], 0, &[], ""),
+            ),
+            (4, review.to_string()),
+            (5, String::new()),
+        ];
+        Replay {
+            screens,
+            typed: Mutex::new(Vec::new()),
+        }
+    }
+
+    #[test]
+    fn the_first_question_is_found_as_drawn_wrapped_and_in_french() {
+        let questions = questions();
+        let screen = question_screen(&questions, 0, &[false; 3], 0, &[], "");
+        let lines = dialog_of(&screen, &questions).expect("the dialog under its tab bar");
+        assert!(untouched(&lines, &questions[0]));
+        // The tab of another question does not stand for this one.
+        assert!(!untouched(&lines, &questions[1]));
+        let moved = question_screen(&questions, 0, &[false; 3], 1, &[], "");
+        let lines = dialog_of(&moved, &questions).unwrap();
+        assert!(!untouched(&lines, &questions[0]), "someone moved the cursor");
+    }
+
+    #[tokio::test]
+    async fn three_questions_own_words_a_default_and_several_answers_typed_then_submitted() {
+        let questions = questions();
+        let choices = choices_from(&questions, &given()).unwrap();
+        assert_eq!(
+            choices,
+            [
+                Choice {
+                    picked: vec![],
+                    other: Some(OWN.into())
+                },
+                Choice {
+                    picked: vec![0],
+                    other: None
+                },
+                Choice {
+                    picked: vec![0, 1],
+                    other: None
+                },
+            ]
+        );
+        let review = review_screen(
+            &questions,
+            &[
+                OWN,
+                "Windows et Linux (Recommandé)",
+                "Calculs Lua lourds, I/O et base de données",
+            ],
+        );
+        let io = replay(&review);
+        type_answers(&io, &questions, &choices).await.unwrap();
+        assert_eq!(
+            io.typed(),
+            [
+                // 1: down to "Type something.", the words, Enter.
+                keys(&["down", "down", "down", "down"]),
+                AnswerStep {
+                    text: Some(OWN.into()),
+                    keys: vec!["enter".into()],
+                },
+                // 2: the first option, under the cursor.
+                keys(&["enter"]),
+                // 3: tick the first two, down to "Submit".
+                keys(&["enter", "down", "enter", "down", "down", "down", "enter"]),
+                // The review's "Submit answers".
+                keys(&["enter"]),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_review_that_shows_another_answer_is_not_submitted() {
+        let questions = questions();
+        let choices = choices_from(&questions, &given()).unwrap();
+        let review = review_screen(
+            &questions,
+            &[OWN, "Linux seulement", "Calculs Lua lourds, I/O et base de données"],
+        );
+        let io = replay(&review);
+        assert_eq!(
+            type_answers(&io, &questions, &choices).await,
+            Err(NOT_REVIEWED.to_string())
+        );
+        assert_eq!(io.typed().len(), 4, "everything but the Enter that submits");
+    }
+
+    #[tokio::test]
+    async fn a_question_someone_is_answering_at_the_pc_gets_nothing_typed() {
+        let questions = questions();
+        let choices = choices_from(&questions, &given()).unwrap();
+        let io = Replay {
+            screens: vec![(
+                0,
+                question_screen(&questions, 0, &[false; 3], 2, &[], ""),
+            )],
+            typed: Mutex::new(Vec::new()),
+        };
+        assert_eq!(
+            type_answers(&io, &questions, &choices).await,
+            Err(NOT_ON_SCREEN.to_string())
+        );
+        assert!(io.typed().is_empty());
+    }
+}
