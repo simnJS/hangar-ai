@@ -1690,18 +1690,13 @@ mod tests {
 
         let mut printed = String::new();
         let mut events = 0;
-        loop {
-            match received
-                .recv_timeout(Duration::from_secs(10))
-                .expect("an event")
-            {
-                PtyEvent::Output(chunk) => {
-                    events += 1;
-                    printed.push_str(&chunk.data);
-                    assert_eq!(chunk.seq, printed.len() as u64);
-                }
-                PtyEvent::Exit(_) => break,
-            }
+        while let PtyEvent::Output(chunk) = received
+            .recv_timeout(Duration::from_secs(10))
+            .expect("an event")
+        {
+            events += 1;
+            printed.push_str(&chunk.data);
+            assert_eq!(chunk.seq, printed.len() as u64);
         }
         let expected: String = std::iter::once("go\r\n".to_string())
             .chain((0..2000).map(|i| format!("x{i:04}\r\n")))
