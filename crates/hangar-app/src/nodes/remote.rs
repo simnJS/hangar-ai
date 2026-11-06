@@ -242,6 +242,11 @@ pub enum StreamEvent {
     Exit,
 }
 
+/// The subprotocol a stream offers for its output in binary frames
+/// (hangar-node's api.rs): an 8-byte big-endian `seq`, then the data. A node
+/// that does not know it sends JSON frames, read all the same.
+pub const BINARY_PROTOCOL: &str = "hangar-binary";
+
 /// What the pane sends on its stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outgoing {
@@ -289,7 +294,7 @@ pub async fn follow(
         let connected = match resolve(&node) {
             Some(client) => {
                 let path = format!("/node/panes/{}/stream?from={last}", wire::encode(&pane));
-                Some(Socket::connect(&client, &path).await)
+                Some(Socket::connect_offering(&client, &path, Some(BINARY_PROTOCOL)).await)
             }
             None => None,
         };
@@ -359,7 +364,11 @@ async fn pump(
                         return ended;
                     }
                 }
-                Ok(Some(Incoming::Binary(_))) => {}
+                Ok(Some(Incoming::Binary(bytes))) => {
+                    if let Some((seq, data)) = binary_output(bytes) {
+                        output(seq, data, last, replay_until, emit);
+                    }
+                }
                 Ok(Some(Incoming::Close)) | Err(_) => return Ended::Dropped,
                 Ok(None) => break,
             }
@@ -411,21 +420,78 @@ fn frame(
         value.get("seq").and_then(Value::as_u64),
         value.get("data").and_then(Value::as_str),
     ) {
-        // Sent twice across a reconnection: drawn once.
-        if seq > *last {
-            *last = seq;
-            emit(StreamEvent::Output {
-                seq,
-                data: data.to_owned(),
-                replay: seq <= replay_until,
-            });
-        }
+        output(seq, data.to_owned(), last, replay_until, emit);
         return None;
     }
     if let Some(error) = value.get("error").and_then(Value::as_str) {
         eprintln!("node stream: {error}");
     }
     None
+}
+
+/// A binary output frame: its `seq` and its data, when it is one.
+pub fn binary_output(mut bytes: Vec<u8>) -> Option<(u64, String)> {
+    let head: [u8; 8] = bytes.get(..8)?.try_into().ok()?;
+    bytes.drain(..8);
+    let data = String::from_utf8(bytes).ok()?;
+    Some((u64::from_be_bytes(head), data))
+}
+
+/// Output ending at byte `seq`, to `emit`: what was drawn already (sent
+/// again across a reconnection) left out, and what the pane printed before
+/// it was followed (`replay_until`) marked so, apart from the rest when a
+/// frame holds both (a node sends the output waiting as one frame).
+pub fn output(
+    seq: u64,
+    mut data: String,
+    last: &mut u64,
+    replay_until: u64,
+    emit: &mut impl FnMut(StreamEvent),
+) {
+    if seq <= *last {
+        return;
+    }
+    let begins = seq.saturating_sub(data.len() as u64);
+    if begins < *last {
+        data.drain(..char_cut(&data, *last - begins));
+    }
+    let begins = seq.saturating_sub(data.len() as u64);
+    *last = seq;
+    if begins < replay_until && replay_until < seq {
+        let cut = char_cut(&data, replay_until - begins);
+        let rest = data.split_off(cut);
+        if !data.is_empty() {
+            emit(StreamEvent::Output {
+                seq: begins + cut as u64,
+                data,
+                replay: true,
+            });
+        }
+        if !rest.is_empty() {
+            emit(StreamEvent::Output {
+                seq,
+                data: rest,
+                replay: false,
+            });
+        }
+        return;
+    }
+    if !data.is_empty() {
+        emit(StreamEvent::Output {
+            seq,
+            data,
+            replay: seq <= replay_until,
+        });
+    }
+}
+
+/// Byte `at` of `data`, or the next character's start when it falls inside one.
+fn char_cut(data: &str, at: u64) -> usize {
+    let mut cut = usize::try_from(at).unwrap_or(usize::MAX).min(data.len());
+    while !data.is_char_boundary(cut) {
+        cut += 1;
+    }
+    cut
 }
 
 /// Follows node `node`'s events (`/node/events`) for as long as the task

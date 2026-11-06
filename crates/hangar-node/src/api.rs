@@ -11,7 +11,11 @@
 //!   {"start"}}` when `from` fell out of the history, the history after it as
 //!   `{"seq", "data"}` frames, then the live ones and `{"exit": {"code"}}`;
 //!   `{"input": "…"}` and `{"resize": {"cols", "rows"}}` frames are taken on
-//!   the same socket;
+//!   the same socket. A client offering the `hangar-binary` subprotocol
+//!   (`Sec-WebSocket-Protocol`; the desktop does, and a node before it picks
+//!   none and sends JSON, which the desktop still reads) gets the output as
+//!   binary frames instead (`panes::binary_frame`); the others stay JSON.
+//!   The output waiting is sent as one frame (`panes::gather`);
 //! - `GET /node/events` (WebSocket): core's events (events.rs);
 //! - `GET /node/fs?path=`: a folder's entries (files.rs);
 //! - `GET /node/chat`, `GET /node/context`, `GET /node/sessions`: the Claude
@@ -47,7 +51,7 @@ use serde_json::{json, Value};
 use subtle::ConstantTimeEq;
 use tokio::sync::broadcast::error::RecvError;
 
-use crate::panes::{Frame, Pane, Panes, Spawn};
+use crate::panes::{Pane, Panes, Spawn, Then};
 use crate::proxy;
 
 pub struct Node {
@@ -384,6 +388,9 @@ struct StreamQuery {
     from: u64,
 }
 
+/// The subprotocol a stream offers for its output in binary frames.
+pub const BINARY_PROTOCOL: &str = "hangar-binary";
+
 async fn stream(
     State(node): State<Shared>,
     Path(id): Path<String>,
@@ -398,11 +405,22 @@ async fn stream(
         Ok(upgrade) => upgrade,
         Err(rejection) => return rejection.into_response(),
     };
-    upgrade.on_upgrade(move |socket| watch(node, id, pane, query.from, socket))
+    let upgrade = upgrade.protocols([BINARY_PROTOCOL]);
+    let binary = upgrade.selected_protocol().is_some();
+    upgrade.on_upgrade(move |socket| watch(node, id, pane, query.from, binary, socket))
 }
 
 fn text(value: Value) -> Message {
     Message::Text(value.to_string().into())
+}
+
+/// Output for a stream, as it asked for it.
+fn output(seq: u64, data: &str, binary: bool) -> Message {
+    if binary {
+        Message::Binary(crate::panes::binary_frame(seq, data).into())
+    } else {
+        text(json!({ "seq": seq, "data": data }))
+    }
 }
 
 /// What a stream is sent from `from` on: the history (a reset first when it
@@ -413,6 +431,7 @@ async fn catch_up(
     socket: &mut WebSocket,
     attached: &crate::panes::Attached,
     mut last: u64,
+    binary: bool,
 ) -> Option<(u64, bool)> {
     if let Some(start) = attached.replay.reset {
         socket
@@ -421,10 +440,7 @@ async fn catch_up(
             .ok()?;
     }
     for (seq, data) in &attached.replay.chunks {
-        socket
-            .send(text(json!({ "seq": seq, "data": data })))
-            .await
-            .ok()?;
+        socket.send(output(*seq, data, binary)).await.ok()?;
         last = *seq;
     }
     if let Some(code) = attached.exit {
@@ -444,9 +460,16 @@ enum Incoming {
     Resize { cols: u16, rows: u16 },
 }
 
-async fn watch(node: Shared, id: String, pane: Arc<Pane>, from: u64, mut socket: WebSocket) {
+async fn watch(
+    node: Shared,
+    id: String,
+    pane: Arc<Pane>,
+    from: u64,
+    binary: bool,
+    mut socket: WebSocket,
+) {
     let mut attached = pane.attach(from);
-    let Some((mut last, ended)) = catch_up(&mut socket, &attached, from).await else {
+    let Some((mut last, ended)) = catch_up(&mut socket, &attached, from, binary).await else {
         return;
     };
     if ended {
@@ -455,32 +478,34 @@ async fn watch(node: Shared, id: String, pane: Arc<Pane>, from: u64, mut socket:
     }
     loop {
         tokio::select! {
-            frame = attached.live.recv() => match frame {
-                Ok(Frame::Output { seq, data }) => {
-                    if seq <= last {
-                        continue;
-                    }
-                    let frame = text(json!({ "seq": seq, "data": &*data }));
-                    if socket.send(frame).await.is_err() {
+            frame = attached.live.recv() => {
+                // With the frames already behind it, as one.
+                let (joined, then) =
+                    crate::panes::gather(frame, &mut attached.live, last, crate::panes::BATCH_BYTES);
+                if let Some((seq, data)) = joined {
+                    if socket.send(output(seq, &data, binary)).await.is_err() {
                         return;
                     }
                     last = seq;
                 }
-                Ok(Frame::Exit { code }) => {
-                    let _ = socket.send(text(json!({ "exit": { "code": code } }))).await;
-                    break;
-                }
-                // Fell behind the live frames: what it missed is still in
-                // the history, unless it fell behind that too.
-                Err(RecvError::Lagged(_)) => {
-                    attached = pane.attach(last);
-                    match catch_up(&mut socket, &attached, last).await {
-                        Some((seq, false)) => last = seq,
-                        Some((_, true)) | None => break,
+                match then {
+                    None => {}
+                    Some(Then::Exit(code)) => {
+                        let _ = socket.send(text(json!({ "exit": { "code": code } }))).await;
+                        break;
                     }
+                    // Fell behind the live frames: what it missed is still in
+                    // the history, unless it fell behind that too.
+                    Some(Then::Lagged) => {
+                        attached = pane.attach(last);
+                        match catch_up(&mut socket, &attached, last, binary).await {
+                            Some((seq, false)) => last = seq,
+                            Some((_, true)) | None => break,
+                        }
+                    }
+                    Some(Then::Closed) => break,
                 }
-                Err(RecvError::Closed) => break,
-            },
+            }
             message = socket.recv() => match message {
                 Some(Ok(Message::Text(raw))) => {
                     let Ok(incoming) = serde_json::from_str::<Incoming>(raw.as_str()) else {

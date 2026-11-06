@@ -118,7 +118,7 @@ fn the_tunnel_forwards_loopback_to_loopback_and_runs_no_command() {
         line(&commands::tunnel(&node(Some("cfg")), 21085, 40123)),
         "ssh | -o | BatchMode=yes | -o | ConnectTimeout=10 | -F | cfg | \
          -o | ExitOnForwardFailure=yes | -o | ServerAliveInterval=15 | -o | ServerAliveCountMax=3 | \
-         -N | -L | 127.0.0.1:21085:127.0.0.1:40123 | me@box"
+         -o | IPQoS=af21 | -o | Compression=no | -N | -L | 127.0.0.1:21085:127.0.0.1:40123 | me@box"
     );
 }
 

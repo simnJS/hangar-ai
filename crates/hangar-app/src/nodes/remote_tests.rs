@@ -8,7 +8,9 @@ use serde_json::{Value, json};
 
 use super::model::{NodeClient, NodeInfo, NodeStatus};
 use super::remote::{self, Backoff, Outgoing, RemoteSpawn, Started, StreamEvent};
-use super::testing::{accept_ws, answer, listen, read_request, read_text, send_text};
+use super::testing::{
+    accept_ws, answer, listen, read_request, read_text, send_output, send_text, server_frame,
+};
 use super::wire::{self, Incoming, client_frame, parse_answer, parse_frame};
 use super::{Conn, Live, State, apply_status};
 
@@ -210,8 +212,9 @@ async fn a_found_shells_history_is_replayed_and_a_reset_says_so() {
         let (mut socket, _) = accept_ws(&listener).await;
         for frame in [
             json!({ "reset": { "start": 4 } }),
-            json!({ "seq": 8, "data": "old" }),
-            json!({ "seq": 12, "data": "new" }),
+            json!({ "seq": 7, "data": "old" }),
+            json!({ "seq": 10, "data": "new" }),
+            json!({ "seq": 13, "data": "now" }),
             json!({ "exit": { "code": null } }),
         ] {
             send_text(&mut socket, &frame.to_string()).await;
@@ -232,10 +235,101 @@ async fn a_found_shells_history_is_replayed_and_a_reset_says_so() {
         *events.lock().unwrap(),
         vec![
             StreamEvent::Reset,
-            output(8, "old", true),
-            output(12, "new", false),
+            output(7, "old", true),
+            output(10, "new", true),
+            output(13, "now", false),
             StreamEvent::Exit
         ]
+    );
+}
+
+/// A stream offers `hangar-binary`; a node that takes it sends its output
+/// as binary frames, many in one read, the rest as JSON. A frame holding
+/// both what the pane printed before it was followed and what came after
+/// (a node joins the output waiting) is split there.
+#[tokio::test]
+async fn binary_output_frames_are_read_and_split_at_the_replay() {
+    let (listener, client) = listen().await;
+    let server = tokio::spawn(async move {
+        let (mut socket, request) = accept_ws(&listener).await;
+        assert!(
+            request
+                .head
+                .contains("Sec-WebSocket-Protocol: hangar-binary"),
+            "{}",
+            request.head
+        );
+        // Bytes 1..=8 in one frame, up to 5 printed before the pane was
+        // followed.
+        send_output(&mut socket, 8, "abcdéfg").await;
+        // A thousand small frames in one write: all read, in order.
+        let mut many = Vec::new();
+        let mut seq = 8;
+        for i in 0..1000 {
+            let data = format!("{}", i % 10);
+            seq += data.len() as u64;
+            let mut payload = seq.to_be_bytes().to_vec();
+            payload.extend_from_slice(data.as_bytes());
+            many.extend(server_frame(0x2, &payload));
+        }
+        use tokio::io::AsyncWriteExt;
+        socket.write_all(&many).await.unwrap();
+        send_text(&mut socket, &json!({ "exit": { "code": 0 } }).to_string()).await;
+    });
+    let (_outgoing, inbox) = tokio::sync::mpsc::unbounded_channel();
+    let (events, emit) = gathered();
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        remote::follow("n".into(), "p".into(), 5, inbox, emit, FAST, move |_| {
+            Some(client.clone())
+        }),
+    )
+    .await
+    .expect("the stream ended");
+    server.await.unwrap();
+    let events = events.lock().unwrap();
+    // Byte 5 is inside the é: the cut goes to the next character.
+    assert_eq!(events[0], output(6, "abcdé", true), "{:?}", &events[..3]);
+    assert_eq!(events[1], output(8, "fg", false));
+    let digits: String = events[2..events.len() - 1]
+        .iter()
+        .map(|event| match event {
+            StreamEvent::Output { data, replay, .. } => {
+                assert!(!replay);
+                data.as_str()
+            }
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(digits.len(), 1000);
+    assert!(digits.starts_with("0123456789012"));
+    assert_eq!(events.last(), Some(&StreamEvent::Exit));
+}
+
+#[test]
+fn a_binary_frame_is_a_seq_then_utf8() {
+    let mut frame = 42u64.to_be_bytes().to_vec();
+    frame.extend_from_slice("é!".as_bytes());
+    assert_eq!(remote::binary_output(frame), Some((42, "é!".into())));
+    assert_eq!(remote::binary_output(vec![0; 7]), None, "too short");
+    let mut broken = 1u64.to_be_bytes().to_vec();
+    broken.push(0xff);
+    assert_eq!(remote::binary_output(broken), None, "not UTF-8");
+}
+
+#[test]
+fn output_drawn_already_is_left_out() {
+    let mut events = Vec::new();
+    let mut emit = |event| events.push(event);
+    let mut last = 0;
+    remote::output(4, "abcd".into(), &mut last, 0, &mut emit);
+    // Sent again whole, and overlapping what was drawn.
+    remote::output(4, "abcd".into(), &mut last, 0, &mut emit);
+    remote::output(7, "cdéf".into(), &mut last, 0, &mut emit);
+    assert_eq!(last, 7);
+    assert_eq!(
+        events,
+        vec![output(4, "abcd", false), output(7, "éf", false)]
     );
 }
 

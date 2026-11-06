@@ -119,8 +119,26 @@ pub async fn accept_ws(listener: &TcpListener) -> (TcpStream, Request) {
 
 /// A text frame as a server sends it: unmasked.
 pub async fn send_text(stream: &mut TcpStream, text: &str) {
-    let payload = text.as_bytes();
-    let mut frame = vec![0x81];
+    stream
+        .write_all(&server_frame(0x1, text.as_bytes()))
+        .await
+        .expect("a frame");
+}
+
+/// A binary frame, as the node sends a pane's output to a stream that
+/// offered `hangar-binary`: the `seq` in 8 bytes, then the data.
+pub async fn send_output(stream: &mut TcpStream, seq: u64, data: &str) {
+    let mut payload = seq.to_be_bytes().to_vec();
+    payload.extend_from_slice(data.as_bytes());
+    stream
+        .write_all(&server_frame(0x2, &payload))
+        .await
+        .expect("a frame");
+}
+
+/// A final, unmasked frame, as a server sends one.
+pub fn server_frame(opcode: u8, payload: &[u8]) -> Vec<u8> {
+    let mut frame = vec![0x80 | opcode];
     if payload.len() < 126 {
         frame.push(payload.len() as u8);
     } else {
@@ -128,7 +146,7 @@ pub async fn send_text(stream: &mut TcpStream, text: &str) {
         frame.extend((payload.len() as u16).to_be_bytes());
     }
     frame.extend_from_slice(payload);
-    stream.write_all(&frame).await.expect("a frame");
+    frame
 }
 
 /// The next text frame the client sent (masked, as a client's must be).

@@ -11,6 +11,7 @@ a dedicated key pair and known_hosts in `.keys/` (gitignored).
 | `ssh.sh <cmd>` | runs a command on the node with the right options |
 | `check.sh [--arm64]` | smoke test: up, `uname -m`, `whoami`, scp round trip, password/root refused, down |
 | `e2e.sh [--no-build] [--keep]` | the whole node flow, end to end, against an isolated debug Hangar (below) |
+| `bench.sh [--runs N] [--samples N] [--lines N] …` | what a remote pane costs: key echo, throughput, the node's memory (below) |
 
 - Image: pinned Debian (dated tag + digest), openssh-server, git, bash, curl,
   ca-certificates, procps; user `hangar`; key auth only, no root login, port 22.
@@ -120,3 +121,46 @@ Files: `e2e.sh` (the steps), `e2e_helper.py` (desktop side, stdlib, run with
 `python3 -I`: control API, MCP calls as a pane, a pane's environment from
 `/proc`), `e2e_node.sh` (copied to the node: its API with `node.json`'s token,
 MCP calls as a pane there).
+
+## Benchmark: `bench.sh`
+
+```
+bash scripts/node-test/bench.sh                    # builds, 3 runs of each measure, medians
+bash scripts/node-test/bench.sh --no-build --runs 5
+bash scripts/node-test/bench.sh --node-bin old/hangar-node --app-bin old/hangar-ai   # a baseline
+HANGAR_BENCH_OUT=after.json bash scripts/node-test/bench.sh   # the medians as JSON too
+```
+
+Same needs and the same isolation as `e2e.sh` (every `HANGAR_*` dropped, its
+own `mktemp -d` data root and endpoint file, its own container and port, the
+app's process group and the container removed on exit). It builds
+`hangar-node` in release, and `hangar-app` in release with debug assertions
+(`target/bench-app/`, a profile of its own): optimized, so what is measured
+is not a debug build's terminal, and with the assertions
+`HANGAR_DEV_NODES_CONNECT` needs. The isolated app has a remote workspace
+(pane `Remote` on node `n1`) and a local one (pane `Local`), both turned into
+a plain `bash --norc` with a fixed prompt. The bench reaches the node's API
+through an SSH tunnel of its own, opened with the app's options.
+
+Measures (each `--runs` times, 3 by default; the report gives the median of
+each number over the runs):
+
+| Measure | What |
+| --- | --- |
+| `local-pty-echo` | a key into a bash on a local PTY (python's `pty`), until it echoes: the floor |
+| `node-echo-ws` | a key sent as an `{"input"}` frame on the pane's stream (what the desktop does), until its echo comes back on it |
+| `node-echo-post` | the same key through `POST /node/panes/{id}/input` |
+| `desktop-echo-local-pane` / `-remote-pane` | `pane_send` of one key (no Enter), `pane_read` polled until the desktop's terminal shows it |
+| `node-flood` | `seq 1 N` on the node's stream alone: seconds to the line after it, data and wire bytes, frames, bytes per frame, resets (output skipped by a stream that fell behind), hangar-node's CPU |
+| `desktop-flood-local-pane` / `-remote-pane` | `seq 1 N` with `pane_send`, `pane_read` polled until the line after it shows; CPU of the app, of hangar-node and of the app's ssh tunnel over it |
+| `node-rest-1-pane` / `-8-panes` | 10 s of nothing: hangar-node's RSS, threads and CPU (the desktop attached, its one pane, then 7 more spawned through the API), and the app's |
+
+Echo samples: `--samples` keys (200), median, p95, min and max per run; a
+line is cleared with ctrl+c every 30 keys. `--lines` (2000000) for the
+floods. CPU is `/proc/<pid>/stat`'s user + system time over the measure's
+wall time (100 % is one core). Docker's loopback has no network latency:
+what is measured is what Hangar adds, not the link.
+
+Files: `bench.sh` (the run), `bench_helper.py` (stdlib, `python3 -I`: the
+node's API and the control API, a WebSocket client, a local PTY, the report).
+
