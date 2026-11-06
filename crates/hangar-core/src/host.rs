@@ -37,6 +37,10 @@ const BUS_CAPACITY: usize = 1024;
 
 /// Everything the backend told the window, by the name the window listened
 /// to (`Event::name`).
+///
+/// The dictation's, Hangar Mobile's share and the notification's click carry
+/// types of modules only the `desktop` feature compiles, and exist with it
+/// only: nothing else could send them.
 #[derive(Debug, Clone)]
 pub enum Event {
     /// `board:changed`: a board was written by an agent or a worker; the
@@ -56,16 +60,21 @@ pub enum Event {
     /// `bridge:queue`: what is queued for a pane, after it changed.
     BridgeQueue(crate::bridge::QueueChanged),
     /// `voice:phase`: the dictation's state.
+    #[cfg(feature = "desktop")]
     VoicePhase(crate::voice::Phase),
     /// `voice:text`: what was said, for the pane that has the focus.
+    #[cfg(feature = "desktop")]
     VoiceText(crate::voice::Transcript),
     /// `voice:level`: the microphone's level, while recording.
+    #[cfg(feature = "desktop")]
     VoiceLevel(crate::voice::Level),
     /// `voice:download`: a local model's download, as it goes.
+    #[cfg(feature = "desktop")]
     VoiceDownload(crate::voice::models::Progress),
     /// `remote:changed`: a phone was paired or revoked.
     RemoteChanged,
     /// `remote:shared`: a file was shared with the phones.
+    #[cfg(feature = "desktop")]
     RemoteShared(crate::remote::Share),
     /// `kits:changed`: the list `kits_list` returns may have changed.
     KitsChanged,
@@ -77,6 +86,7 @@ pub enum Event {
     /// `notification-activated`: the person clicked a notification that names
     /// a pane (Windows; notify.rs). The window brings itself, or the
     /// workspace's own window, forward and reveals the pane.
+    #[cfg(feature = "desktop")]
     NotificationActivated(crate::notify::Activated),
 }
 
@@ -91,15 +101,21 @@ impl Event {
             Event::ControlInternal(_) => "control:internal",
             Event::BridgeEvent { .. } => "bridge:event",
             Event::BridgeQueue(_) => "bridge:queue",
+            #[cfg(feature = "desktop")]
             Event::VoicePhase(_) => "voice:phase",
+            #[cfg(feature = "desktop")]
             Event::VoiceText(_) => "voice:text",
+            #[cfg(feature = "desktop")]
             Event::VoiceLevel(_) => "voice:level",
+            #[cfg(feature = "desktop")]
             Event::VoiceDownload(_) => "voice:download",
             Event::RemoteChanged => "remote:changed",
+            #[cfg(feature = "desktop")]
             Event::RemoteShared(_) => "remote:shared",
             Event::KitsChanged => "kits:changed",
             Event::AccountsChanged => "accounts:changed",
             Event::GitCloneProgress(_) => "git-clone:progress",
+            #[cfg(feature = "desktop")]
             Event::NotificationActivated(_) => "notification-activated",
         }
     }

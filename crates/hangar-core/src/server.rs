@@ -25,6 +25,9 @@ use crate::memory::{self, MemoryPatch, NewMemory};
 pub struct Reach {
     pub host: Host,
     pub pty: Arc<crate::pty::PtyManager>,
+    /// Hangar Mobile is the desktop's only (`desktop` feature): a headless
+    /// node answers an agent's shares that there is no phone to share with.
+    #[cfg(feature = "desktop")]
     pub remote: Option<Arc<crate::remote::Remote>>,
 }
 
@@ -34,6 +37,7 @@ pub struct ApiState {
     pub store: &'static BoardStore,
     tokens: Arc<Tokens>,
     pub host: Host,
+    #[cfg(feature = "desktop")]
     pub remote: Option<Arc<crate::remote::Remote>>,
 }
 
@@ -912,6 +916,8 @@ fn kit_tab_router(route: KitTabRoute) -> Router {
 // ---------------------------------------------------------------------------
 
 #[derive(Deserialize)]
+// Only the desktop build reads past the path: a headless one refuses the share.
+#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
 struct PhoneShareBody {
     path: String,
     caption: Option<String>,
@@ -934,6 +940,11 @@ async fn phone_share(
     if body.path.trim().is_empty() {
         return Err(bad(StatusCode::BAD_REQUEST, "missing 'path'"));
     }
+    share_with_phones(&state, body, q.cwd).await
+}
+
+#[cfg(feature = "desktop")]
+async fn share_with_phones(state: &ApiState, body: PhoneShareBody, workspace: String) -> ApiResult {
     let remote = state.remote.as_ref().ok_or_else(|| {
         bad(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -944,12 +955,22 @@ async fn phone_share(
         .share(crate::remote::NewShare {
             source: std::path::PathBuf::from(body.path),
             caption: body.caption,
-            workspace: q.cwd,
+            workspace,
             pane: body.pane_name,
         })
         .await
         .map_err(|err| bad(StatusCode::BAD_REQUEST, err))?;
     Ok(Json(json!({ "shared": share })))
+}
+
+/// A headless build has no Hangar Mobile: the route stays, so an agent's MCP
+/// tool gets an answer that says why rather than a 404.
+#[cfg(not(feature = "desktop"))]
+async fn share_with_phones(_: &ApiState, _: PhoneShareBody, _: String) -> ApiResult {
+    Err(bad(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "Hangar Mobile is not part of this build",
+    ))
 }
 
 async fn health() -> impl IntoResponse {
@@ -961,7 +982,10 @@ async fn health() -> impl IntoResponse {
 /// (`Caller::App`); the panes' tokens come from `pane_tokens`, and the one for
 /// other processes is `outside_token`.
 pub async fn start(reach: Reach, store: &'static BoardStore, token: String) -> Result<u16, String> {
+    #[cfg(feature = "desktop")]
     let Reach { host, pty, remote } = reach;
+    #[cfg(not(feature = "desktop"))]
+    let Reach { host, pty } = reach;
     let tokens = Arc::new(Tokens {
         app: token,
         outside: outside_token(),
@@ -982,6 +1006,7 @@ pub async fn start(reach: Reach, store: &'static BoardStore, token: String) -> R
         store,
         tokens,
         host,
+        #[cfg(feature = "desktop")]
         remote,
     });
     let router = router(state, kit_tabs);
@@ -1230,6 +1255,7 @@ mod tests {
             store,
             tokens: tokens.clone(),
             host: host.clone(),
+            #[cfg(feature = "desktop")]
             remote: None,
         });
         let kit_tabs = KitTabRoute {
