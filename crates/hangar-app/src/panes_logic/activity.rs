@@ -12,10 +12,10 @@
 //! and are ignored, while a real turn produces seconds of it.
 //!
 //! The watcher owns no timer and reads no clock. Output is reported with
-//! `push(now)`, and while `is_ticking()` the host calls `poll(now, idle_ms)`
-//! about every `TICK_MS`; `poll` runs every check that came due since the
-//! last call, each at its own moment, so a host that is late gets the answer
-//! the timers of the web app would have given.
+//! `push(now)`, and the host calls `poll(now, idle_ms)` once `next_check()`
+//! comes due (every `TICK_MS` during a burst); `poll` runs every check that
+//! came due since the last call, each at its own moment, so a host that is
+//! late gets the answer the timers of the web app would have given.
 
 use super::EpochMs;
 
@@ -52,8 +52,15 @@ pub struct ActivityWatcher {
 impl ActivityWatcher {
     /// Whether a burst is being followed, and so whether the host has to
     /// call `poll` every `TICK_MS`. False means no timer needs to run.
+    #[cfg(test)]
     pub fn is_ticking(&self) -> bool {
         self.next_tick.is_some()
+    }
+
+    /// When `poll` next has a check to run (`None`: no burst is followed), so
+    /// that the host can sleep until then rather than tick.
+    pub fn next_check(&self) -> Option<EpochMs> {
+        self.next_tick
     }
 
     /// The burst followed, from its first byte to its last.

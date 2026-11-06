@@ -1075,3 +1075,191 @@ fn a_session_no_pane_holds_any_more_is_released_and_one_still_held_is_not() {
     assert!(claims.contains("s-p2"));
     assert!(!claims.contains("s-gone"));
 }
+
+// ---- The timers sleep until a job is due -------------------------------------
+
+/// The polls just done, so that what is due next is what the test sets up.
+fn polled_at(now: EpochMs) -> State {
+    State {
+        last_context_poll: now,
+        last_branch_poll: now,
+        ..State::default()
+    }
+}
+
+/// A shell and a Claude Code with the mod, both running and quiet.
+fn at_rest() -> Model {
+    let (mut m, _) = model(vec![workspace(
+        "w1",
+        vec![
+            pane("sh", "sh", AgentId::Shell),
+            pane("p1", "Ava", AgentId::Claude),
+        ],
+    )]);
+    for id in ["sh", "p1"] {
+        m.live
+            .panes_logic
+            .status
+            .insert(id.into(), PaneStatus::Running);
+    }
+    bridge(
+        &mut m,
+        "p1",
+        json!({"kind": "hello", "sessionId": "s-p1", "model": "claude-opus-5", "version": "2.1"}),
+        NOW,
+    );
+    m
+}
+
+#[test]
+fn panes_at_rest_wake_the_window_for_their_branch_alone() {
+    let m = at_rest();
+    let st = polled_at(NOW);
+    // Nothing prints: no check of a burst, no trust look.
+    assert_eq!(next_tick_at(&m), None);
+    // No mark, no hunt after output, no gauge to read: the branches' refresh
+    // is the one job left, 45 s away, where `Slow` used to tick every 1.5 s.
+    assert_eq!(next_slow_at(&st, &m), Some(NOW + PANE_BRANCH_REFRESH_MS));
+    // Without a pane mounted, nothing at all.
+    let st = State::default();
+    assert_eq!(next_slow_at(&st, &Model::default()), None);
+    assert_eq!(next_tick_at(&Model::default()), None);
+}
+
+#[test]
+fn output_arms_the_tick_for_the_bursts_next_check_and_rest_disarms_it() {
+    let (mut m, _) = model(vec![workspace(
+        "w1",
+        vec![pane("sh", "sh", AgentId::Shell)],
+    )]);
+    let live = &mut m.live.panes_logic;
+    live.note_printed("sh", NOW, NOW + 10);
+    // The first check of the burst comes before the trust look.
+    assert_eq!(next_tick_at(&m), Some(NOW + activity::TICK_MS));
+    // A short burst falls silent: the watcher stops, the trust look is left,
+    // then nothing once it is done.
+    let later = NOW + 5_000;
+    let (info, amb) = inputs(&m, "sh", later).expect("a mounted pane");
+    let live = &mut m.live.panes_logic;
+    live.poll_pane(&info, 1000, &amb);
+    assert_eq!(next_tick_at(&m), Some(NOW + 10 + pane_agent::TRUST_LOOK_MS));
+    let live = &mut m.live.panes_logic;
+    assert!(live.trust_look_due("sh", later));
+    live.look_for_trust_question(&info, "", &amb);
+    assert_eq!(next_tick_at(&m), None);
+}
+
+#[test]
+fn a_bridged_panes_trust_look_keeps_no_timer_running() {
+    let mut m = at_rest();
+    // Printed while it had no mod yet: the look is set, but never due.
+    let machine = m.live.panes_logic.machines.get_mut("p1").unwrap();
+    machine.trust_look_at = Some(NOW);
+    assert_eq!(next_tick_at(&m), None);
+}
+
+#[test]
+fn the_hunt_wakes_slow_only_after_output_and_on_its_cadence() {
+    let mut m = at_rest();
+    let st = polled_at(NOW);
+    let watch = SessionWatch::new("/work/w1".into(), HashSet::new(), NOW);
+    m.live.panes_logic.watches.insert("sh".into(), watch);
+    // Its round is due at NOW + HUNT_MS, but would do nothing: not a wake.
+    assert_eq!(next_slow_at(&st, &m), Some(NOW + PANE_BRANCH_REFRESH_MS));
+    // Output long after: the round comes on the slot it would have had if
+    // every round in between had been passed, not right away.
+    let printed = NOW + session_watch::HUNT_MS * 4 + 100;
+    m.live.panes_logic.note_printed("sh", printed, printed);
+    assert_eq!(
+        next_slow_at(&st, &m),
+        Some(NOW + session_watch::HUNT_MS * 5)
+    );
+}
+
+#[test]
+fn an_overlap_mark_wakes_slow_when_it_wears_off() {
+    // No pane mounted here, so that the mark is the one job.
+    let mut m = Model::default();
+    let mut st = polled_at(NOW);
+    m.live.panes_logic.agents.flag_overlap("p1", "Bob", NOW);
+    assert_eq!(next_slow_at(&st, &m), Some(NOW + OVERLAP_SHOWN_MS));
+    // Due, it goes, and nothing is left to wake for.
+    let _ = slow(&mut st, &mut m, NOW + OVERLAP_SHOWN_MS);
+    assert_eq!(m.live.panes_logic.agents.conflict("p1"), None);
+    assert_eq!(next_slow_at(&st, &m), None);
+}
+
+#[test]
+fn a_gauge_to_read_or_to_clear_wakes_slow_for_the_context_poll() {
+    let (mut m, _) = without_the_mod_running();
+    let st = polled_at(NOW);
+    // An agent without the mod, shown and running: its transcript is read.
+    assert_eq!(next_slow_at(&st, &m), Some(NOW + CONTEXT_POLL_MS));
+    // Its shell gone, there is nothing to read.
+    m.live
+        .panes_logic
+        .status
+        .insert("p1".into(), PaneStatus::Exited);
+    assert_eq!(next_slow_at(&st, &m), Some(NOW + PANE_BRANCH_REFRESH_MS));
+    // A pane with no session that still shows a gauge: one clear is due.
+    let mut state = m.state().clone();
+    state.workspaces[0].panes[0].session_id = None;
+    m.hydrate(state);
+    let gauge = compute_context_gauge(&hangar_core::context::ContextUsage {
+        used_tokens: 50_000,
+        model: Some("claude-opus-5-5".into()),
+    });
+    assert!(gauge.is_some());
+    m.live.panes_logic.set_transcript_context("p1", gauge);
+    assert_eq!(next_slow_at(&st, &m), Some(NOW + CONTEXT_POLL_MS));
+    let mut st = st;
+    let _ = slow(&mut st, &mut m, NOW + CONTEXT_POLL_MS);
+    assert!(!m.live.panes_logic.has_transcript_context("p1"));
+    assert_eq!(next_slow_at(&st, &m), Some(NOW + PANE_BRANCH_REFRESH_MS));
+}
+
+/// An agent pane whose Claude Code has no mod, running in the workspace on
+/// screen.
+fn without_the_mod_running() -> (Model, window::Id) {
+    let (mut m, main) = one_claude();
+    bridge_off(&mut m);
+    m.live
+        .panes_logic
+        .status
+        .insert("p1".into(), PaneStatus::Running);
+    (m, main)
+}
+
+#[tokio::test]
+async fn a_wake_fires_at_its_deadline() {
+    use iced::futures::StreamExt;
+    let start = std::time::Instant::now();
+    let at = wall_clock_ms() + 120;
+    let mut stream = Box::pin(wake_stream(at, Wake::Slow));
+    let first = stream.next().await;
+    let waited = start.elapsed();
+    assert!(matches!(first, Some(Message::PanesLogic(Msg::Slow))));
+    assert!(waited >= Duration::from_millis(110), "{waited:?}");
+    assert!(waited < Duration::from_millis(1000), "{waited:?}");
+    // A deadline already passed fires at once.
+    let start = std::time::Instant::now();
+    let mut late = Box::pin(wake_stream(wall_clock_ms() - 5_000, Wake::Tick));
+    assert!(matches!(
+        late.next().await,
+        Some(Message::PanesLogic(Msg::Tick))
+    ));
+    assert!(start.elapsed() < Duration::from_millis(100));
+}
+
+#[test]
+fn the_subscription_holds_a_timer_only_for_a_job_due() {
+    let mut m = at_rest();
+    let mut state = m.state().clone();
+    state.settings.hibernate_idle = false;
+    m.hydrate(state);
+    let st = polled_at(NOW);
+    // The focus listener and the branches' wake.
+    assert_eq!(subscription(&st, &m).units(), 2);
+    m.live.panes_logic.note_printed("sh", NOW, NOW);
+    assert_eq!(subscription(&st, &m).units(), 3);
+}

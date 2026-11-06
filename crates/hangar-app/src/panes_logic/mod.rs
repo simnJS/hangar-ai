@@ -1423,7 +1423,10 @@ fn screen_of(access: &dyn crate::services::TerminalAccess, pane: &PaneId) -> Str
 /// How often the transcripts' context is read.
 const CONTEXT_POLL_MS: u64 = 5000;
 
-/// What happens every second and a half while panes are mounted: the overlap
+/// The cadence `Slow` had when it ticked.
+const SLOW_MS: u64 = 1500;
+
+/// What happens when one of its jobs is due (`next_slow_at`): the overlap
 /// marks wear off, the session hunt takes a round, the transcripts' context
 /// and the branches are read when it is time.
 fn slow(st: &mut State, m: &mut Model, now: EpochMs) -> Task<Message> {
@@ -1487,33 +1490,17 @@ fn slow(st: &mut State, m: &mut Model, now: EpochMs) -> Task<Message> {
         st.last_context_poll = now;
         let mut reads = Vec::new();
         let mut clears = Vec::new();
-        let live = &m.live.panes_logic;
         for ws in &m.state().workspaces {
             for pane in &ws.panes {
-                let Some(machine) = live.machines.get(&pane.id) else {
-                    continue;
-                };
-                if machine.bridged {
-                    continue;
-                }
-                let session = pane.session_id.clone().filter(|id| !id.is_empty());
-                match session {
-                    Some(session) if is_resumable(pane.agent) => {
-                        if attended_workspace(m, ws)
-                            && live.pane_status(&pane.id) == Some(PaneStatus::Running)
-                        {
-                            reads.push((
-                                pane.id.clone(),
-                                session,
-                                folder_of(ws, pane),
-                                crate::nodes::away::node_of(ws, pane),
-                            ));
-                        }
-                    }
-                    // A shell keeps no transcript, and before a session is
-                    // captured there is nothing to read: no gauge beats a
-                    // made-up zero.
-                    _ => clears.push(pane.id.clone()),
+                match context_job(m, ws, pane) {
+                    Some(ContextJob::Read(session)) => reads.push((
+                        pane.id.clone(),
+                        session,
+                        folder_of(ws, pane),
+                        crate::nodes::away::node_of(ws, pane),
+                    )),
+                    Some(ContextJob::Clear) => clears.push(pane.id.clone()),
+                    None => {}
                 }
             }
         }
@@ -1554,6 +1541,73 @@ fn slow(st: &mut State, m: &mut Model, now: EpochMs) -> Task<Message> {
         }
     }
     Task::batch(tasks)
+}
+
+/// What the context poll has to do for a pane.
+enum ContextJob {
+    /// Read the gauge from this session's transcript.
+    Read(String),
+    /// Take away a gauge read before.
+    Clear,
+}
+
+/// The context poll's job for a pane, if it has one: a read while the pane is
+/// shown, its shell alive and the mod silent (a pane that goes hidden keeps
+/// its last honest reading), a clear when nothing can be read and a gauge is
+/// still shown.
+fn context_job(m: &Model, ws: &Workspace, pane: &Pane) -> Option<ContextJob> {
+    let live = &m.live.panes_logic;
+    let machine = live.machines.get(&pane.id)?;
+    if machine.bridged {
+        return None;
+    }
+    let session = pane.session_id.clone().filter(|id| !id.is_empty());
+    match session {
+        Some(session) if is_resumable(pane.agent) => (attended_workspace(m, ws)
+            && live.pane_status(&pane.id) == Some(PaneStatus::Running))
+        .then_some(ContextJob::Read(session)),
+        // A shell keeps no transcript, and before a session is captured
+        // there is nothing to read: no gauge beats a made-up zero.
+        _ => live
+            .has_transcript_context(&pane.id)
+            .then_some(ContextJob::Clear),
+    }
+}
+
+/// When `Tick` has something to do: the soonest check of a burst or look
+/// for the trust question (`None`: no pane is printing).
+fn next_tick_at(m: &Model) -> Option<EpochMs> {
+    m.live.panes_logic.next_check()
+}
+
+/// When `Slow` has something to do, the soonest of its jobs: an overlap mark
+/// that wears off, a hunt round after output, the context poll while a pane
+/// has a gauge to read or clear, the branches while a pane is mounted.
+/// `None`: nothing at all, and the window sleeps.
+fn next_slow_at(st: &State, m: &Model) -> Option<EpochMs> {
+    let live = &m.live.panes_logic;
+    let marks = live.agents.next_expiry();
+    let hunt = live
+        .watches
+        .values()
+        .filter_map(SessionWatch::wake_at)
+        .min();
+    let context = m
+        .state()
+        .workspaces
+        .iter()
+        .any(|ws| {
+            ws.panes
+                .iter()
+                .any(|pane| context_job(m, ws, pane).is_some())
+        })
+        .then_some(st.last_context_poll + CONTEXT_POLL_MS);
+    let branches = live
+        .machines
+        .keys()
+        .any(|pane| live.is_pane_mounted(pane))
+        .then_some(st.last_branch_poll + PANE_BRANCH_REFRESH_MS);
+    [marks, hunt, context, branches].into_iter().flatten().min()
 }
 
 /// Whether the workspace's panes are drawn at all (`visible` of TerminalPane
@@ -1622,25 +1676,21 @@ fn hibernate_tick(st: &mut State, m: &mut Model, sv: &Services, now: EpochMs) ->
 }
 
 pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
-    let _ = st;
-    let live = &m.live.panes_logic;
     let mut subscriptions = vec![iced::event::listen_with(window_focus)];
-    let watching = live
-        .machines
-        .values()
-        .any(|machine| machine.watcher.is_ticking() || machine.trust_look_at.is_some());
+    // iced draws the window again after every message: the timers sleep
+    // until a job is due, rather than tick to find out there is none.
     // The tick is also when the panes off screen are looked at, while one of
     // them prints (`panes::look_off_screen`, called before the tick).
-    if watching || m.live.panes.looking_off_screen() {
+    if m.live.panes.looking_off_screen() {
         subscriptions.push(
             iced::time::every(Duration::from_millis(activity::TICK_MS))
                 .map(|_| Message::PanesLogic(Msg::Tick)),
         );
+    } else if let Some(at) = next_tick_at(m) {
+        subscriptions.push(wake_at(at, Wake::Tick));
     }
-    if !live.machines.is_empty() || live.agents.has_conflicts() {
-        subscriptions.push(
-            iced::time::every(Duration::from_millis(1500)).map(|_| Message::PanesLogic(Msg::Slow)),
-        );
+    if let Some(at) = next_slow_at(st, m) {
+        subscriptions.push(wake_at(at, Wake::Slow));
     }
     if m.live.hydrated && m.settings().hibernate_idle {
         subscriptions.push(
@@ -1649,6 +1699,47 @@ pub fn subscription(st: &State, m: &Model) -> Subscription<Message> {
         );
     }
     Subscription::batch(subscriptions)
+}
+
+/// The timers that sleep until their job is due.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Wake {
+    Tick,
+    Slow,
+}
+
+impl Wake {
+    fn message(self) -> Message {
+        Message::PanesLogic(match self {
+            Wake::Tick => Msg::Tick,
+            Wake::Slow => Msg::Slow,
+        })
+    }
+
+    /// How often it fires again if the deadline it fired for does not move,
+    /// which no job allows but which must not stop the timer: the period of
+    /// the old ticker.
+    fn period_ms(self) -> u64 {
+        match self {
+            Wake::Tick => activity::TICK_MS,
+            Wake::Slow => SLOW_MS,
+        }
+    }
+}
+
+/// A timer that fires once at `at` (wall clock), then every `period_ms`
+/// until the deadline moves: a new deadline is a new subscription, which
+/// iced starts in place of this one.
+fn wake_at(at: EpochMs, wake: Wake) -> Subscription<Message> {
+    Subscription::run_with((at, wake), |&(at, wake)| wake_stream(at, wake))
+}
+
+fn wake_stream(at: EpochMs, wake: Wake) -> impl iced::futures::Stream<Item = Message> {
+    let first = Duration::from_millis(at.saturating_sub(wall_clock_ms()));
+    iced::futures::stream::unfold(first, move |delay| async move {
+        tokio::time::sleep(delay).await;
+        Some((wake.message(), Duration::from_millis(wake.period_ms())))
+    })
 }
 
 /// Which window of the app has the system's focus (`document.hasFocus()`).

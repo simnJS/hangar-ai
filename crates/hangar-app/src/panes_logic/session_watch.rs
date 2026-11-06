@@ -79,9 +79,27 @@ impl SessionWatch {
         }
     }
 
-    /// The pane printed something.
-    pub fn note_output(&mut self) {
+    /// The pane printed something, at `now`. A pane at rest has nobody to
+    /// wake it for its rounds (they would only schedule the next one), so the
+    /// round it is owed is put back on its cadence: the first slot after the
+    /// output, as if every round in between had been passed.
+    pub fn note_output(&mut self, now: EpochMs) {
+        if !self.printed
+            && let Some(at) = self.next_at
+            && at < now
+        {
+            let slots = (now - at).div_ceil(self.interval_ms);
+            self.next_at = Some(at + slots * self.interval_ms);
+        }
         self.printed = true;
+    }
+
+    /// When a round with something to do comes due: only after output, since
+    /// a round that follows none just schedules the next one (`begin_round`,
+    /// `skip_round`). `None`: nothing to look for until the pane prints, or a
+    /// look is in flight.
+    pub fn wake_at(&self) -> Option<EpochMs> {
+        self.next_at.filter(|_| self.printed)
     }
 
     pub fn due(&self, now: EpochMs) -> bool {
@@ -171,7 +189,7 @@ mod tests {
         assert!(!watch.due(HUNT_MS - 1));
         assert!(watch.due(HUNT_MS));
 
-        watch.note_output();
+        watch.note_output(HUNT_MS);
         assert!(watch.begin_round(HUNT_MS));
         // In flight: not due again until the answer is in.
         assert!(!watch.due(HUNT_MS * 10));
@@ -185,12 +203,12 @@ mod tests {
     fn keeps_hunting_briskly_while_it_finds_nothing() {
         let mut claims = Claims::default();
         let mut watch = watch(&[]);
-        watch.note_output();
+        watch.note_output(HUNT_MS);
         assert!(watch.begin_round(HUNT_MS));
         assert_eq!(watch.round_done(Some(&[]), HUNT_MS, &mut claims), None);
         assert!(watch.due(HUNT_MS * 2));
         // A listing that failed reads as nothing found.
-        watch.note_output();
+        watch.note_output(HUNT_MS * 2);
         assert!(watch.begin_round(HUNT_MS * 2));
         assert_eq!(watch.round_done(None, HUNT_MS * 2, &mut claims), None);
         assert!(watch.due(HUNT_MS * 3));
@@ -203,7 +221,7 @@ mod tests {
         assert!(!watch.due(HUNT_MS * 2 - 1));
         assert!(watch.due(HUNT_MS * 2));
         // Output counts for one round only.
-        watch.note_output();
+        watch.note_output(HUNT_MS * 2);
         assert!(watch.begin_round(HUNT_MS * 2));
         let mut claims = Claims::default();
         watch.round_done(Some(&[]), HUNT_MS * 2, &mut claims);
@@ -215,7 +233,7 @@ mod tests {
         let mut claims = Claims::default();
         claims.claim("taken");
         let mut watch = watch(&["old"]);
-        watch.note_output();
+        watch.note_output(HUNT_MS);
         watch.begin_round(HUNT_MS);
         let now = 100_000;
         let sessions = [
@@ -234,12 +252,12 @@ mod tests {
     fn does_not_adopt_a_transcript_that_is_not_warm() {
         let mut claims = Claims::default();
         let mut watch = watch(&[]);
-        watch.note_output();
+        watch.note_output(HUNT_MS);
         watch.begin_round(HUNT_MS);
         let now = 100_000;
         let cold = [session("cold", now - FRESH_MS)];
         assert_eq!(watch.round_done(Some(&cold), now, &mut claims), None);
-        watch.note_output();
+        watch.note_output(now + HUNT_MS);
         watch.begin_round(now + HUNT_MS);
         let warm = [session("warm", now - FRESH_MS + 1 + HUNT_MS)];
         assert_eq!(
@@ -256,7 +274,7 @@ mod tests {
         let mut claims = Claims::default();
         let mut watch = watch(&[]);
         let mut now = HUNT_MS;
-        watch.note_output();
+        watch.note_output(now);
         watch.begin_round(now);
         assert_eq!(
             watch
@@ -266,7 +284,7 @@ mod tests {
         );
 
         now += FOLLOW_MS;
-        watch.note_output();
+        watch.note_output(now);
         assert!(watch.begin_round(now));
         // The first is known now: only the second stands out.
         let both = [session("two", now - 10), session("one", now - 20)];
@@ -282,7 +300,7 @@ mod tests {
         let mut watch = watch(&["resumed"]);
         let mut now = HUNT_MS;
         for round in 1..=EMPTY_ROUNDS_BEFORE_FOLLOW {
-            watch.note_output();
+            watch.note_output(now);
             assert!(watch.begin_round(now));
             let only_known = [session("resumed", now - 10)];
             assert_eq!(watch.round_done(Some(&only_known), now, &mut claims), None);
@@ -298,7 +316,7 @@ mod tests {
     #[test]
     fn a_skipped_round_claims_nothing_and_is_rescheduled() {
         let mut watch = watch(&[]);
-        watch.note_output();
+        watch.note_output(HUNT_MS);
         watch.skip_round(HUNT_MS);
         // The output was spent on the skipped round; the next one is on time.
         assert!(!watch.due(HUNT_MS + HUNT_MS - 1));
