@@ -19,7 +19,7 @@ Every release, with its installers, is on the
 
 ### Changed
 
-- Released builds use link-time optimization across the whole program: Hangar's executable is a third smaller (119 → 79 MB, hangar-node 17 → 10 MB) and parses terminal output a few percent faster.
+- Released builds use link-time optimization across the whole program, rarely used code is built for size and unused image codecs are left out: Hangar's executable is 44 % smaller (119 → 67 MB, hangar-node 17 → 10 MB) and parses terminal output a few percent faster. TIFF and ICO images no longer show in kit tabs.
 - Output from panes that are not on screen no longer makes Hangar rebuild and redraw its window 60 times a second: with eight agents printing, Hangar's CPU falls from 8.1 % to 2.9 % in the chat view and from 6.4 % to 5.8 % in the panes view.
 - On relaunch, the next wave of resumed sessions starts as soon as the previous one is under way (its agent printed and went quiet) instead of a fixed 2 s later: eight sessions in the chat view are all back in 3.2 s instead of 9.1 s. Agents that keep printing still hold the next wave as long as before.
 - The login shell's PATH is read from the first instant of the launch, beside the window's start: with a slow shell profile (0.35 s), the first prompt comes about 90 ms sooner.
