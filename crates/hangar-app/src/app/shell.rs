@@ -724,6 +724,16 @@ impl App {
         if panels.dock.drawer {
             return self.toggle_drawer(w, Drawer::Dock);
         }
+        // The chat view has no dock: the toggle does nothing there, rather
+        // than flip a setting the person cannot see.
+        if !panels.dock.shown
+            && self
+                .model
+                .window_workspace(w)
+                .is_some_and(|ws| crate::chat_view::shown(&self.model, ws))
+        {
+            return Task::none();
+        }
         let closing = self.model.settings().board_dock_open;
         self.update_settings(|s| s.board_dock_open = !s.board_dock_open);
         if closing {
