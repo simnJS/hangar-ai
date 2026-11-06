@@ -934,8 +934,11 @@ fn success_content(mut value: Value) -> Value {
     ])
 }
 
+/// The result as the model reads it: compact JSON. Indenting it is for a
+/// person, and the model pays for every space and line of it — 14% of the
+/// bytes of a board, 30 lines per task (board/bench.rs measured it).
 fn text_block(value: &Value) -> Value {
-    json!({ "type": "text", "text": serde_json::to_string_pretty(value).unwrap_or_default() })
+    json!({ "type": "text", "text": serde_json::to_string(value).unwrap_or_default() })
 }
 
 /// An optional text argument: trimmed, and absent when empty. A model that
@@ -1355,6 +1358,13 @@ mod tests {
             Some(("http://127.0.0.1:2".into(), "kit".into()))
         );
         assert_eq!(pane_endpoint(env(&[("HANGAR_BRIDGE_TOKEN", "pane")])), None);
+    }
+
+    /// The model pays for every character of a result: no indentation.
+    #[test]
+    fn a_result_reaches_the_model_as_compact_json() {
+        let content = success_content(json!({ "tasks": [{ "id": "a", "title": "t" }] }));
+        assert_eq!(content[0]["text"], r#"{"tasks":[{"id":"a","title":"t"}]}"#);
     }
 
     fn tool(name: &str) -> Value {

@@ -435,3 +435,30 @@ mod letters {
         assert_eq!(status_mark("R"), "R");
     }
 }
+
+/// What reading a diff at the size `git_file_diff` stops at costs the
+/// thread it runs on.
+#[test]
+#[ignore = "a benchmark: run it in release with --ignored --nocapture"]
+fn bench_reading_the_biggest_diff() {
+    let mut text =
+        String::from("diff --git a/x.js b/x.js\n--- a/x.js\n+++ b/x.js\n@@ -1,4000 +1,4000 @@\n");
+    while text.len() < 512 * 1024 {
+        text.push_str("-\tconst value = function (a, b) { return a + b; };\n");
+        text.push_str("+\tconst value = fn_ (a, b) { return a + b; };\n");
+    }
+    let diff = FileDiff {
+        text,
+        binary: false,
+        truncated: true,
+    };
+    let mut took = Vec::new();
+    for _ in 0..9 {
+        let started = std::time::Instant::now();
+        let shown = Shown::of(&diff);
+        took.push(started.elapsed());
+        assert!(shown.has_lines());
+    }
+    took.sort();
+    println!("Shown::of on 512 KiB: median {:?}", took[4]);
+}
