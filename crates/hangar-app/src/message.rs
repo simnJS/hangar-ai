@@ -15,10 +15,10 @@ use crate::services::{CoreEvent, PreviewRequest};
 use crate::shell::{CloseReason, Notice, Notification, Overlay, Region, SettingsCategory, View};
 use crate::state::{PaneId, PanePatch, SplitDir, StoreAction, WsId};
 use crate::{
-    accounts, board, consent_card, control, git_flow, git_ui, inspector, keymap, kit_tabs, kits,
-    mcp, memory, mobile, model3d_view, navigator, needs_you, orchestration, orchestration_ui,
-    palette, pane_menu, panes, panes_logic, preview, saved_commands, session_picker, settings,
-    stats, status_bar, toolbar, update_banner, voice, workspace_dialog,
+    accounts, board, chat_view, consent_card, control, git_flow, git_ui, inspector, keymap,
+    kit_tabs, kits, mcp, memory, mobile, model3d_view, navigator, needs_you, orchestration,
+    orchestration_ui, palette, pane_menu, panes, panes_logic, preview, saved_commands,
+    session_picker, settings, stats, status_bar, toolbar, update_banner, voice, workspace_dialog,
 };
 
 #[derive(Debug, Clone)]
@@ -85,6 +85,7 @@ pub enum Message {
     Control(control::Msg),
     Orchestration(orchestration::Msg),
     Mobile(mobile::Msg),
+    ChatView(chat_view::Msg),
 }
 
 /// Every cross-package request found in the inventory. The shell handles its

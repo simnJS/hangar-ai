@@ -40,6 +40,12 @@ pub enum Target {
         kit: String,
         tab: String,
     },
+    /// The workspace shown as the chat view (`on`) or as its panes, while
+    /// the `chat-view` experiment is on (`chat_view`).
+    ChatView {
+        ws: WsId,
+        on: bool,
+    },
 }
 
 /// The order groups are listed in with nothing typed. Pane commands share
@@ -453,6 +459,41 @@ pub fn items(
                     .keywords(keywords)
                     .icon(icon_of(id))
                     .keys(index.first_binding(id).unwrap_or("")),
+            );
+        }
+
+        // The chat view's switch, the toolbar's « Chat / Panes », after the
+        // view commands: what it says is what it would do.
+        if section == Section::View
+            && let Some(ws) = active
+            && crate::chat_view::available(m)
+        {
+            let on = !crate::chat_view::shown(m, ws);
+            let label = if on {
+                Key::ChatViewShowChat
+            } else {
+                Key::ChatViewShowPanes
+            };
+            let mut keywords = vec![
+                i18n.t(Key::ChatViewChat).into_owned(),
+                i18n.t(Key::ChatViewPanes).into_owned(),
+                "chat".to_string(),
+                group.clone(),
+            ];
+            keywords.extend(elsewhere(locale, label, &[]));
+            keywords.extend(elsewhere(locale, Key::ChatViewChat, &[]));
+            keywords.extend(elsewhere(locale, Key::ChatViewPanes, &[]));
+            list.push(
+                Item::new(
+                    Target::ChatView {
+                        ws: ws.id.clone(),
+                        on,
+                    },
+                    group.as_str(),
+                    i18n.t(label),
+                )
+                .keywords(keywords)
+                .icon(if on { Icon::Window } else { Icon::Terminal }),
             );
         }
 

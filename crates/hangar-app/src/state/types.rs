@@ -226,6 +226,12 @@ pub struct Workspace {
     pub claude_account: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub worktree_hooks: Option<WorktreeHooks>,
+    /// Shown as the chat view rather than its grid, while the `chat-view`
+    /// experiment is on (`chat_view::shown`). Written only while it is: off
+    /// is the absence, so a file that never used it stays as it was, and an
+    /// experiment turned off leaves the grid without touching the file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chat_view: Option<bool>,
     #[serde(flatten)]
     pub extra: Extra,
 }

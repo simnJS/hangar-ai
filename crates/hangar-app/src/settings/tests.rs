@@ -166,15 +166,11 @@ fn the_schema_is_built_from_the_model_the_way_the_page_sees_it() {
 
 #[test]
 fn every_category_of_the_shell_has_a_page() {
-    // The shell's `SettingsCategory` has Experimental, which the schema leaves
-    // out while the registry is empty; the others are all there.
+    // Experimental is left out while the registry is empty; it holds the
+    // chat view, so every category of the shell is there.
     let built: Vec<SettingsCategory> = categories(&Model::default()).iter().map(|c| c.id).collect();
     for category in schema::ORDER {
-        if category == SettingsCategory::Experimental {
-            assert!(!built.contains(&category));
-        } else {
-            assert!(built.contains(&category), "{category:?}");
-        }
+        assert!(built.contains(&category), "{category:?}");
     }
 }
 

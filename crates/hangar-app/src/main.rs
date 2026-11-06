@@ -17,6 +17,7 @@ mod state;
 // One directory per package (PACKAGES.md), each owned by its package.
 mod accounts;
 mod board;
+mod chat_view;
 mod consent_card;
 mod control;
 mod git_flow;

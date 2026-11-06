@@ -318,6 +318,22 @@ pub enum Key {
     BroadcastWhenFree,
     /// `broadcast.whenFreeHint`
     BroadcastWhenFreeHint,
+    /// `chatView.chat`
+    ChatViewChat,
+    /// `chatView.comingSoon`
+    ChatViewComingSoon,
+    /// `chatView.conversation`
+    ChatViewConversation,
+    /// `chatView.panes`
+    ChatViewPanes,
+    /// `chatView.showChat`
+    ChatViewShowChat,
+    /// `chatView.showPanes`
+    ChatViewShowPanes,
+    /// `chatView.switchHint`
+    ChatViewSwitchHint,
+    /// `chatView.tasks`
+    ChatViewTasks,
     /// `cmd.app.fullscreen`
     CmdAppFullscreen,
     /// `cmd.app.zoomIn`
@@ -716,6 +732,10 @@ pub enum Key {
     EditorNotFound,
     /// `editor.open`
     EditorOpen,
+    /// `experiments.chatView.hint`
+    ExperimentsChatViewHint,
+    /// `experiments.chatView.title`
+    ExperimentsChatViewTitle,
     /// `experiments.onlyOn`
     ExperimentsOnlyOn,
     /// `experiments.stage.beta`
@@ -3565,7 +3585,7 @@ pub enum Key {
 }
 
 /// How many keys there are.
-pub const KEY_COUNT: usize = 1774;
+pub const KEY_COUNT: usize = 1784;
 
 impl Key {
     /// Every key, in the order of their ids.
@@ -3722,6 +3742,14 @@ impl Key {
         Key::BroadcastSend,
         Key::BroadcastWhenFree,
         Key::BroadcastWhenFreeHint,
+        Key::ChatViewChat,
+        Key::ChatViewComingSoon,
+        Key::ChatViewConversation,
+        Key::ChatViewPanes,
+        Key::ChatViewShowChat,
+        Key::ChatViewShowPanes,
+        Key::ChatViewSwitchHint,
+        Key::ChatViewTasks,
         Key::CmdAppFullscreen,
         Key::CmdAppZoomIn,
         Key::CmdAppZoomOut,
@@ -3921,6 +3949,8 @@ impl Key {
         Key::EditorMissingFolder,
         Key::EditorNotFound,
         Key::EditorOpen,
+        Key::ExperimentsChatViewHint,
+        Key::ExperimentsChatViewTitle,
         Key::ExperimentsOnlyOn,
         Key::ExperimentsStageBeta,
         Key::ExperimentsStageExperimental,
@@ -5501,6 +5531,14 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "broadcast.send", en: Text::plain("Broadcast"), fr: Text::plain("Diffuser") },
     Message { id: "broadcast.whenFree", en: Text::plain("When free"), fr: Text::plain("Quand libre") },
     Message { id: "broadcast.whenFreeHint", en: Text::plural("Hold the instruction until each agent is done with what it is doing (Alt+Enter). {n} pane's Claude Code can hold it; the others get it typed right away.", "Hold the instruction until each agent is done with what it is doing (Alt+Enter). {n} panes' Claude Code can hold it; the others get it typed right away."), fr: Text::plural("Garder l'instruction jusqu'à ce que chaque agent ait fini ce qu'il fait (Alt+Entrée). {n} panneau a un Claude Code capable de la garder\u{202f}; les autres la reçoivent tout de suite.", "Garder l'instruction jusqu'à ce que chaque agent ait fini ce qu'il fait (Alt+Entrée). {n} panneaux ont un Claude Code capable de la garder\u{202f}; les autres la reçoivent tout de suite.") },
+    Message { id: "chatView.chat", en: Text::plain("Chat"), fr: Text::plain("Chat") },
+    Message { id: "chatView.comingSoon", en: Text::plain("Coming soon."), fr: Text::plain("Bientôt disponible.") },
+    Message { id: "chatView.conversation", en: Text::plain("Conversation"), fr: Text::plain("Conversation") },
+    Message { id: "chatView.panes", en: Text::plain("Panes"), fr: Text::plain("Panneaux") },
+    Message { id: "chatView.showChat", en: Text::plain("Show the workspace as a chat"), fr: Text::plain("Afficher le workspace en chat") },
+    Message { id: "chatView.showPanes", en: Text::plain("Show the workspace's panes"), fr: Text::plain("Afficher les panneaux du workspace") },
+    Message { id: "chatView.switchHint", en: Text::plain("Show this workspace as a chat or as its panes"), fr: Text::plain("Afficher ce workspace en chat ou en panneaux") },
+    Message { id: "chatView.tasks", en: Text::plain("Tasks"), fr: Text::plain("Tâches") },
     Message { id: "cmd.app.fullscreen", en: Text::plain("Full screen"), fr: Text::plain("Plein écran") },
     Message { id: "cmd.app.zoomIn", en: Text::plain("Bigger text"), fr: Text::plain("Agrandir le texte") },
     Message { id: "cmd.app.zoomOut", en: Text::plain("Smaller text"), fr: Text::plain("Réduire le texte") },
@@ -5700,6 +5738,8 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "editor.missingFolder", en: Text::plain("The folder of {name} no longer exists."), fr: Text::plain("Le dossier de {name} n'existe plus.") },
     Message { id: "editor.notFound", en: Text::plain("VS Code was not found on this computer."), fr: Text::plain("VS Code est introuvable sur cet ordinateur.") },
     Message { id: "editor.open", en: Text::plain("Open with VS Code"), fr: Text::plain("Ouvrir avec VS Code") },
+    Message { id: "experiments.chatView.hint", en: Text::plain("Each workspace can be shown as a chat instead of its panes: the conversation, its tasks, and the previews and kit tabs beside them. The terminals keep running behind it, and the panes come back as they were."), fr: Text::plain("Chaque workspace peut s'afficher en chat plutôt qu'en panneaux\u{202f}: la conversation, ses tâches, et les aperçus et onglets de kits à côté. Les terminaux continuent de tourner derrière, et les panneaux reviennent tels qu'ils étaient.") },
+    Message { id: "experiments.chatView.title", en: Text::plain("Chat view"), fr: Text::plain("Vue chat") },
     Message { id: "experiments.onlyOn", en: Text::plain("Only on {platforms}"), fr: Text::plain("Uniquement sur {platforms}") },
     Message { id: "experiments.stage.beta", en: Text::plain("Beta"), fr: Text::plain("Bêta") },
     Message { id: "experiments.stage.experimental", en: Text::plain("Experimental"), fr: Text::plain("Expérimental") },
