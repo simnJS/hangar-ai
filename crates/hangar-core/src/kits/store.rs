@@ -699,13 +699,26 @@ pub(crate) fn remove_tree(path: &Path) -> std::io::Result<()> {
     match fs::remove_dir_all(path) {
         Ok(()) => Ok(()),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        // A git just killed on a deadline still holds its files open for a
+        // moment on Windows, and the removal fails while it does: a few short
+        // tries let the handles go instead of leaving the folder behind.
         #[cfg(windows)]
         Err(_) => {
-            clear_readonly(path);
-            match fs::remove_dir_all(path) {
-                Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                other => other,
+            let mut last = Ok(());
+            for attempt in 0..6 {
+                if attempt > 0 {
+                    std::thread::sleep(std::time::Duration::from_millis(150));
+                }
+                clear_readonly(path);
+                last = match fs::remove_dir_all(path) {
+                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                    other => other,
+                };
+                if last.is_ok() {
+                    break;
+                }
             }
+            last
         }
         #[cfg(not(windows))]
         Err(err) => Err(err),
