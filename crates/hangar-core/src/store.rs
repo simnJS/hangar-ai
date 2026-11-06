@@ -163,6 +163,8 @@ pub fn load_state_checked(host: &Host) -> Result<Option<serde_json::Value>, Load
     // mark, which serde_json refuses: a state.json edited by hand would
     // otherwise be set aside for one invisible character.
     let raw = raw.strip_prefix('\u{feff}').unwrap_or(&raw);
+    // Only the desktop build moves the key below into the keychain.
+    #[cfg_attr(not(feature = "desktop"), allow(unused_mut))]
     let mut value: serde_json::Value =
         serde_json::from_str(raw).map_err(|err| set_aside(&path, err.to_string()))?;
     if !value.is_object() {
@@ -171,7 +173,9 @@ pub fn load_state_checked(host: &Host) -> Result<Option<serde_json::Value>, Load
     // Rewritten at once rather than left to the frontend's next save, so the
     // plaintext copy is gone even if the app closes before then. A failed
     // rewrite costs nothing more: the value handed back no longer carries the
-    // key, and that save drops it from the file.
+    // key, and that save drops it from the file. A headless build has no
+    // keychain and no dictation: it leaves the file as it found it.
+    #[cfg(feature = "desktop")]
     if crate::voice::key::migrate(&mut value) {
         let _ = write_state(&path, &value);
     }

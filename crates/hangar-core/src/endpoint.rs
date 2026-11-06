@@ -48,13 +48,35 @@ fn endpoint_paths() -> Vec<PathBuf> {
         .collect()
 }
 
-pub fn publish(port: u16, token: &str) -> Result<(), String> {
-    let body = serde_json::to_string_pretty(&Endpoint {
+fn body(port: u16, token: &str) -> Result<String, String> {
+    serde_json::to_string_pretty(&Endpoint {
         port,
         token: token.to_string(),
         pid: std::process::id(),
     })
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| e.to_string())
+}
+
+/// The endpoint written to one file the caller chose, rather than to the
+/// app's own (`publish`): a headless node (headless.rs) next to a desktop
+/// Hangar on the same account must not take its agents over. Its folder is
+/// created private if missing and otherwise left as it is, as one named by
+/// `HANGAR_ENDPOINT_FILE` is.
+pub fn publish_to(path: &Path, port: u16, token: &str) -> Result<(), String> {
+    let body = body(port, token)?;
+    if let Some(parent) = path.parent() {
+        private_folder(parent, false);
+    }
+    write_atomic(path, body.as_bytes(), Access::Private)
+}
+
+/// `clear` for a file `publish_to` wrote.
+pub fn clear_at(path: &Path) {
+    let _ = fs::remove_file(path);
+}
+
+pub fn publish(port: u16, token: &str) -> Result<(), String> {
+    let body = body(port, token)?;
 
     let paths = endpoint_paths();
     if paths.is_empty() {

@@ -95,6 +95,16 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+      # A headless node builds hangar-core without its `desktop` feature: no
+      # whisper.cpp, ALSA, D-Bus notifications, Discord, login item or Hangar
+      # Mobile (docs/native/nodes.md). Linux is where nodes run; checked here
+      # so the gates cannot rot while every other build keeps the feature.
+      - name: Clippy and tests, hangar-core headless
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          cargo clippy -p hangar-core --no-default-features --all-targets --locked -- -D warnings
+          cargo test -p hangar-core --no-default-features --locked
+
       # The engine is behind a feature so the main executable never compiles
       # a browser engine; it still has to build on every platform.
       - name: Clippy, webview helper engine

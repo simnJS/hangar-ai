@@ -2,6 +2,13 @@
 //! board, the memory, git, orchestration, the agents' API and MCP server,
 //! kits, Hangar Mobile.
 //!
+//! The `desktop` feature, on by default, is what only the desktop app needs:
+//! dictation (voice/), notifications (notify.rs), the system opener
+//! (opener.rs), the Discord presence, Hangar at login (autostart.rs) and
+//! Hangar Mobile (remote/), with `Core` around them. Without it hangar-core
+//! builds on a server with none of their libraries, and `headless::start`
+//! sets up what a node runs instead (docs/native/nodes.md).
+//!
 //! This was the Tauri app's backend. Each `#[tauri::command]` the window
 //! invoked is a plain function now, in the module it always lived in, and the
 //! app calls it directly; docs/native/core-api.md lists every one with what
@@ -16,6 +23,7 @@
 //! off the app's own.
 
 pub mod accounts;
+#[cfg(feature = "desktop")]
 pub mod autostart;
 pub mod board;
 pub mod bridge;
@@ -24,10 +32,12 @@ pub mod chat;
 pub mod context;
 pub mod control;
 pub mod delivery;
+#[cfg(feature = "desktop")]
 pub mod discord;
 pub mod endpoint;
 pub mod git;
 pub mod git_clone;
+pub mod headless;
 pub mod host;
 pub mod install;
 pub mod instructions;
@@ -37,8 +47,10 @@ pub mod mcp;
 pub mod mcp_scope;
 pub mod memory;
 pub mod model;
+#[cfg(feature = "desktop")]
 pub mod notify;
 pub mod open_editor;
+#[cfg(feature = "desktop")]
 pub mod opener;
 pub mod orchestrator;
 pub mod path_env;
@@ -47,6 +59,7 @@ pub mod preview;
 pub mod pricing;
 pub mod procs;
 pub mod pty;
+#[cfg(feature = "desktop")]
 pub mod remote;
 pub mod server;
 pub mod sessions;
@@ -55,12 +68,14 @@ pub mod stats;
 pub mod store;
 #[cfg(test)]
 mod testdir;
+#[cfg(feature = "desktop")]
 pub mod voice;
 pub mod workspace_file;
 
 pub use host::{Event, Host};
 pub use paths::Paths;
 
+#[cfg(feature = "desktop")]
 use std::sync::Arc;
 
 /// Entry point for `hangar-ai --mcp`: no window, no runtime of the app's, just
@@ -69,6 +84,7 @@ pub fn run_mcp() {
     mcp::run_stdio();
 }
 
+#[cfg(feature = "desktop")]
 /// What the Tauri app set up around the window and took down after it: the
 /// state its commands were handed (`State<…>`), and the work its `setup` hook
 /// started — the agents' API, Hangar Mobile, the watchers.
@@ -86,6 +102,7 @@ pub struct Core {
     remote: Option<Arc<remote::Remote>>,
 }
 
+#[cfg(feature = "desktop")]
 impl Core {
     /// What the Tauri `setup` hook did: the slow lookups warmed on threads of
     /// their own, the watchers, Hangar Mobile opened and resumed, and the
@@ -360,20 +377,24 @@ mod tests {
         sendable(|| crate::open_editor::open_in_vscode(todo!(), todo!()));
         sendable(|| crate::preview::preview_inspect(todo!()));
         sendable(|| crate::pty::pty_has_children(todo!(), todo!()));
-        sendable(|| crate::remote::remote_app_slots(todo!()));
-        sendable(|| crate::remote::remote_pair_start(todo!()));
-        sendable(|| crate::remote::remote_ports_listening(todo!()));
-        sendable(|| crate::remote::remote_push(todo!(), todo!(), todo!(), todo!()));
-        sendable(|| crate::remote::remote_push_subscribers(todo!()));
-        sendable(|| crate::remote::remote_set_enabled(todo!(), todo!()));
-        sendable(|| crate::remote::remote_status(todo!()));
-        sendable(|| crate::remote::remote_tailscale(todo!()));
-        sendable(|| crate::remote::remote_tailscale_serve(todo!()));
         sendable(|| crate::stats::usage_stats(todo!(), todo!(), todo!(), todo!()));
-        sendable(crate::voice::key::voice_key_clear);
-        sendable(|| crate::voice::key::voice_key_set(todo!()));
-        sendable(crate::voice::key::voice_key_status);
-        sendable(|| crate::voice::models::voice_model_download(todo!(), todo!()));
-        sendable(|| crate::voice::voice_start(todo!(), todo!(), todo!()));
+        // Hangar Mobile's and the dictation's, the `desktop` feature's own.
+        #[cfg(feature = "desktop")]
+        {
+            sendable(|| crate::remote::remote_app_slots(todo!()));
+            sendable(|| crate::remote::remote_pair_start(todo!()));
+            sendable(|| crate::remote::remote_ports_listening(todo!()));
+            sendable(|| crate::remote::remote_push(todo!(), todo!(), todo!(), todo!()));
+            sendable(|| crate::remote::remote_push_subscribers(todo!()));
+            sendable(|| crate::remote::remote_set_enabled(todo!(), todo!()));
+            sendable(|| crate::remote::remote_status(todo!()));
+            sendable(|| crate::remote::remote_tailscale(todo!()));
+            sendable(|| crate::remote::remote_tailscale_serve(todo!()));
+            sendable(crate::voice::key::voice_key_clear);
+            sendable(|| crate::voice::key::voice_key_set(todo!()));
+            sendable(crate::voice::key::voice_key_status);
+            sendable(|| crate::voice::models::voice_model_download(todo!(), todo!()));
+            sendable(|| crate::voice::voice_start(todo!(), todo!(), todo!()));
+        }
     }
 }
