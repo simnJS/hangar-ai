@@ -153,6 +153,7 @@ pub struct Live {
     pub control: crate::control::Live,
     pub orchestration: crate::orchestration::Live,
     pub mobile: crate::mobile::Live,
+    pub nodes: crate::nodes::Live,
 }
 
 /// What an agent is doing (`AgentActivity`).

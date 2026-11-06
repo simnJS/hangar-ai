@@ -34,6 +34,8 @@ pub enum SettingsCategory {
     Voice,
     Discord,
     Shortcuts,
+    /// Only while the `nodes` experiment is on.
+    Nodes,
     Experimental,
     About,
 }
@@ -54,6 +56,7 @@ impl SettingsCategory {
             SettingsCategory::Voice => "voice",
             SettingsCategory::Discord => "discord",
             SettingsCategory::Shortcuts => "shortcuts",
+            SettingsCategory::Nodes => "nodes",
             SettingsCategory::Experimental => "experimental",
             SettingsCategory::About => "about",
         }

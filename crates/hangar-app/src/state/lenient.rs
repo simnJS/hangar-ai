@@ -33,8 +33,8 @@ use serde_json::{Map, Value};
 
 use super::layout;
 use super::types::{
-    AppState, OrchestrationSettings, Pane, RETIRED_AGENTS, SavedCommand, Settings, SplitNode,
-    Workspace, WorkspaceFolder, WorkspaceMcp,
+    AppState, NodeConfig, OrchestrationSettings, Pane, RETIRED_AGENTS, SavedCommand, Settings,
+    SplitNode, Workspace, WorkspaceFolder, WorkspaceMcp,
 };
 use super::unread::{self, Kept, Owner};
 
@@ -146,6 +146,11 @@ fn explicit_nulls(read: &Value, written: &Value, kept: &mut Vec<Kept>) {
         ids(read.get("settings").and_then(|s| s.get("savedCommands")))
             .into_iter()
             .map(Owner::SettingsCommand),
+    );
+    owners.extend(
+        ids(read.get("settings").and_then(|s| s.get("nodes")))
+            .into_iter()
+            .map(Owner::SettingsNode),
     );
     for ws in read
         .get("workspaces")
@@ -296,6 +301,12 @@ fn clean_settings(value: &mut Value, kept: &mut Vec<Kept>) {
                 clean_object::<SavedCommand>(command, owner, kept);
             },
         );
+    }
+    if let Some(list) = map.get_mut("nodes") {
+        clean_list(list, &Owner::Settings, "nodes", kept, |node, kept| {
+            let owner = Owner::SettingsNode(id_of(node));
+            clean_object::<NodeConfig>(node, owner, kept);
+        });
     }
     drop_unreadable::<Settings>(map, &Owner::Settings, kept);
 }

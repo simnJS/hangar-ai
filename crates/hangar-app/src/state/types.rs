@@ -534,6 +534,28 @@ pub struct Settings {
     pub kits_everywhere: Option<Vec<WorkspaceKit>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub projects_folder: Option<String>,
+    /// The machines the `nodes` experiment connects to (`nodes`). Written
+    /// only when there is one, so a file from before stays as it was.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub nodes: Vec<NodeConfig>,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+
+/// A machine reached over SSH that runs `hangar-node` (docs/native/nodes.md
+/// §4). Only how to reach it is stored: its state is the `nodes` package's
+/// and lives as long as the app.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct NodeConfig {
+    pub id: String,
+    /// What the page calls it; the SSH target when empty.
+    pub label: String,
+    /// What `ssh` is given: `user@host`, or a `Host` of the SSH config.
+    pub ssh_target: String,
+    /// An SSH config file passed as `-F`; the person's own when `None`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ssh_config: Option<String>,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -592,6 +614,7 @@ impl Default for Settings {
             experiments: Vec::new(),
             kits_everywhere: None,
             projects_folder: None,
+            nodes: Vec::new(),
             extra: Map::new(),
         }
     }

@@ -32,6 +32,7 @@ mod mobile;
 mod model3d_view;
 mod navigator;
 mod needs_you;
+mod nodes;
 mod orchestration;
 mod orchestration_ui;
 mod palette;

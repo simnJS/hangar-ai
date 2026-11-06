@@ -869,6 +869,9 @@ fn reduce(model: &mut Model, action: StoreAction) -> StoreOutcome {
                 voice_api_key: current.voice_api_key.clone(),
                 kits_everywhere: current.kits_everywhere.clone(),
                 projects_folder: current.projects_folder.clone(),
+                // The machines are not a preference: a reset of the
+                // preferences does not forget them.
+                nodes: current.nodes.clone(),
                 extra: current.extra.clone(),
                 ..Settings::default()
             };

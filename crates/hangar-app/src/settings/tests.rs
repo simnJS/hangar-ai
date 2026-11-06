@@ -167,8 +167,15 @@ fn the_schema_is_built_from_the_model_the_way_the_page_sees_it() {
 #[test]
 fn every_category_of_the_shell_has_a_page() {
     // Experimental is left out while the registry is empty; it holds the
-    // chat view, so every category of the shell is there.
-    let built: Vec<SettingsCategory> = categories(&Model::default()).iter().map(|c| c.id).collect();
+    // chat view, so every category of the shell is there once Nodes, which
+    // waits for its experiment, is turned on.
+    let mut model = Model::default();
+    model.apply(crate::state::StoreAction::UpdateSettings(
+        crate::state::Patch::new(|s: &mut crate::state::Settings| {
+            s.experiments = vec![experiments::NODES.into()]
+        }),
+    ));
+    let built: Vec<SettingsCategory> = categories(&model).iter().map(|c| c.id).collect();
     for category in schema::ORDER {
         assert!(built.contains(&category), "{category:?}");
     }
