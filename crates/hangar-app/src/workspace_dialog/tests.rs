@@ -52,8 +52,17 @@ fn closed(messages: &[Message]) -> bool {
 
 // ── the folder form, drawn ────────────────────────────────────────────
 
+/// The form with « More options » unfolded on the panes picked by hand: the
+/// whole of the dialog as it was before the orchestrator was the default.
+fn custom() -> State {
+    let mut st = State::default();
+    st.folder.more = true;
+    st.folder.custom = true;
+    st
+}
+
 #[test]
-fn the_folder_form_has_every_field_of_the_web_dialog() {
+fn the_folder_form_starts_with_an_orchestrator_and_folds_the_rest() {
     let h = Harness::new(Locale::En, "graphite");
     let st = State::default();
     let mut ui = h.show(view(&st, h.ctx()));
@@ -66,6 +75,54 @@ fn the_folder_form_has_every_field_of_the_web_dialog() {
         "Browse…",
         ".code-workspace…",
         "Name",
+        "Starts with",
+        "One Claude Code pane, the orchestrator: tell it what you want, it plans the work and hands it to workers",
+        "More options",
+        "Cancel",
+        "Create workspace",
+    ] {
+        assert!(ui.find(text).is_ok(), "{text} is on the form");
+    }
+    for folded in [
+        "Shell",
+        "Number of panes",
+        "Agent split",
+        "Worktree commands",
+    ] {
+        assert!(ui.find(folded).is_err(), "{folded} is folded away");
+    }
+    h.shot(&mut ui, "dialog-folder-default-en-graphite");
+    ui.click("More options").expect("the fold is drawn");
+    assert!(sent(&messages(ui), |msg| matches!(msg, Msg::MoreOptions)));
+
+    // Unfolded: the default stays an orchestrator until panes are picked.
+    let mut st = State::default();
+    st.folder.more = true;
+    let mut ui = h.show(view(&st, h.ctx()));
+    for text in ["Panes", "One orchestrator", "Panes of my choice", "Shell"] {
+        assert!(ui.find(text).is_ok(), "{text} is under More options");
+    }
+    assert!(ui.find("Number of panes").is_err());
+    ui.click("Panes of my choice")
+        .expect("the segment is drawn");
+    assert!(sent(&messages(ui), |msg| matches!(msg, Msg::Custom(true))));
+}
+
+#[test]
+fn the_folder_form_has_every_field_of_the_web_dialog() {
+    let h = Harness::new(Locale::En, "graphite");
+    let st = custom();
+    let mut ui = h.show(view(&st, h.ctx()));
+    for text in [
+        "New workspace",
+        "Source",
+        "Existing folder",
+        "From a Git repository",
+        "Project folder",
+        "Browse…",
+        ".code-workspace…",
+        "Name",
+        "4 panes, as chosen under More options",
         "Shell",
         "2 detected on this machine",
         "Number of panes",
@@ -85,7 +142,7 @@ fn the_folder_form_has_every_field_of_the_web_dialog() {
 #[test]
 fn an_agent_that_is_not_installed_says_so() {
     let mut h = Harness::new(Locale::En, "graphite");
-    let st = State::default();
+    let st = custom();
     {
         let mut ui = h.show(view(&st, h.ctx()));
         assert!(ui.find("not installed").is_err());
@@ -97,9 +154,212 @@ fn an_agent_that_is_not_installed_says_so() {
 }
 
 #[test]
+fn without_claude_code_the_default_is_a_shell_and_the_form_says_why() {
+    let mut h = Harness::new(Locale::En, "graphite");
+    h.model.ui.claude_installed = false;
+    let st = State::default();
+    let mut ui = h.show(view(&st, h.ctx()));
+    for text in [
+        "One plain shell",
+        "Claude Code is not installed on this machine: the workspace starts with a shell instead of an orchestrator.",
+    ] {
+        assert!(ui.find(text).is_ok(), "{text}");
+    }
+    h.shot(&mut ui, "dialog-folder-no-claude-en-graphite");
+}
+
+#[test]
+fn the_default_orchestrator_starts_alone_in_its_new_workspace() {
+    let mut h = Harness::new(Locale::Fr, "graphite");
+    let st = State::default();
+    {
+        let mut ui = h.show(view(&st, h.ctx()));
+        for text in ["Démarre avec", "Plus d'options"] {
+            assert!(ui.find(text).is_ok(), "{text}");
+        }
+        h.shot(&mut ui, "dialog-folder-default-fr-graphite");
+    }
+    let mut st = State::default();
+    st.folder.cwd = "/home/me/dev/blog".into();
+    let before = h.model.state().workspaces.len();
+    let _ = form(&mut st, &mut h.model, Msg::Submit(Vec::new()));
+    let workspaces = &h.model.state().workspaces;
+    assert_eq!(workspaces.len(), before + 1);
+    let made = workspaces.last().expect("the workspace is made");
+    assert_eq!(made.cwd, "/home/me/dev/blog");
+    assert_eq!(made.panes.len(), 1);
+    let pane = &made.panes[0];
+    assert_eq!(pane.agent, AgentId::Claude);
+    assert_eq!(pane.role, Some(crate::state::types::PaneRole::Orchestrator));
+    assert_eq!(
+        pane.model.as_deref(),
+        Some(
+            crate::state::roles::orchestration_defaults()
+                .orchestrator_model
+                .as_str()
+        )
+    );
+    // It is the one in front, in the panes view.
+    assert_eq!(
+        h.model.state().active_workspace_id.as_deref(),
+        Some(made.id.as_str())
+    );
+    assert_eq!(made.chat_view, None);
+    // The other workspaces are left as they were.
+    for ws in &workspaces[..before] {
+        assert!(ws.panes.iter().all(|pane| pane.role.is_none()), "{}", ws.id);
+    }
+}
+
+#[test]
+fn the_orchestrator_made_by_the_dialog_is_saved_and_read_back() {
+    let mut h = Harness::new(Locale::En, "graphite");
+    let mut st = State::default();
+    st.folder.cwd = "/home/me/dev/blog".into();
+    let _ = form(&mut st, &mut h.model, Msg::Submit(Vec::new()));
+    let written = h.model.to_json();
+    let (state, kept) = crate::state::read_state_keeping(written.clone());
+    let mut again = Model::default();
+    again.hydrate_read(state, kept);
+    let made = again
+        .state()
+        .workspaces
+        .iter()
+        .find(|ws| ws.cwd == "/home/me/dev/blog")
+        .expect("read back");
+    assert_eq!(made.panes.len(), 1);
+    assert_eq!(made.panes[0].agent, AgentId::Claude);
+    assert_eq!(
+        made.panes[0].role,
+        Some(crate::state::types::PaneRole::Orchestrator)
+    );
+    assert_eq!(again.to_json(), written);
+}
+
+#[test]
+fn without_claude_code_the_dialog_makes_one_shell_with_no_role() {
+    let mut h = Harness::new(Locale::En, "graphite");
+    h.model.ui.claude_installed = false;
+    let mut st = State::default();
+    st.folder.cwd = "/home/me/dev/blog".into();
+    let _ = form(&mut st, &mut h.model, Msg::Submit(Vec::new()));
+    let made = h.model.state().workspaces.last().expect("made");
+    assert_eq!(made.panes.len(), 1);
+    assert_eq!(made.panes[0].agent, AgentId::Shell);
+    assert_eq!(made.panes[0].role, None);
+}
+
+#[test]
+fn more_options_makes_every_layout_as_it_is_chosen_and_no_orchestrator() {
+    for layout in folder::LAYOUTS {
+        let mut h = Harness::new(Locale::En, "graphite");
+        let mut st = State::default();
+        st.folder.cwd = format!("/home/me/dev/l{layout}");
+        let _ = form(&mut st, &mut h.model, Msg::MoreOptions);
+        let _ = form(&mut st, &mut h.model, Msg::Custom(true));
+        let _ = form(&mut st, &mut h.model, Msg::Layout(layout));
+        let _ = form(&mut st, &mut h.model, Msg::More(AgentId::Claude));
+        // Folding the section keeps what was chosen in it.
+        let _ = form(&mut st, &mut h.model, Msg::MoreOptions);
+        let mut wanted = vec![AgentId::Shell; usize::from(layout)];
+        wanted[0] = AgentId::Claude;
+        assert_eq!(st.folder.assignments, wanted);
+        let _ = form(&mut st, &mut h.model, Msg::Submit(Vec::new()));
+        let made = h.model.state().workspaces.last().expect("made");
+        assert_eq!(made.cwd, st.folder.cwd);
+        let agents: Vec<_> = made.panes.iter().map(|pane| pane.agent).collect();
+        assert_eq!(agents, wanted, "{layout} panes");
+        assert!(
+            made.panes.iter().all(|pane| pane.role.is_none()),
+            "{layout} panes: no role, as before"
+        );
+    }
+    // Back to « One orchestrator »: the default again.
+    let mut h = Harness::new(Locale::En, "graphite");
+    let mut st = custom();
+    st.folder.cwd = "/home/me/dev/back".into();
+    let _ = form(&mut st, &mut h.model, Msg::Custom(false));
+    let _ = form(&mut st, &mut h.model, Msg::Submit(Vec::new()));
+    let made = h.model.state().workspaces.last().expect("made");
+    assert_eq!(made.panes.len(), 1);
+    assert_eq!(
+        made.panes[0].role,
+        Some(crate::state::types::PaneRole::Orchestrator)
+    );
+}
+
+#[test]
+fn a_folder_that_is_not_a_repository_still_gets_an_orchestrator_and_a_note() {
+    let note = "This folder is not a Git repository: the workers will share it. Run git init in it to give each worker a worktree of its own.";
+    let mut h = Harness::new(Locale::En, "graphite");
+    let mut st = State::default();
+    let _ = form(&mut st, &mut h.model, Msg::Cwd("/home/me/notes".into()));
+    {
+        let mut ui = h.show(view(&st, h.ctx()));
+        assert!(ui.find(note).is_err(), "not known yet");
+    }
+    // An answer for another folder is not about this one.
+    let _ = form(
+        &mut st,
+        &mut h.model,
+        Msg::RepoChecked {
+            for_cwd: "/home/me/old".into(),
+            repo: false,
+        },
+    );
+    assert!(!st.folder.not_a_repo());
+    let _ = form(
+        &mut st,
+        &mut h.model,
+        Msg::RepoChecked {
+            for_cwd: "/home/me/notes".into(),
+            repo: false,
+        },
+    );
+    {
+        let mut ui = h.show(view(&st, h.ctx()));
+        assert!(ui.find(note).is_ok());
+        h.shot(&mut ui, "dialog-folder-no-git-en-graphite");
+    }
+    // A repository needs no note.
+    let mut other = State::default();
+    other.folder = Folder {
+        cwd: "/home/me/notes".into(),
+        repo: Some(("/home/me/notes".into(), true)),
+        ..Folder::default()
+    };
+    {
+        let mut ui = h.show(view(&other, h.ctx()));
+        assert!(ui.find(note).is_err(), "a repository needs no note");
+    }
+    let _ = form(&mut st, &mut h.model, Msg::Submit(Vec::new()));
+    let made = h.model.state().workspaces.last().expect("made");
+    assert_eq!(made.cwd, "/home/me/notes");
+    assert_eq!(
+        made.panes[0].role,
+        Some(crate::state::types::PaneRole::Orchestrator)
+    );
+}
+
+#[test]
+fn a_folder_that_is_not_a_repository_is_told_in_french_too() {
+    let h = Harness::new(Locale::Fr, "github-light");
+    let mut st = State::default();
+    st.folder.cwd = "/home/me/notes".into();
+    st.folder.repo = Some(("/home/me/notes".into(), false));
+    let mut ui = h.show(view(&st, h.ctx()));
+    let fr = Translator::new(Locale::Fr);
+    for key in [Key::CreateStartOrchestrator, Key::CreateStartNoGit] {
+        let text = fr.t(key);
+        assert!(ui.find(text.as_ref()).is_ok(), "{text}");
+    }
+    h.shot(&mut ui, "dialog-folder-no-git-fr-github-light");
+}
+
+#[test]
 fn the_form_speaks_french_in_a_light_theme() {
     let h = Harness::new(Locale::Fr, "github-light");
-    let st = State::default();
+    let st = custom();
     let mut ui = h.show(view(&st, h.ctx()));
     for text in [
         "Nouveau workspace",
@@ -143,7 +403,7 @@ fn the_source_control_switches_to_the_git_form() {
 #[test]
 fn the_layout_preview_names_the_panes_with_the_next_free_names() {
     let h = Harness::new(Locale::En, "graphite");
-    let st = State::default();
+    let st = custom();
     let mut ui = h.show(view(&st, h.ctx()));
     // Ava, Max and Leo are taken by the harness' workspaces.
     for name in ["Mia", "Sam", "Zoe", "Eli"] {
@@ -155,7 +415,7 @@ fn the_layout_preview_names_the_panes_with_the_next_free_names() {
 #[test]
 fn a_cell_of_the_preview_asks_to_change_its_agent() {
     let h = Harness::new(Locale::En, "graphite");
-    let st = State::default();
+    let st = custom();
     let mut ui = h.show(view(&st, h.ctx()));
     ui.click("Mia").expect("the cell is drawn");
     assert!(sent(&messages(ui), |msg| matches!(msg, Msg::Cycle(0))));
@@ -715,8 +975,13 @@ mod fields {
     #[test]
     fn every_field_of_the_folder_form_leaves_the_shortcut_to_the_keymap() {
         let h = Harness::new(Locale::En, "graphite");
-        let st = State::default();
-        // The folder, the name, and the two commands of the worktrees.
+        // The folder and the name; « More options » folded.
+        assert_eq!(
+            Fixture::new().split_chord(view(&State::default(), h.ctx())),
+            ["Noop", "Noop"]
+        );
+        // Unfolded, the two commands of the worktrees too.
+        let st = custom();
         assert_eq!(
             Fixture::new().split_chord(view(&st, h.ctx())),
             ["Noop", "Noop", "Noop", "Noop"]

@@ -587,14 +587,98 @@ fn roots<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
         .into()
 }
 
-/// Shell, panes, agents, arrangement, account, kits, hooks.
+/// What the workspace starts with, and « More options »: the panes picked
+/// by hand, shell, account, kits, hooks.
 fn folder_agents<'a>(
     mut form: iced::widget::Column<'a, Message>,
     st: &'a State,
     ctx: Ctx<'a>,
 ) -> iced::widget::Column<'a, Message> {
     let t = ctx.theme;
+    form = form.push(labelled(
+        ctx,
+        Some(ctx.t(Key::CreateStart).into_owned()),
+        start_summary(st, ctx),
+    ));
+    let mut more = column![].spacing(14).width(Length::Fill);
+    if st.folder.more {
+        more = more_options(more, st, ctx);
+    }
+    let fold = hangar_ui::section::section(
+        t,
+        ctx.t(Key::CreateMoreOptions),
+        !st.folder.more,
+        msg(Msg::MoreOptions),
+    )
+    .padding(0.0)
+    .last()
+    .body(more);
+    form.push(fold)
+}
+
+/// One line on what the workspace starts with, and what to know about it:
+/// Claude Code missing, a folder that is not a Git repository.
+fn start_summary<'a>(st: &'a State, ctx: Ctx<'a>) -> Element<'a, Message> {
+    let start = folder::start_of(st.folder.custom, ctx.model.ui.claude_installed);
+    let said = match start {
+        folder::Start::Orchestrator => ctx.t(Key::CreateStartOrchestrator).into_owned(),
+        folder::Start::Shell => ctx.t(Key::CreateStartShell).into_owned(),
+        folder::Start::Custom => ctx
+            .i18n
+            .tn(Key::CreateStartCustom, st.folder.assignments.len(), &[])
+            .into_owned(),
+    };
+    let mut lines = column![text(said).size(tokens::font_size::UI)].spacing(tokens::space::SM);
+    match start {
+        folder::Start::Shell => {
+            lines = lines.push(notice(
+                ctx,
+                text(ctx.t(Key::CreateStartNoClaude))
+                    .size(tokens::font_size::UI)
+                    .into(),
+                false,
+            ));
+        }
+        folder::Start::Orchestrator if st.folder.not_a_repo() => {
+            lines = lines.push(notice(
+                ctx,
+                text(ctx.t(Key::CreateStartNoGit))
+                    .size(tokens::font_size::UI)
+                    .into(),
+                false,
+            ));
+        }
+        _ => {}
+    }
+    lines.into()
+}
+
+/// What « More options » holds: the panes picked by hand (as the dialog
+/// always offered them), then shell, account, kits and hooks.
+fn more_options<'a>(
+    mut form: iced::widget::Column<'a, Message>,
+    st: &'a State,
+    ctx: Ctx<'a>,
+) -> iced::widget::Column<'a, Message> {
+    let t = ctx.theme;
     let locale = ctx.i18n;
+
+    form = form.push(labelled(
+        ctx,
+        Some(ctx.t(Key::CreatePanes).into_owned()),
+        input::segmented(
+            t,
+            &[
+                (false, word(ctx.t(Key::CreatePanesOrchestrator))),
+                (true, word(ctx.t(Key::CreatePanesCustom))),
+            ],
+            &st.folder.custom,
+            |custom| msg(Msg::Custom(custom)),
+        ),
+    ));
+    if st.folder.custom {
+        form = custom_panes(form, st, ctx);
+    }
 
     // The shell.
     let shells = &ctx.model.ui.shells;
@@ -641,6 +725,41 @@ fn folder_agents<'a>(
         .align_y(Alignment::Center),
     ));
 
+    // The Claude account, when there are accounts to choose from.
+    if accounts::has_any(ctx) {
+        form = form.push(labelled(
+            ctx,
+            Some(ctx.t(Key::AccountsPickerLabel).into_owned()),
+            accounts::workspace_picker(ctx, st.folder.claude_account.as_deref()),
+        ));
+    }
+
+    // The kits (P14's section) and the worktree hooks.
+    form = form.push(labelled(
+        ctx,
+        Some(ctx.t(Key::KitsManageSectionTitle).into_owned()),
+        crate::kits::workspace_section(&ctx.pkg.kits, ctx, None),
+    ));
+    form.push(labelled(
+        ctx,
+        Some(ctx.t(Key::WorktreesHooksTitle).into_owned()),
+        hooks::view(
+            ctx,
+            &st.folder.hooks,
+            Some(submit_message(st, ctx)),
+            |field, text| msg(Msg::Hook(field, text)),
+        ),
+    ))
+}
+
+/// The panes picked by hand: how many, which agents, their arrangement.
+fn custom_panes<'a>(
+    mut form: iced::widget::Column<'a, Message>,
+    st: &'a State,
+    ctx: Ctx<'a>,
+) -> iced::widget::Column<'a, Message> {
+    let t = ctx.theme;
+    let locale = ctx.i18n;
     // The number of panes.
     let layouts: Vec<(u8, &'static str)> = LAYOUTS
         .iter()
@@ -710,31 +829,7 @@ fn folder_agents<'a>(
         .spacing(tokens::space::SM),
     ));
 
-    // The Claude account, when there are accounts to choose from.
-    if accounts::has_any(ctx) {
-        form = form.push(labelled(
-            ctx,
-            Some(ctx.t(Key::AccountsPickerLabel).into_owned()),
-            accounts::workspace_picker(ctx, st.folder.claude_account.as_deref()),
-        ));
-    }
-
-    // The kits (P14's section) and the worktree hooks.
-    form = form.push(labelled(
-        ctx,
-        Some(ctx.t(Key::KitsManageSectionTitle).into_owned()),
-        crate::kits::workspace_section(&ctx.pkg.kits, ctx, None),
-    ));
-    form.push(labelled(
-        ctx,
-        Some(ctx.t(Key::WorktreesHooksTitle).into_owned()),
-        hooks::view(
-            ctx,
-            &st.folder.hooks,
-            Some(submit_message(st, ctx)),
-            |field, text| msg(Msg::Hook(field, text)),
-        ),
-    ))
+    form
 }
 
 /// One agent's line of the counters: its name, « not installed » when it is

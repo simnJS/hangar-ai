@@ -35,9 +35,12 @@ have been tested by CI but not yet used by a person.
 
 ## Getting started
 
-1. **Create a workspace** with `Ctrl`/`Cmd`+`Shift`+`N`. Pick a project folder and a
-   layout, then click a cell to choose Claude Code or a shell. If Claude Code is not
-   installed, the dialog says so.
+1. **Create a workspace** with `Ctrl`/`Cmd`+`Shift`+`N` and pick a project folder. The
+   workspace starts with one Claude Code pane, its orchestrator: tell it what you want.
+   Outside a git repository its workers share the folder (`git init` gives each one a
+   worktree). **More options** has the other setups: several panes, a layout, shells and
+   agents of your choice. If Claude Code is not installed, the dialog says so and the
+   workspace starts with a shell.
 2. **Connect Claude Code to Hangar.** Open the MCP panel (`Ctrl`/`Cmd`+`Alt`+`M`; `Alt` is
    `Option` on a Mac) and click
    **Configure**. The panel can also write a short playbook into the project's `CLAUDE.md`,
@@ -45,10 +48,11 @@ have been tested by CI but not yet used by a person.
    server.
 3. **Give them work.** Add tasks on the board (`Ctrl`/`Cmd`+`Alt`+`B`), or ask an agent to
    split a goal into tasks. Other agents pick tasks up with `board_next_task`.
-4. **Try orchestration.** In a git repository, run **New orchestrator** from the command
-   palette (`Ctrl`/`Cmd`+`Shift`+`P`), or pin an existing Claude Code pane from its **…**
-   menu. Then describe the goal to it. **Orchestration…** in the same menu opens the
-   workspace's settings: models, permissions, check command and automatic merging.
+4. **Orchestration.** A new workspace has its orchestrator already; in another one, run
+   **New orchestrator** from the command palette (`Ctrl`/`Cmd`+`Shift`+`P`), or pin an
+   existing Claude Code pane from its **…** menu. Then describe the goal to it.
+   **Orchestration…** in the same menu opens the workspace's settings: models,
+   permissions, check command and automatic merging.
 
 The command palette lists every command. Shortcuts can be changed in
 **Settings → Shortcuts**, and the defaults use `Ctrl` on Windows and Linux and `Cmd` on
