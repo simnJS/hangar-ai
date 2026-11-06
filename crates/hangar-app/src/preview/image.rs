@@ -456,8 +456,7 @@ mod tests {
 
     #[test]
     fn reading_a_broken_svg_is_a_failed_image_and_a_good_one_is_the_source() {
-        let dir = std::env::temp_dir().join(format!("hangar-svg-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::kit_tabs::testdir::scratch("svg");
         std::fs::write(
             dir.join("ok.svg"),
             "<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4'/>",

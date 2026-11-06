@@ -192,8 +192,7 @@ mod tests {
     const NOON: u64 = 1_793_188_800_000;
 
     fn log(tag: &str) -> (ActivityLog, PathBuf) {
-        let dir =
-            std::env::temp_dir().join(format!("hangar-activity-{tag}-{}", uuid::Uuid::new_v4()));
+        let dir = crate::testdir::scratch(&format!("activity-{tag}"));
         (ActivityLog::open(dir.clone()), dir)
     }
 

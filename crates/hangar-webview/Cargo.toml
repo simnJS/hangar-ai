@@ -36,6 +36,8 @@ wry = { workspace = true, optional = true }
 tao = { workspace = true, optional = true }
 
 [dev-dependencies]
+# Scratch folders the tests make, removed when the test ends (panic included).
+tempfile = "3"
 # The kit SDK test (tests/kit_sdk.rs) answers a page with the scheme the app
 # serves it with, and installs the kit it asks for.
 hangar-core.workspace = true

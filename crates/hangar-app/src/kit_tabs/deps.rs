@@ -567,9 +567,7 @@ mod tests {
     use crate::state::types::Pane;
 
     fn scratch(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("hangar-kit-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::kit_tabs::testdir::scratch(&format!("kit-{tag}"));
         dir.canonicalize().unwrap()
     }
 
@@ -706,8 +704,7 @@ mod tests {
 
     #[test]
     fn an_image_is_read_from_inside_its_folder_only() {
-        let dir = std::env::temp_dir().join(format!("hangar-kit-image-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = crate::kit_tabs::testdir::scratch("kit-image");
         std::fs::create_dir_all(dir.join("assets")).unwrap();
         std::fs::write(dir.join("assets/logo.png"), b"png").unwrap();
         std::fs::write(dir.join(".secret.png"), b"no").unwrap();

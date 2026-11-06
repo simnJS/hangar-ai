@@ -490,12 +490,7 @@ pub(super) mod tests {
     use super::*;
 
     fn scratch(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "hangar-files-{tag}-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
-        fs::create_dir_all(&dir).unwrap();
-        dir
+        crate::testdir::scratch(&format!("files-{tag}"))
     }
 
     fn file_of(dir: &Path, name: &str, bytes: &[u8]) -> PathBuf {

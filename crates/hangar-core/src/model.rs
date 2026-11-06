@@ -705,12 +705,7 @@ pub(crate) mod tests {
     use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 
     pub(crate) fn temp_dir(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "hangar-model-{tag}-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
-        std::fs::create_dir_all(&dir).expect("temp dir");
-        dir
+        crate::testdir::scratch(&format!("model-{tag}"))
     }
 
     pub(crate) fn write(root: &Path, relative: &str, body: &[u8]) -> PathBuf {

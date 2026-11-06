@@ -51,19 +51,8 @@ struct Harness {
 }
 
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "hangar-preview-{tag}-{}-{}",
-        std::process::id(),
-        uuid_like()
-    ));
-    std::fs::create_dir_all(&dir).expect("a folder");
+    let dir = crate::kit_tabs::testdir::scratch(&format!("preview-{tag}"));
     dir.canonicalize().expect("a canonical folder")
-}
-
-fn uuid_like() -> u64 {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static N: AtomicU64 = AtomicU64::new(0);
-    N.fetch_add(1, Ordering::Relaxed)
 }
 
 impl Harness {

@@ -141,6 +141,8 @@ hyper-util = { version = "0.1", features = ["tokio"] }
 # The mobile server's tests call its router directly, without a socket.
 # Already compiled for axum, with this feature.
 [dev-dependencies]
+# Scratch folders the tests make, removed when the test ends (panic included).
+tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 # The push's encryption checked byte for byte against RFC 8291's example.
 # Already compiled for web-push-native, which encrypts with it.

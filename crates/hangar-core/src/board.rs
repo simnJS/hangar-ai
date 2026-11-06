@@ -1245,9 +1245,7 @@ mod tests {
     const ONE_TASK: &str = r#"{"tasks":[{"id":"a","title":"tache existante","column":"todo","created_at":1,"updated_at":1}]}"#;
 
     fn temp_workspace(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("hangar-board-{tag}-{}", new_id()));
-        fs::create_dir_all(&dir).expect("temp workspace");
-        dir
+        crate::testdir::scratch(&format!("board-{tag}"))
     }
 
     fn seed(path: &Path, body: &str) {

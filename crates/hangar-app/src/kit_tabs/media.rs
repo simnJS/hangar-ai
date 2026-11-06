@@ -124,7 +124,7 @@ mod tests {
 
     #[test]
     fn a_file_of_the_workspace_is_named_by_its_path_and_a_hidden_one_is_not() {
-        let root = std::env::temp_dir().join(format!("hangar-kit-media-{}", std::process::id()));
+        let root = crate::kit_tabs::testdir::scratch("kit-media");
         let shots = root.join("captures");
         let hidden = root.join(".cache");
         std::fs::create_dir_all(&shots).unwrap();

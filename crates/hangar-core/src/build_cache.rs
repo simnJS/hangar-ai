@@ -149,8 +149,7 @@ mod tests {
 
     #[test]
     fn the_check_builds_in_a_folder_the_workers_never_share() {
-        let root = std::env::temp_dir().join(format!("hangar-check-env-{}", std::process::id()));
-        std::fs::create_dir_all(&root).unwrap();
+        let root = crate::testdir::scratch("check-env");
         assert!(check_env_for(&root, "w1").is_empty());
         std::fs::write(root.join("Cargo.toml"), "[workspace]\n").unwrap();
         let env = check_env_for(&root, "w1");
@@ -185,8 +184,7 @@ mod tests {
 
     #[test]
     fn only_a_cargo_root_that_is_enabled_gets_the_variable() {
-        let root = std::env::temp_dir().join(format!("hangar-bc-{}", std::process::id()));
-        std::fs::create_dir_all(&root).unwrap();
+        let root = crate::testdir::scratch("bc");
         assert!(env_for(&root, "w", true).is_empty());
         std::fs::write(root.join("Cargo.toml"), "").unwrap();
         let env = env_for(&root, "w", true);
@@ -194,12 +192,11 @@ mod tests {
         assert_eq!(env[0].0, "CARGO_TARGET_DIR");
         assert!(Path::new(&env[0].1).starts_with(dir_for("w")));
         assert!(env_for(&root, "w", false).is_empty());
-        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
     fn size_and_empty() {
-        let dir = std::env::temp_dir().join(format!("hangar-bc-size-{}", std::process::id()));
+        let dir = crate::testdir::scratch("bc-size").join("folder");
         assert_eq!(size_of(&dir), 0);
         std::fs::create_dir_all(dir.join("a/b")).unwrap();
         std::fs::write(dir.join("a/b/x"), [0u8; 10]).unwrap();

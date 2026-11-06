@@ -1836,8 +1836,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn quitting_gives_the_panes_a_moment_to_finish_writing() {
-        let file = std::env::temp_dir().join(format!("hangar-pty-flush-{}", std::process::id()));
-        let _ = std::fs::remove_file(&file);
+        let file = crate::testdir::scratch("pty-flush").join("flushed");
         let manager = PtyManager::default();
         spawn_printing_a_pid(
             &manager,

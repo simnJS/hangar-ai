@@ -70,6 +70,8 @@ re_rav1d.workspace = true
 usvg.workspace = true
 
 [dev-dependencies]
+# Scratch folders the tests make, removed when the test ends (panic included).
+tempfile = "3"
 # Draws a package's views without a window, for the snapshot tests packages keep
 # to look at what they built (kits/views/snapshot.rs), and drives the preview's
 # views with real events.

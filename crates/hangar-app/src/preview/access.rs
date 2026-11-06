@@ -974,8 +974,7 @@ mod tests {
 
     #[test]
     fn writes_a_workspaces_kit_tabs_to_a_file_and_reads_them_back() {
-        let dir = std::env::temp_dir().join(format!("hangar-kit-tabs-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = crate::kit_tabs::testdir::scratch("kit-tabs");
         let path = dir.join("kit-tabs.json");
         {
             let shared = Shared::new(Some(Box::new(FileSavedTabs::new(path.clone()))));
@@ -1009,8 +1008,7 @@ mod tests {
 
     #[test]
     fn a_file_that_is_not_json_is_no_saved_tab() {
-        let dir = std::env::temp_dir().join(format!("hangar-kit-tabs-bad-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::kit_tabs::testdir::scratch("kit-tabs-bad");
         let path = dir.join("kit-tabs.json");
         std::fs::write(&path, "{ not json").unwrap();
         let saved = FileSavedTabs::new(path);
@@ -1022,9 +1020,7 @@ mod tests {
     #[test]
     fn kit_tabs_are_written_off_the_callers_thread_the_last_of_a_burst_once_dropped_at_the_latest()
     {
-        let dir =
-            std::env::temp_dir().join(format!("hangar-kit-tabs-burst-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = crate::kit_tabs::testdir::scratch("kit-tabs-burst");
         let path = dir.join("kit-tabs.json");
         let tab = |title: &str| crate::preview::store::SavedKitTab {
             id: Some("p1".into()),
@@ -1051,8 +1047,7 @@ mod tests {
 
     #[test]
     fn kit_tabs_are_written_soon_after_a_change_without_a_drop() {
-        let dir = std::env::temp_dir().join(format!("hangar-kit-tabs-soon-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = crate::kit_tabs::testdir::scratch("kit-tabs-soon");
         let path = dir.join("kit-tabs.json");
         let mut saved = FileSavedTabs::new(path.clone());
         saved.write("w1", None);

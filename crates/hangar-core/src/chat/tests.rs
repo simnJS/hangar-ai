@@ -112,8 +112,7 @@ fn items_of(lines: &[String]) -> Vec<ChatItem> {
 }
 
 fn temp_path(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("hangar-chat-{tag}-{}", uuid::Uuid::new_v4()));
-    fs::create_dir_all(&dir).unwrap();
+    let dir = crate::testdir::scratch(&format!("chat-{tag}"));
     dir.join("session.jsonl")
 }
 

@@ -47,6 +47,8 @@ mod dev;
 mod media;
 mod native;
 pub mod tabs;
+#[cfg(test)]
+pub(crate) mod testdir;
 mod view;
 
 #[cfg(test)]

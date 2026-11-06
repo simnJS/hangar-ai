@@ -3156,6 +3156,7 @@ dependencies = [
  "serde",
  "serde_json",
  "syntect",
+ "tempfile",
  "tokio",
  "two-face",
  "unicode-normalization",
@@ -3198,6 +3199,7 @@ dependencies = [
  "sha2 0.11.0",
  "subtle",
  "tauri-winrt-notification",
+ "tempfile",
  "tokio",
  "tower",
  "ureq",
@@ -3233,6 +3235,7 @@ dependencies = [
  "png 0.18.1",
  "serde",
  "serde_json",
+ "tempfile",
  "tiny-skia",
  "wasmtime",
 ]
@@ -3307,6 +3310,7 @@ dependencies = [
  "iced",
  "iced_test",
  "png 0.18.1",
+ "tempfile",
  "unicode-normalization",
  "usvg",
 ]
@@ -3337,6 +3341,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tao",
+ "tempfile",
  "tokio",
  "wry",
 ]

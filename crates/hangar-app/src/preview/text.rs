@@ -207,8 +207,7 @@ mod tests {
 
     #[test]
     fn reads_the_head_of_a_file_and_no_more() {
-        let dir = std::env::temp_dir().join(format!("hangar-text-head-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::kit_tabs::testdir::scratch("text-head");
         let path = dir.join("big.log");
         std::fs::write(&path, vec![b'x'; TEXT_HEAD_BYTES + 5000]).unwrap();
         let head = read_head(&path).unwrap();

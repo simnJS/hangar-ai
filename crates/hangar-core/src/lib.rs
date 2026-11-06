@@ -53,6 +53,8 @@ pub mod sessions;
 pub mod shells;
 pub mod stats;
 pub mod store;
+#[cfg(test)]
+mod testdir;
 pub mod voice;
 pub mod workspace_file;
 

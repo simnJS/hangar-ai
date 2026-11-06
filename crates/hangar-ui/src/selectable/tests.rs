@@ -428,8 +428,7 @@ fn the_selected_part_is_drawn_in_the_selection_colour_and_only_that() {
     assert_eq!(doc.selected_text(), "gamma");
     let (gamma, alpha) = (middle(&doc, 1), middle(&doc, 0));
     let snapshot = ui.snapshot(&iced::Theme::Dark).expect("it draws");
-    let dir = std::env::temp_dir().join(format!("hangar-selectable-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = crate::testdir::scratch("selectable");
     snapshot
         .matches_image(dir.join("selected"))
         .expect("written");

@@ -1218,7 +1218,7 @@ mod tests {
     }
 
     fn api() -> Api {
-        let root = std::env::temp_dir().join(format!("hangar-server-{}", uuid::Uuid::new_v4()));
+        let root = crate::testdir::scratch("server");
         let cwd = root.join("ws");
         std::fs::create_dir_all(&cwd).unwrap();
         let host = Host::with_paths(crate::paths::Paths::rooted(&root.join("data")));

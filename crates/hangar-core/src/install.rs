@@ -393,11 +393,7 @@ mod tests {
     use super::*;
 
     fn temp_config(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "hangar-install-{tag}-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
-        fs::create_dir_all(&dir).expect("temp dir");
+        let dir = crate::testdir::scratch(&format!("install-{tag}"));
         dir.join("mcp.json")
     }
 
