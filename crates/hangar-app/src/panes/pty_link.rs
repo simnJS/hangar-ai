@@ -52,9 +52,9 @@
 //! writer thread hands what is typed to that task, which sends it on the
 //! same socket.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, mpsc};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use hangar_core::pty::{PtyEvent, PtyManager, PtySink};
 use hangar_term::{Event, Terminal};
@@ -150,7 +150,7 @@ enum Sink {
 /// looked, and whether it is on screen.
 pub struct PaneLink {
     pub id: PaneId,
-    terminal: Arc<Mutex<Terminal>>,
+    terminal: Arc<Shared>,
     jobs: mpsc::Sender<Job>,
     woken: Arc<Mutex<Option<Printed>>>,
     /// The window draws the pane: its output is looked at every frame.
@@ -230,7 +230,7 @@ impl PaneLink {
         }
         Arc::new(PaneLink {
             id,
-            terminal: Arc::new(Mutex::new(terminal)),
+            terminal: Arc::new(Shared::new(terminal)),
             jobs,
             woken: Arc::default(),
             // On screen until the window says otherwise: looked at every
@@ -309,9 +309,7 @@ impl PaneLink {
     /// The terminal, for as long as the guard lives. Held briefly: the
     /// pane's reader thread waits on it to feed the next chunk.
     pub fn lock(&self) -> MutexGuard<'_, Terminal> {
-        self.terminal
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
+        self.terminal.lock()
     }
 
     /// Bytes for the process: typing, a paste, a report.
@@ -406,10 +404,76 @@ impl PaneLink {
     }
 }
 
+/// How long a feeder lets the window go first before it takes the lock
+/// anyway: a frame's worth of turns, never a stall of the output.
+const YIELD_FOR: Duration = Duration::from_millis(2);
+
+/// A pane's terminal, shared by the thread that feeds it and everything else
+/// that reads it (the window above all, a handful of times a frame).
+///
+/// A `std` mutex hands the lock to whoever asks first once it is free, and a
+/// reader thread with output queued asks again the moment it lets go: while
+/// a pane floods, the window could wait several feeds for its turn. Sixteen
+/// panes flooding, the frames that wait cost about 5 ms in locks alone
+/// (task bddfd5c6). So the other side counts itself while it waits, and the
+/// feeder, finding someone waiting, yields until they had their turn
+/// ([`YIELD_FOR`] at most) before it takes the lock again.
+pub(crate) struct Shared {
+    terminal: Mutex<Terminal>,
+    /// Lockers other than the feeder blocked on the lock right now.
+    waiting: AtomicUsize,
+}
+
+impl Shared {
+    fn new(terminal: Terminal) -> Self {
+        Self {
+            terminal: Mutex::new(terminal),
+            waiting: AtomicUsize::new(0),
+        }
+    }
+
+    /// The terminal, for anyone but the feeder: first in line.
+    fn lock(&self) -> MutexGuard<'_, Terminal> {
+        if let Ok(guard) = self.terminal.try_lock() {
+            return guard;
+        }
+        self.waiting.fetch_add(1, Ordering::AcqRel);
+        let guard = self
+            .terminal
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        self.waiting.fetch_sub(1, Ordering::AcqRel);
+        guard
+    }
+
+    /// The terminal, for the feeder: after whoever is waiting for it.
+    fn lock_to_feed(&self) -> MutexGuard<'_, Terminal> {
+        self.lock_to_feed_within(YIELD_FOR)
+    }
+
+    fn lock_to_feed_within(&self, at_most: Duration) -> MutexGuard<'_, Terminal> {
+        if self.waiting.load(Ordering::Acquire) > 0 {
+            let until = Instant::now() + at_most;
+            while self.waiting.load(Ordering::Acquire) > 0 && Instant::now() < until {
+                std::thread::yield_now();
+            }
+        }
+        self.terminal
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+    }
+
+    /// How many are waiting, for the tests.
+    #[cfg(test)]
+    fn waiting(&self) -> usize {
+        self.waiting.load(Ordering::Acquire)
+    }
+}
+
 /// Feeds a pane's terminal on the thread its output arrives on, and wakes
 /// the window, unless it is awake already.
 struct Feeder {
-    terminal: Arc<Mutex<Terminal>>,
+    terminal: Arc<Shared>,
     jobs: mpsc::Sender<Job>,
     woken: Arc<Mutex<Option<Printed>>>,
     shown: Arc<AtomicBool>,
@@ -435,10 +499,7 @@ impl Feeder {
             }
         }
         let events = {
-            let mut terminal = self
-                .terminal
-                .lock()
-                .unwrap_or_else(|poison| poison.into_inner());
+            let mut terminal = self.terminal.lock_to_feed();
             if replay {
                 terminal.replay(data.as_bytes())
             } else {
@@ -576,6 +637,56 @@ mod tests {
     use hangar_term::Config;
 
     use super::*;
+
+    #[test]
+    fn a_feeder_lets_whoever_waits_for_the_terminal_go_first() {
+        let shared = Arc::new(Shared::new(Terminal::new(Config::default(), 80, 24)));
+        let order = Arc::new(Mutex::new(Vec::new()));
+        // Something holds the terminal; the window comes to wait for it.
+        let held = shared.terminal.lock().unwrap();
+        let window = {
+            let (shared, order) = (shared.clone(), order.clone());
+            std::thread::spawn(move || {
+                let _terminal = shared.lock();
+                order.lock().unwrap().push("window");
+                std::thread::sleep(Duration::from_millis(20));
+            })
+        };
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while shared.waiting() == 0 {
+            assert!(Instant::now() < deadline, "the window never waited");
+            std::thread::yield_now();
+        }
+        // Then the feeder, with output queued.
+        let feeder = {
+            let (shared, order) = (shared.clone(), order.clone());
+            std::thread::spawn(move || {
+                let _terminal = shared.lock_to_feed_within(Duration::from_secs(10));
+                order.lock().unwrap().push("feeder");
+            })
+        };
+        std::thread::sleep(Duration::from_millis(20));
+        drop(held);
+        window.join().unwrap();
+        feeder.join().unwrap();
+        assert_eq!(*order.lock().unwrap(), ["window", "feeder"]);
+        assert_eq!(shared.waiting(), 0);
+    }
+
+    #[test]
+    fn a_feeder_does_not_wait_for_good_on_someone_who_never_comes() {
+        let shared = Shared::new(Terminal::new(Config::default(), 80, 24));
+        // A count left behind (it cannot be, but a feeder must not hang on it).
+        shared.waiting.fetch_add(1, Ordering::AcqRel);
+        let started = Instant::now();
+        drop(shared.lock_to_feed_within(Duration::from_millis(5)));
+        assert!(started.elapsed() < Duration::from_secs(5));
+        // Nobody waiting, nobody holding: at once, either side.
+        shared.waiting.fetch_sub(1, Ordering::AcqRel);
+        drop(shared.lock());
+        drop(shared.lock_to_feed());
+        assert_eq!(shared.waiting(), 0);
+    }
 
     /// The whole path of a pane against a real shell: typing goes out through
     /// the writer thread, the output is parsed on the reader thread into the

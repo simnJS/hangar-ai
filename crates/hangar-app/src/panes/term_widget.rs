@@ -98,20 +98,16 @@ impl Widget<Message, iced::Theme, iced::Renderer> for PaneTerminal<'_> {
         Size::new(Length::Fill, Length::Fill)
     }
 
+    // The tree's tag and state, children and diff do not read the terminal:
+    // answered without its lock, which iced asks for on every rebuild of the
+    // view, so every frame while output flows, for every pane. The inner
+    // widget has no children (iced's defaults, as here).
     fn tag(&self) -> tree::Tag {
-        self.with(|view| Widget::<Message, iced::Theme, iced::Renderer>::tag(view))
+        hangar_term::view_tag()
     }
 
     fn state(&self) -> tree::State {
-        self.with(|view| Widget::<Message, iced::Theme, iced::Renderer>::state(view))
-    }
-
-    fn children(&self) -> Vec<Tree> {
-        self.with(|view| Widget::<Message, iced::Theme, iced::Renderer>::children(view))
-    }
-
-    fn diff(&self, tree: &mut Tree) {
-        self.with(|view| Widget::<Message, iced::Theme, iced::Renderer>::diff(view, tree));
+        hangar_term::view_state()
     }
 
     fn layout(
@@ -167,6 +163,11 @@ impl Widget<Message, iced::Theme, iced::Renderer> for PaneTerminal<'_> {
         viewport: &Rectangle,
         renderer: &iced::Renderer,
     ) -> mouse::Interaction {
+        // Away from the pointer a terminal has nothing to say (the inner
+        // widget's own first answer), and asking it would take the lock.
+        if !cursor.is_over(layout.bounds()) {
+            return mouse::Interaction::None;
+        }
         self.with(|view| view.mouse_interaction(tree, layout, cursor, viewport, renderer))
     }
 

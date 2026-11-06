@@ -199,6 +199,18 @@ pub struct TerminalView<'a, Message, Theme = iced::Theme, Renderer = iced::Rende
     _marker: PhantomData<(Theme, Renderer)>,
 }
 
+/// The tag of a [`TerminalView`]'s tree, which does not depend on the
+/// terminal: for a wrapper that would otherwise lock a shared terminal just
+/// to answer it, as iced asks for it on every rebuild of the view.
+pub fn view_tag() -> tree::Tag {
+    tree::Tag::of::<State>()
+}
+
+/// A fresh [`TerminalView`] tree state, likewise.
+pub fn view_state() -> tree::State {
+    tree::State::new(State::default())
+}
+
 /// A widget that draws `terminal`. `on_action` turns what happens to it into
 /// the app's message; pass the result to [`Terminal::perform`].
 pub fn terminal_view<'a, Message, Theme, Renderer>(
@@ -567,11 +579,11 @@ where
     Renderer: text::Renderer<Font = iced::Font>,
 {
     fn tag(&self) -> tree::Tag {
-        tree::Tag::of::<State>()
+        view_tag()
     }
 
     fn state(&self) -> tree::State {
-        tree::State::new(State::default())
+        view_state()
     }
 
     fn size(&self) -> Size<Length> {
@@ -1798,6 +1810,26 @@ mod tests {
         width: 8.0,
         height: 16.0,
     };
+
+    #[test]
+    fn the_tree_a_wrapper_makes_without_the_terminal_is_the_views_own() {
+        // A wrapper answers the tag and the state with `view_tag` and
+        // `view_state` rather than locking its terminal: they must be what
+        // the view itself answers, or its state would be reset every frame.
+        let terminal = Terminal::new(crate::Config::default(), 80, 24);
+        let view: TerminalView<'_, (), iced::Theme, iced::Renderer> =
+            terminal_view(&terminal, |_| ());
+        assert_eq!(
+            view_tag(),
+            Widget::<(), iced::Theme, iced::Renderer>::tag(&view)
+        );
+        let state = view_state();
+        let tree::State::Some(state) = state else {
+            panic!("a state");
+        };
+        assert!(state.downcast_ref::<State>().is_some());
+        assert!(Widget::<(), iced::Theme, iced::Renderer>::children(&view).is_empty());
+    }
 
     #[test]
     fn shapes_are_built_once_per_metrics() {
