@@ -49,7 +49,7 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use hangar_term::{Action, ClipboardTarget, Event as TermEvent, ScrollTo};
 use iced::futures::stream;
@@ -70,6 +70,7 @@ use crate::state::{Model, PaneId, Patch, StoreAction, Workspace, WsId};
 use controller::{PaneRt, SpawnReport};
 use hub::{Hub, HubChannel};
 use pty_link::{HubEvent, HubKind, Printed};
+use waves::Settling;
 
 pub use search::SearchMsg;
 
@@ -348,11 +349,8 @@ fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Messag
         }
         Msg::LaunchChecked(pane, attempt, running) => match st.panes.get_mut(&pane) {
             Some(rt) => {
-                let task = controller::launch_checked(rt, sv, attempt, running);
-                if rt.launch_checked() {
-                    st.waves.checked(&pane);
-                }
-                task
+                // Under way or not, `release` tells, as it goes.
+                controller::launch_checked(rt, sv, attempt, running)
             }
             None => Task::none(),
         },
@@ -1196,6 +1194,21 @@ fn release(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
         .panes
         .iter()
         .any(|(id, rt)| rt.launch_to_come() && front(m, rt, id));
+    // The resumes typed that are under way hold no wave back any more; the
+    // soonest of the others to settle is when to look again.
+    let mut settles_in: Option<Duration> = None;
+    for id in st.waves.starting().to_vec() {
+        match st.panes.get(&id).map(PaneRt::settling) {
+            None | Some(Settling::Settled) => st.waves.settled(&id),
+            Some(Settling::Printing(wait)) => {
+                st.waves.printing(&id);
+                settles_in = Some(settles_in.map_or(wait, |soonest| soonest.min(wait)));
+            }
+            Some(Settling::In(wait)) => {
+                settles_in = Some(settles_in.map_or(wait, |soonest| soonest.min(wait)));
+            }
+        }
+    }
     let now = Instant::now();
     if !held {
         go.extend(st.waves.due(now));
@@ -1215,7 +1228,7 @@ fn release(st: &mut State, m: &mut Model, sv: &Services) -> Task<Message> {
     }
     // Held, the launch that holds the waves brings them back here as it
     // goes; otherwise one look at a time, the earliest wins.
-    if !held && let Some(wait) = st.waves.next_look(now) {
+    if !held && let Some(wait) = st.waves.next_look(now, settles_in) {
         let at = now + wait;
         if st.wave_look.is_none_or(|look| at < look) {
             st.wave_look = Some(at);
