@@ -147,6 +147,11 @@ pub struct Pane {
     /// A worker in the workspace's own folder (no worktree).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shared_folder: Option<bool>,
+    /// The node this pane runs on when it is not its workspace's: a worker
+    /// a local workspace sent to a node (nodes/away.rs). Its shell, its
+    /// transcripts and its queue are there. Absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node: Option<String>,
     /// The Claude account over its workspace's.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub claude_account: Option<String>,

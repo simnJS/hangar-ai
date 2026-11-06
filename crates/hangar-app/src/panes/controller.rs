@@ -311,8 +311,12 @@ struct Spawn {
     mcp: Option<McpLaunch>,
     /// `pane-scopes` is on: the shell goes into a systemd scope of its own.
     scoped: bool,
-    /// The node of a remote workspace: the shell starts there.
+    /// The node of a remote workspace, or the pane's own: the shell starts
+    /// there.
     node: Option<String>,
+    /// A worker a local workspace sent to a node: its board is this
+    /// machine's (`remote::BOARD_RELAY`).
+    away: bool,
 }
 
 /// What the MCP scope of a launch is made from (`mcpLaunchConfig`).
@@ -326,11 +330,16 @@ struct McpLaunch {
     tr: Translator,
 }
 
-/// What the panes of `ws` reach their shells through: core's PTY manager
-/// `pty`, or the node the workspace lives on.
-pub fn backend_for(ws: &Workspace, pty: &Arc<hangar_core::pty::PtyManager>) -> PtyBackend {
-    match &ws.node {
-        Some(node) => PtyBackend::Remote { node: node.clone() },
+/// What `pane` of `ws` reaches its shell through: core's PTY manager `pty`,
+/// or its node — its own (a worker sent to a node from a local workspace),
+/// else the one the workspace lives on.
+pub fn backend_for(
+    ws: &Workspace,
+    pane: &Pane,
+    pty: &Arc<hangar_core::pty::PtyManager>,
+) -> PtyBackend {
+    match crate::nodes::away::node_of(ws, pane) {
+        Some(node) => PtyBackend::Remote { node },
         None => PtyBackend::Local(pty.clone()),
     }
 }
@@ -353,10 +362,15 @@ pub fn mount(
     let mut terminal = Terminal::new(look.config.clone(), 80, 24);
     terminal.set_palette(look.palette.clone());
     terminal.set_font(look.font.clone());
-    let link = PaneLink::new(pane.id.clone(), terminal, backend_for(ws, sv.core().pty()));
+    let link = PaneLink::new(
+        pane.id.clone(),
+        terminal,
+        backend_for(ws, pane, sv.core().pty()),
+    );
     hub.insert(link.clone());
 
-    let remote = ws.node.is_some();
+    let node = crate::nodes::away::node_of(ws, pane);
+    let remote = node.is_some();
     let login = pane.agent == AgentId::Claude && pane.login == Some(true);
     let account = (pane.agent == AgentId::Claude).then(|| AccountChoice {
         default: settings.claude_account.clone(),
@@ -408,7 +422,8 @@ pub fn mount(
                 settings,
                 crate::settings::experiments::PANE_SCOPES,
             ),
-        node: ws.node.clone(),
+        node,
+        away: crate::nodes::away::pane_node(pane).is_some(),
     };
 
     let task = mounted_then_due(pane.id.clone(), measured);
@@ -632,6 +647,11 @@ impl Spawn {
             bridge: self.bridge,
             port_base: self.port_base,
             mcp,
+            env: if self.away {
+                vec![(crate::nodes::remote::BOARD_RELAY.to_owned(), "1".to_owned())]
+            } else {
+                Vec::new()
+            },
         }
     }
 
@@ -1312,7 +1332,7 @@ pub(crate) fn mounted(ws: &Workspace, pane: &Pane) -> PaneRt {
     let link = PaneLink::new(
         pane.id.clone(),
         Terminal::new(hangar_term::Config::default(), 80, 24),
-        backend_for(ws, &Arc::new(hangar_core::pty::PtyManager::default())),
+        backend_for(ws, pane, &Arc::new(hangar_core::pty::PtyManager::default())),
     );
     PaneRt {
         ws: ws.id.clone(),
@@ -1586,6 +1606,7 @@ mod tests {
             }),
             scoped: false,
             node: None,
+            away: false,
         };
         assert!(spawn.shell.is_none());
 

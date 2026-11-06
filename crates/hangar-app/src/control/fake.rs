@@ -935,4 +935,20 @@ impl AppPort for Fake {
     fn deliveries(&self) -> &Deliveries {
         &self.deliveries
     }
+
+    fn board_request(
+        &self,
+        pane: &PaneId,
+        name: &str,
+        cwd: &str,
+        method: &str,
+        path: &str,
+        body: Option<Value>,
+    ) -> BoxFuture<Result<Value, String>> {
+        self.push(format!(
+            "board:{pane}:{name}:{cwd}:{method} {path}:{}",
+            body.map(|body| body.to_string()).unwrap_or_default()
+        ));
+        ready(Ok(json!({ "task": { "id": "t1" } })))
+    }
 }

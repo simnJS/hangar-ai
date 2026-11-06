@@ -29,6 +29,13 @@ pub enum Gate {
 /// An agent's operation, run to its answer (`runControl`).
 pub async fn run(op: &str, args: Value, port: &Port, gate: Gate) -> Result<Value, String> {
     let snapshot = port.snapshot();
+    // A worker's board, not the panes it drives: never gated by the setting,
+    // as the board's own tools are not.
+    if op == "board_relay" {
+        let caller = Caller::of(&args);
+        let ws = workspace_for(&snapshot.state, &args, &caller)?.clone();
+        return super::board_relay::control(&ws, &args, &caller, port).await;
+    }
     if gate == Gate::Agent && !snapshot.state.settings.agent_pane_control {
         return Err(DISABLED.into());
     }

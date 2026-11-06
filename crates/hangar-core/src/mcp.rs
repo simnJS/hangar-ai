@@ -53,6 +53,33 @@ struct Api {
     base: String,
     token: String,
     cwd: String,
+    /// A worker a local workspace sent to a node (`BOARD_RELAY` set in its
+    /// shell): its board is that workspace's, on the desktop, so the board's
+    /// calls go there through the node's control relay (`board_relay`).
+    relay: bool,
+}
+
+/// Set by the desktop in the shell of a worker it sends to a node.
+pub const BOARD_RELAY: &str = "HANGAR_BOARD_RELAY";
+
+/// The control operation a relayed board call travels as.
+pub const BOARD_RELAY_OP: &str = "board_relay";
+
+/// The calls of the board, which a worker on a node sends to the desktop.
+fn relayed(path: &str) -> bool {
+    ["/api/board", "/api/next", "/api/tasks"]
+        .iter()
+        .any(|prefix| {
+            path == *prefix
+                || path.starts_with(&format!("{prefix}/"))
+                || path.starts_with(&format!("{prefix}?"))
+        })
+}
+
+/// What a relayed call carries: the request the board's route would have
+/// been sent, which the desktop makes to its own API as the worker's pane.
+fn relay_body(method: &str, path: &str, body: Option<Value>) -> Value {
+    json!({ "request": { "method": method, "path": path, "body": body } })
 }
 
 /// The API's URL and token as the pane's environment gives them: the bridge
@@ -85,6 +112,24 @@ impl Api {
             base: base.trim_end_matches('/').to_string(),
             token,
             cwd: workspace_cwd(),
+            relay: env_var(&[BOARD_RELAY]).is_some_and(|value| value == "1"),
+        })
+    }
+
+    /// `method path` relayed to the desktop as `board_relay`, when this is a
+    /// worker on a node and the call is the board's.
+    fn relay(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<Value>,
+    ) -> Option<Result<Value, String>> {
+        (self.relay && relayed(path)).then(|| {
+            self.send(
+                "POST",
+                &format!("/api/control/{BOARD_RELAY_OP}"),
+                relay_body(method, path, body),
+            )
         })
     }
 
@@ -99,6 +144,9 @@ impl Api {
     }
 
     fn get(&self, path: &str) -> Result<Value, String> {
+        if let Some(relayed) = self.relay("GET", path, None) {
+            return relayed;
+        }
         read_api_response(
             ureq::get(&self.url(path))
                 .config()
@@ -111,6 +159,9 @@ impl Api {
     }
 
     fn send(&self, method: &str, path: &str, body: Value) -> Result<Value, String> {
+        if let Some(relayed) = self.relay(method, path, Some(body.clone())) {
+            return relayed;
+        }
         // ureq types requests by whether they carry a body, so DELETE cannot
         // share this builder chain.
         let request = match method {
@@ -130,6 +181,9 @@ impl Api {
     }
 
     fn delete(&self, path: &str) -> Result<Value, String> {
+        if let Some(relayed) = self.relay("DELETE", path, None) {
+            return relayed;
+        }
         read_api_response(
             ureq::delete(&self.url(path))
                 .config()
@@ -1479,9 +1533,19 @@ mod tests {
     /// ever call.
     #[test]
     fn every_window_operation_is_offered_as_a_tool() {
-        for op in crate::control::OPERATIONS {
+        // But the relay of a worker's board calls, which the proxy makes by
+        // itself for the board tools: no agent asks for it.
+        for op in crate::control::OPERATIONS
+            .iter()
+            .filter(|op| **op != BOARD_RELAY_OP)
+        {
             assert_eq!(tool(op)["name"], *op);
         }
+        assert!(tool_definitions()
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|tool| tool["name"] != BOARD_RELAY_OP));
     }
 
     #[test]
@@ -1580,6 +1644,37 @@ mod tests {
 
     /// An orchestrator plans with these: files a task owns, the label that
     /// hands a task to the person, the order tasks run in.
+    /// A worker on a node sends its board's calls, and only those, to the
+    /// desktop: the request as the route would get it.
+    #[test]
+    fn a_worker_on_a_node_relays_its_board_and_nothing_else() {
+        for board in [
+            "/api/board",
+            "/api/next",
+            "/api/tasks",
+            "/api/tasks/t1/comment",
+            "/api/tasks/t1",
+        ] {
+            assert!(relayed(board), "{board}");
+        }
+        for other in [
+            "/api/memory",
+            "/api/control/delivery_submit",
+            "/api/boards",
+            "/api/tasksx",
+        ] {
+            assert!(!relayed(other), "{other}");
+        }
+        assert_eq!(
+            relay_body("POST", "/api/tasks/t1/comment", Some(json!({"text": "hi"}))),
+            json!({"request": {"method": "POST", "path": "/api/tasks/t1/comment", "body": {"text": "hi"}}})
+        );
+        assert!(
+            crate::control::OPERATIONS.contains(&BOARD_RELAY_OP),
+            "it reaches the window"
+        );
+    }
+
     /// A worker can be sent to a node: by its id or name, a string.
     #[test]
     fn worker_spawn_takes_a_node() {

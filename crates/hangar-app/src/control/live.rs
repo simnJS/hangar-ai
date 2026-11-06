@@ -306,6 +306,39 @@ impl AppPort for LivePort {
     fn deliveries(&self) -> &Deliveries {
         &self.shared.deliveries
     }
+
+    /// Through core's own API, with the pane's own token: the board's
+    /// routes then sign, claim and check as that pane, as they do for a
+    /// worker of this machine.
+    fn board_request(
+        &self,
+        pane: &PaneId,
+        name: &str,
+        cwd: &str,
+        method: &str,
+        path: &str,
+        body: Option<Value>,
+    ) -> BoxFuture<Result<Value, String>> {
+        let endpoint = hangar_core::bridge::endpoint().map(|(port, _)| port);
+        let token = hangar_core::server::pane_tokens().issue(pane, Some(name));
+        let separator = if path.contains('?') { '&' } else { '?' };
+        let path = format!("{path}{separator}cwd={}", crate::nodes::wire::encode(cwd));
+        let method = method.to_string();
+        Box::pin(async move {
+            let port = endpoint.ok_or("Hangar.AI's API is not listening yet.")?;
+            let client = crate::nodes::NodeClient {
+                base_url: format!("http://127.0.0.1:{port}"),
+                token,
+            };
+            let answer =
+                crate::nodes::wire::request(&client, &method, &path, body.as_ref()).await?;
+            if answer.ok() {
+                answer.json()
+            } else {
+                Err(answer.error())
+            }
+        })
+    }
 }
 
 /// A pane's terminal through P5's hub.

@@ -294,7 +294,10 @@ fn handle(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Messag
             // The pane went while its shell was starting: the shell would
             // outlive it.
             None if result.as_ref().is_ok_and(|report| report.remote.is_some()) => {
-                match m.find_pane(&pane).and_then(|(ws, _)| ws.node.clone()) {
+                match m
+                    .find_pane(&pane)
+                    .and_then(|(ws, entry)| crate::nodes::away::node_of(ws, entry))
+                {
                     Some(node) => controller::kill_remote(node, pane),
                     // Its workspace is gone too: its node is not known.
                     None => Task::none(),

@@ -523,4 +523,17 @@ impl AppPort for AwayPort {
     fn deliveries(&self) -> &Deliveries {
         self.inner.deliveries()
     }
+
+    fn board_request(
+        &self,
+        pane: &PaneId,
+        name: &str,
+        cwd: &str,
+        method: &str,
+        path: &str,
+        body: Option<Value>,
+    ) -> BoxFuture<Result<Value, String>> {
+        self.inner
+            .board_request(pane, name, cwd, method, path, body)
+    }
 }

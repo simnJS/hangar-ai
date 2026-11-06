@@ -515,11 +515,12 @@ fn every_operation_core_relays_is_answered_here() {
         "worker_stop",
         "delivery_submit",
         "delivery_status",
+        "board_relay",
         "project_list",
         "project_status",
         "project_send",
     ];
-    assert_eq!(handled.len(), 27);
+    assert_eq!(handled.len(), 28);
     assert_eq!(hangar_core::control::OPERATIONS, handled);
 }
 

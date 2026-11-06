@@ -252,7 +252,8 @@ pub fn on_intent(
     };
     // Only Claude Code keeps conversations; a shell has none to list.
     let claude = picker.agent == AgentId::Claude;
-    let node = workspace.node.clone();
+    // A pane on a node (its workspace's, or its own) keeps its sessions there.
+    let node = crate::nodes::away::node_of(workspace, entry);
     st.picker = Some(picker);
     Some(Task::perform(
         async move {

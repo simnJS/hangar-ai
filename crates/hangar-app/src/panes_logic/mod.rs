@@ -1293,7 +1293,7 @@ fn watch_remote(m: &Model, pane: &str, resumed: Option<&str>) -> Task<Message> {
     let Some((ws, found)) = m.find_pane(pane) else {
         return Task::none();
     };
-    let Some(node) = ws.node.clone() else {
+    let Some(node) = crate::nodes::away::node_of(ws, found) else {
         return Task::none();
     };
     let agent = found.agent;
@@ -1443,7 +1443,9 @@ fn slow(st: &mut State, m: &mut Model, now: EpochMs) -> Task<Message> {
         }
         let cwd = watch.cwd.clone();
         // A remote pane's transcripts are on its node.
-        let node = m.find_pane(&pane).and_then(|(ws, _)| ws.node.clone());
+        let node = m
+            .find_pane(&pane)
+            .and_then(|(ws, entry)| crate::nodes::away::node_of(ws, entry));
         tasks.push(Task::perform(
             async move {
                 match node {
@@ -1487,7 +1489,7 @@ fn slow(st: &mut State, m: &mut Model, now: EpochMs) -> Task<Message> {
                                 pane.id.clone(),
                                 session,
                                 folder_of(ws, pane),
-                                ws.node.clone(),
+                                crate::nodes::away::node_of(ws, pane),
                             ));
                         }
                     }

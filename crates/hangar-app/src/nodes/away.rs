@@ -25,9 +25,9 @@
 //!   is Hangar's, nobody works in it: it is made again at each delivery, and
 //!   it goes with the branch once the work lands.
 //!
-//! Which node a pane runs on is the pane's `node` (in its JSON, as the
-//! workspace's is). Until the pane model holds it as a field, it rides in
-//! the pane's extra fields under that same name, which the field will read.
+//! Which node a pane runs on is the pane's `node` (`Pane.node`), as the
+//! workspace's is `Workspace.node`: the pane's first, else its workspace's
+//! (`node_of`).
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -44,14 +44,10 @@ use super::model::NodeClient;
 use super::runner::Runner;
 use super::wire;
 
-/// The pane's JSON field naming the node it runs on.
-pub const PANE_NODE: &str = "node";
-
 /// The node pane `pane` runs on, when it is one sent from a local workspace.
 pub fn pane_node(pane: &Pane) -> Option<String> {
-    pane.extra
-        .get(PANE_NODE)
-        .and_then(Value::as_str)
+    pane.node
+        .as_deref()
         .map(str::trim)
         .filter(|node| !node.is_empty())
         .map(str::to_string)
@@ -59,7 +55,12 @@ pub fn pane_node(pane: &Pane) -> Option<String> {
 
 /// Pane `pane` runs on node `node`.
 pub fn set_pane_node(pane: &mut Pane, node: &str) {
-    pane.extra.insert(PANE_NODE.into(), json!(node));
+    pane.node = Some(node.to_string());
+}
+
+/// The node pane `pane` of `ws` runs on: its own, else its workspace's.
+pub fn node_of(ws: &crate::state::types::Workspace, pane: &Pane) -> Option<String> {
+    pane_node(pane).or_else(|| ws.node.clone())
 }
 
 /// The label of a node: its name, else its SSH target.

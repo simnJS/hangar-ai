@@ -648,12 +648,16 @@ mod remote_tests {
     fn a_workspace_on_a_node_gets_the_remote_backend() {
         let pty = Arc::new(PtyManager::default());
         let local = Workspace::default();
-        assert!(matches!(backend_for(&local, &pty), PtyBackend::Local(_)));
+        let pane = crate::state::Pane::default();
+        assert!(matches!(
+            backend_for(&local, &pane, &pty),
+            PtyBackend::Local(_)
+        ));
         let remote = Workspace {
             node: Some("n1".into()),
             ..Workspace::default()
         };
-        match backend_for(&remote, &pty) {
+        match backend_for(&remote, &pane, &pty) {
             PtyBackend::Remote { node } => assert_eq!(node, "n1"),
             other => panic!("a remote workspace got {other:?}"),
         }
@@ -661,12 +665,33 @@ mod remote_tests {
         let link = PaneLink::new(
             id.clone(),
             Terminal::new(Config::default(), 80, 24),
-            backend_for(&remote, &pty),
+            backend_for(&remote, &pane, &pty),
         );
         assert_eq!(link.node(), Some("n1"));
         assert_eq!(remote::node_of(&id).as_deref(), Some("n1"));
         drop(link);
         assert_eq!(remote::node_of(&id), None, "forgotten with its link");
+    }
+
+    /// A worker a local workspace sent to a node runs there; the others of
+    /// that workspace stay on this machine.
+    #[test]
+    fn a_pane_on_a_node_of_a_local_workspace_gets_the_remote_backend() {
+        let pty = Arc::new(PtyManager::default());
+        let local = Workspace::default();
+        let worker = crate::state::Pane {
+            node: Some("n2".into()),
+            ..crate::state::Pane::default()
+        };
+        match backend_for(&local, &worker, &pty) {
+            PtyBackend::Remote { node } => assert_eq!(node, "n2"),
+            other => panic!("a worker on a node got {other:?}"),
+        }
+        let shell = crate::state::Pane::default();
+        assert!(matches!(
+            backend_for(&local, &shell, &pty),
+            PtyBackend::Local(_)
+        ));
     }
 
     async fn until(what: &str, done: impl Fn() -> bool) {

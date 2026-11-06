@@ -85,7 +85,7 @@ pub fn view<'a>(
     let filter = Box::new(crate::keymap::terminal_filter(ctx));
     let mut terminal = pane_terminal(&rt.link, &pane.id, rt.look.padding, filter)
         .scale(crate::panes::scale_of(st, ctx.window, ctx.metrics.scale));
-    let away = node_away(ctx, ws);
+    let away = node_away(ctx, ws, pane);
     if away.is_some() {
         // Greyed while its node is away: what it shows is the last it heard.
         terminal = terminal.dimmed(t.colors.bg, AWAY_OPACITY);
@@ -128,18 +128,22 @@ pub struct Away {
     pub connecting: bool,
 }
 
-/// `Some` for a pane of a workspace on a node that is not connected: its
-/// terminal is greyed and says so, with a way to reconnect. Its state stays
-/// as it was, and its shell runs on in the node.
-pub fn node_away(ctx: Ctx<'_>, ws: &Workspace) -> Option<Away> {
-    let node = ws.node.as_ref()?;
-    if crate::nodes::client(ctx.model, node).is_some() {
+/// `Some` for a pane on a node that is not connected — of a workspace on a
+/// node, or a worker a local workspace sent to one: its terminal is greyed
+/// and says so, with a way to reconnect. Its state stays as it was, and its
+/// shell runs on in the node.
+pub fn node_away(ctx: Ctx<'_>, ws: &Workspace, pane: &Pane) -> Option<Away> {
+    let node = crate::nodes::away::node_of(ws, pane)?;
+    if crate::nodes::client(ctx.model, &node).is_some() {
         return None;
     }
-    let connecting = matches!(ctx.model.live.nodes.status(node), NodeStatus::Connecting(_));
+    let connecting = matches!(
+        ctx.model.live.nodes.status(&node),
+        NodeStatus::Connecting(_)
+    );
     Some(Away {
-        node: node.clone(),
-        label: crate::nodes::label(ctx.model, node),
+        label: crate::nodes::label(ctx.model, &node),
+        node,
         connecting,
     })
 }
@@ -267,6 +271,49 @@ mod tests {
         );
         let mut ui = h.show(crate::panes::view_workspace(&st, h.ctx(), &id, false));
         assert!(ui.find("Node GPU box is not connected").is_err());
+    }
+
+    /// A worker a local workspace sent to a node: its bar names the node,
+    /// and while that node is away it is greyed and says so; the workspace's
+    /// other panes, of this machine, are drawn as they are.
+    #[test]
+    fn a_worker_on_a_node_names_it_and_says_when_it_is_away() {
+        use crate::nodes::model::NodeInfo;
+        use crate::state::types::NodeConfig;
+        use crate::workspace_dialog::testing::Harness;
+
+        let mut h = Harness::new(hangar_i18n::Locale::En, "graphite").edit(|state| {
+            state.settings.experiments = vec![crate::settings::experiments::NODES.into()];
+            state.settings.nodes = vec![NodeConfig {
+                id: "n1".into(),
+                label: "GPU box".into(),
+                ssh_target: "me@gpu".into(),
+                ..NodeConfig::default()
+            }];
+            let first = &mut state.workspaces[0].panes[0];
+            first.node = Some("n1".into());
+        });
+        let ws = h.model.state().workspaces[0].clone();
+        assert!(ws.node.is_none(), "a workspace of this machine");
+        let mut st = State::default();
+        st.mount_for_test(&ws);
+        let id = ws.id.clone();
+        {
+            let mut ui = h.show(crate::panes::view_workspace(&st, h.ctx(), &id, false));
+            assert!(ui.find("GPU box").is_ok(), "the bar names the node");
+            assert!(ui.find("Node GPU box is not connected").is_ok());
+        }
+        h.model.live.nodes.statuses.insert(
+            "n1".into(),
+            NodeStatus::Connected {
+                info: NodeInfo::default(),
+                local_port: 21012,
+                token: "tok".into(),
+            },
+        );
+        let mut ui = h.show(crate::panes::view_workspace(&st, h.ctx(), &id, false));
+        assert!(ui.find("Node GPU box is not connected").is_err());
+        assert!(ui.find("GPU box").is_ok());
     }
 
     #[test]

@@ -46,6 +46,25 @@ fn an_answer_says_its_status_and_the_nodes_error() {
     assert_eq!(wire::encode("a b/é"), "a%20b%2F%C3%A9");
 }
 
+/// A worker sent from a local workspace asks the node for the variable that
+/// sends its board to this machine.
+#[test]
+fn a_spawn_carries_its_worker_s_variables() {
+    let spawn = RemoteSpawn {
+        id: "p2".into(),
+        cwd: "/home/h/hangar-repos/site-1a-worktrees/w".into(),
+        cols: 80,
+        rows: 24,
+        name: "Nia".into(),
+        agent: "claude".into(),
+        bridge: true,
+        port_base: Some(21020),
+        mcp: None,
+        env: vec![(remote::BOARD_RELAY.into(), "1".into())],
+    };
+    assert_eq!(spawn.body()["env"], json!({ "HANGAR_BOARD_RELAY": "1" }));
+}
+
 #[test]
 fn a_spawn_carries_what_the_node_takes() {
     let spawn = RemoteSpawn {
@@ -63,6 +82,7 @@ fn a_spawn_carries_what_the_node_takes() {
             enabled: vec!["github".into()],
             strict: true,
         }),
+        env: Vec::new(),
     };
     assert_eq!(
         spawn.body(),
@@ -280,6 +300,7 @@ async fn a_pane_finds_its_shell_on_the_node_or_starts_one() {
         bridge: false,
         port_base: None,
         mcp: None,
+        env: Vec::new(),
     };
     let (listener, client) = listen().await;
     let server = tokio::spawn(async move {

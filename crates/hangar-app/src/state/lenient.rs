@@ -613,6 +613,31 @@ mod tests {
         assert!(written.get("node").is_none(), "absent for this machine's");
     }
 
+    /// The node a pane runs on (a worker sent from a local workspace) reads
+    /// the same way, and stays absent from a pane of this machine.
+    #[test]
+    fn a_panes_node_reads_leniently() {
+        let (state, _) = read(json!({
+            "workspaces": [{
+                "id": "local", "cwd": "/home/me",
+                "panes": [
+                    {"id": "p1", "name": "Nia", "node": "n1"},
+                    {"id": "p2", "name": "Ola"},
+                    {"id": "p3", "name": "Max", "node": ["n1"]}
+                ]
+            }]
+        }));
+        let panes = &state.workspaces[0].panes;
+        assert_eq!(panes[0].node.as_deref(), Some("n1"));
+        assert_eq!(panes[1].node, None);
+        assert_eq!(panes[2].node, None);
+        assert_eq!(panes[2].name, "Max", "the rest of it reads");
+        let written = serde_json::to_value(&panes[0]).unwrap();
+        assert_eq!(written["node"], "n1");
+        let written = serde_json::to_value(&panes[1]).unwrap();
+        assert!(written.get("node").is_none(), "absent for this machine's");
+    }
+
     #[test]
     fn a_list_keeps_the_entries_that_read_and_sets_the_others_aside() {
         let (state, kept) = read(json!({

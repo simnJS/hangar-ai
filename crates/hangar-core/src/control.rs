@@ -51,6 +51,9 @@ pub const OPERATIONS: &[&str] = &[
     // orchestration: delivery (lib/deliveryControl.ts)
     "delivery_submit",
     "delivery_status",
+    // a worker sent to a node from a local workspace: its board's calls,
+    // made on the desktop (mcp.rs, `BOARD_RELAY`)
+    "board_relay",
     // orchestration: the project manager (lib/managerControl.ts)
     "project_list",
     "project_status",

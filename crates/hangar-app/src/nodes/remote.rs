@@ -101,7 +101,16 @@ pub struct RemoteSpawn {
     pub bridge: bool,
     pub port_base: Option<u16>,
     pub mcp: Option<RemoteMcp>,
+    /// Variables for a worker's shell (the node applies them to a pane with
+    /// a `port_base`): a worker sent from a local workspace gets
+    /// [`BOARD_RELAY`], so its board is this machine's.
+    pub env: Vec<(String, String)>,
 }
+
+/// Set in the shell of a worker a local workspace sent to a node: its MCP
+/// proxy sends its board's calls to this machine (hangar-core's mcp.rs,
+/// `board_relay`), where its task is, rather than to the node's board.
+pub const BOARD_RELAY: &str = "HANGAR_BOARD_RELAY";
 
 impl RemoteSpawn {
     pub fn body(&self) -> Value {
@@ -116,6 +125,14 @@ impl RemoteSpawn {
         });
         if let Some(port) = self.port_base {
             body["portBase"] = json!(port);
+        }
+        if !self.env.is_empty() {
+            body["env"] = self
+                .env
+                .iter()
+                .map(|(name, value)| (name.clone(), json!(value)))
+                .collect::<serde_json::Map<_, _>>()
+                .into();
         }
         if let Some(mcp) = &self.mcp {
             body["mcp"] = json!({

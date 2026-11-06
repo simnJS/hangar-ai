@@ -219,6 +219,11 @@ pub fn view<'a>(ctx: Ctx<'a>, head: Head<'a>) -> Element<'a, Message> {
         name_tip,
     ));
 
+    // A worker sent to a node from this workspace: where it runs.
+    if let Some(node) = crate::nodes::away::pane_node(pane) {
+        bar = bar.push(node_label(ctx, &node));
+    }
+
     if let Some(branch) = logic.pane_branch(&folder_of(head.ws, pane)) {
         bar = bar.push(branch_label(ctx, branch));
     }
@@ -376,6 +381,30 @@ pub fn view<'a>(ctx: Ctx<'a>, head: Head<'a>) -> Element<'a, Message> {
 
 /// The git branch of the pane's folder, beside its name; a detached head
 /// shows its short sha, marked (`PaneBranchLabel`).
+/// The node a pane of a local workspace runs on, by its label.
+fn node_label<'a>(ctx: Ctx<'a>, node: &str) -> Element<'a, Message> {
+    let t = ctx.theme;
+    let label = crate::nodes::label(ctx.model, node);
+    let words = ctx
+        .i18n
+        .t_with(Key::NodesCreateOnNode, &args!("node" => label.as_str()))
+        .into_owned();
+    let content = row![
+        icon(Icon::Plug, 11.0),
+        text(label)
+            .size(tokens::font_size::LABEL)
+            .wrapping(text::Wrapping::None)
+            .style(style::text::muted(t)),
+    ]
+    .spacing(3)
+    .align_y(Alignment::Center);
+    tip::bottom(
+        t,
+        container(content).max_width(BRANCH_MAX).clip(true),
+        words,
+    )
+}
+
 fn branch_label<'a>(ctx: Ctx<'a>, branch: &'a PaneBranch) -> Element<'a, Message> {
     let t = ctx.theme;
     let (label, words, detached) = match branch {

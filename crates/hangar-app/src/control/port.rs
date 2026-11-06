@@ -276,6 +276,24 @@ pub trait AppPort: Send + Sync + 'static {
     /// (deliveryControl's module state).
     fn deliveries(&self) -> &super::delivery::Deliveries;
 
+    /// A board call of a worker a local workspace sent to a node
+    /// (board_relay.rs): `method path` made to this machine's own API as
+    /// pane `pane` (`name`), on the board of `cwd`; the API's answer.
+    fn board_request(
+        &self,
+        pane: &PaneId,
+        name: &str,
+        cwd: &str,
+        method: &str,
+        path: &str,
+        body: Option<Value>,
+    ) -> BoxFuture<Result<Value, String>> {
+        let _ = (pane, name, cwd, method, path, body);
+        Box::pin(std::future::ready(Err(
+            "The board of this Hangar cannot be reached from a node here.".to_string(),
+        )))
+    }
+
     /// Tells the orchestration engine (`postOrchestratorEvent`). A worker
     /// start or stop during the orchestrator's own turn is `quiet`.
     fn post_event(&self, ws: &WsId, event: OrchestratorEvent, quiet: bool) {
