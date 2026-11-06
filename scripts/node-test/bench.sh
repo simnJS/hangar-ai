@@ -2,15 +2,19 @@
 # Benchmark of a remote pane on the Docker rig, against an isolated Hangar
 # started as e2e.sh starts it: keystroke -> echo latency (the node's API, the
 # desktop's mirrored terminal, a local pane, a local PTY), output throughput
-# (`seq 1 N`), and hangar-node's memory, threads and idle CPU.
+# (`seq 1 N`), hangar-node's memory, threads and idle CPU, and the time from
+# the app's start to a live remote pane (cold, warm, reconnect; per step).
 #   bench.sh [--no-build] [--keep] [--runs N] [--samples N] [--lines N]
-#            [--node-bin PATH] [--app-bin PATH]
+#            [--node-bin PATH] [--app-bin PATH] [--connect-only] [--latency "0 20"]
 #     --no-build    use the binaries already in the target folder
 #     --keep        keep the run's temporary folder (logs, results)
 #     --runs N      runs of each measure, the median reported (default 3)
 #     --samples N   keystrokes per echo run (default 200)
 #     --lines N     lines of `seq` per throughput run (default 2000000)
 #     --node-bin/--app-bin  other binaries (a baseline build) than the target's
+#     --connect-only  only the connect measures
+#     --latency "MS…" the added latencies of the connect measures, each a run
+#                   of its own (default "0 20"; `tc netem` in the container)
 # Container, port and isolation: as e2e.sh (HANGAR_NODE_TEST_CONTAINER,
 # HANGAR_NODE_TEST_PORT, HANGAR_PORT_BASE). Results: printed, and
 # HANGAR_BENCH_OUT (a JSON file) when set.
@@ -26,6 +30,8 @@ samples=200
 lines=2000000
 node_bin=""
 app_bin=""
+connect_only=0
+latencies="0 20"
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-build) build=0 ;;
@@ -35,7 +41,9 @@ while [ $# -gt 0 ]; do
     --lines) lines="$2"; shift ;;
     --node-bin) node_bin="$(realpath "$2")"; build=0; shift ;;
     --app-bin) app_bin="$(realpath "$2")"; build=0; shift ;;
-    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
+    --connect-only) connect_only=1 ;;
+    --latency) latencies="$2"; shift ;;
+    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
@@ -136,7 +144,7 @@ free_port() {
 }
 [ -n "$rig_port" ] || rig_port="$(free_port)" || die "no free port"
 say "rig: container $container on port $rig_port"
-HANGAR_NODE_TEST_PORT="$rig_port" "$here/up.sh" > "$work/rig.log" 2>&1 || { cat "$work/rig.log"; die "the rig did not start"; }
+HANGAR_NODE_TEST_NET_ADMIN=1 HANGAR_NODE_TEST_PORT="$rig_port" "$here/up.sh" > "$work/rig.log" 2>&1 || { cat "$work/rig.log"; die "the rig did not start"; }
 
 git init -q -b main "$work/local" && git -C "$work/local" -c user.name=B -c user.email=b@b commit -q --allow-empty -m init
 cat > "$HANGAR_DATA_ROOT/data/state.json" <<JSON
@@ -158,8 +166,13 @@ JSON
 
 say "app: $app_bin"
 say "node: $node_bin"
-HANGAR_NODE_BINARY="$node_bin" HANGAR_DEV_NODES_CONNECT=1 setsid "$app_bin" >> "$work/app.log" 2>&1 < /dev/null &
-app_pid=$!
+start_app() { # [log]: the isolated app, connecting its node as it starts
+  rm -f "$HANGAR_ENDPOINT_FILE"
+  HANGAR_NODE_BINARY="$node_bin" HANGAR_DEV_NODES_CONNECT=1 HANGAR_NODES_TIMING=1 \
+    setsid "$app_bin" >> "${1:-$work/app.log}" 2>&1 < /dev/null &
+  app_pid=$!
+}
+start_app
 retry 90 test -s "$HANGAR_ENDPOINT_FILE" || { tail -n 20 "$work/app.log"; die "no endpoint after 90 s"; }
 ctl_args=(--root "$work" --endpoint "$HANGAR_ENDPOINT_FILE")
 # The remote pane once its node is deployed, started and connected.
@@ -204,6 +217,7 @@ hz="$(getconf CLK_TCK)"
 cpu_pct() { python3 -I -c "print(round(100 * $1 / $hz / $2, 2))"; }
 
 # --- Measures ----------------------------------------------------------------
+if [ "$connect_only" = 0 ]; then
 say "keystroke -> echo ($samples keys, $runs runs each)"
 for run in $(seq 1 "$runs"); do
   helper local-echo --samples "$samples" | record
@@ -260,6 +274,64 @@ for run in $(seq 1 "$runs"); do
   for i in 1 2 3 4 5 6 7; do helper node-kill "${node_args[@]}" --pane "bench-idle-$i" > /dev/null; done
   sleep 1
 done
+fi
+
+# --- Connect -------------------------------------------------------------------
+# The app quit and started again, until its remote pane shows text (its
+# prompt; the replayed screen on a reconnect). Local: the local workspace
+# shown instead, until its pane shows its prompt (the floor). Cold: no hangar-node on the node (binary, state and daemon gone).
+# Warm: the binary there and its daemon running, the pane not (killed
+# through the node's API): the app makes it. Reconnect: everything as the
+# app left it. Each with each `--latency` added on the container's link
+# (netem on its eth0: what it sends is delayed, so the round trip grows by
+# that much).
+docker cp "$here/e2e_node.sh" "$container:/tmp/e2e_node.sh" >/dev/null
+node_sh() { docker exec -u hangar -e HOME=/home/hangar "$container" bash /tmp/e2e_node.sh "$@"; }
+set_latency() { # <ms>
+  docker exec "$container" tc qdisc del dev eth0 root 2>/dev/null
+  [ "$1" = 0 ] && return 0
+  docker exec "$container" tc qdisc add dev eth0 root netem delay "${1}ms" \
+    || { echo "bench: tc netem refused in the container (no NET_ADMIN?): $1 ms not measured" >&2; return 1; }
+}
+forget_node() { # no hangar-node at all on the node
+  docker exec "$container" pkill -u hangar -f 'hangar-node serve' 2>/dev/null
+  for _ in $(seq 1 40); do docker exec "$container" pgrep -u hangar -f 'hangar-node serve' >/dev/null || break; sleep 0.1; done
+  docker exec -u hangar "$container" rm -rf /home/hangar/.local/share/hangar-node /home/hangar/.local/state/hangar-node
+}
+shown_workspace() { # <id>: the workspace the app opens on
+  python3 -I - "$HANGAR_DATA_ROOT/data/state.json" "$1" <<'PY'
+import json, sys
+path, ws = sys.argv[1], sys.argv[2]
+with open(path, encoding="utf-8") as handle:
+    state = json.load(handle)
+state["activeWorkspaceId"] = ws
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(state, handle)
+PY
+}
+connect_run() { # <kind> <latency>: not in a subshell (app_pid is the caller's)
+  local log="$work/connect-$1-$2ms-$run.log" t0 ws=w-remote pane=Remote
+  stop_app
+  case "$1" in
+    cold) forget_node ;;
+    warm) node_sh api DELETE /node/panes/p-remote > /dev/null 2>&1 || true ;;
+    local) ws=w-local; pane=Local ;;
+  esac
+  shown_workspace "$ws"
+  t0="$(date +%s%N)"
+  start_app "$log"
+  helper connect "${ctl_args[@]}" --since "$t0" --log "$log" --name "connect-$1-$2ms" \
+    "$ws" "$pane" > "$work/connect.json" || { tail -n 20 "$log"; die "connect-$1 ($2 ms) did not finish"; }
+  record < "$work/connect.json"
+}
+say "connect: cold, warm, reconnect, local ($runs runs each, added latency: $latencies ms)"
+for latency in $latencies; do
+  set_latency "$latency" || continue
+  for run in $(seq 1 "$runs"); do
+    for kind in cold warm reconnect local; do connect_run "$kind" "$latency"; done
+  done
+done
+set_latency 0
 
 echo
 say "medians of $runs runs"

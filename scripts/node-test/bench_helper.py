@@ -23,6 +23,11 @@ its API (`--url`, `--token`: node.json's).
                   line after it shows
   desktop-prepare --root R --endpoint F <ws> <pane>
                   a plain bash with a fixed prompt in that pane
+  connect --root R --endpoint F --since NS --log LOG --name NAME <ws> <pane>
+                  an app just started (at NS, epoch nanoseconds): milliseconds
+                  until its endpoint file, then until the pane shows its first
+                  text (its prompt, or the screen replayed), and the
+                  connection's steps from LOG (HANGAR_NODES_TIMING lines)
   report <results.jsonl> <out.json>
                   the median of each number over the runs of each measure
 
@@ -427,7 +432,7 @@ class Control:
         self.token = ep["token"]
         self.http = None
 
-    def call(self, op, body):
+    def call(self, op, body, strict=True):
         for attempt in (1, 2):
             if self.http is None:
                 self.http = http.client.HTTPConnection("127.0.0.1", self.port, timeout=60)
@@ -453,11 +458,68 @@ class Control:
                 continue
             value = json.loads(text) if text else None
             if answer.status >= 300 or (isinstance(value, dict) and value.get("ok") is False):
+                if not strict:
+                    return None
                 die(f"{op}: {text}")
             if isinstance(value, dict) and value.get("ok") is True and "value" in value:
                 return value["value"]
             return value
         return None
+
+
+def shown(control, workspace, pane):
+    """The pane's text, or None while the app cannot say (no such pane yet,
+    or its terminal not up)."""
+    try:
+        value = control.call("pane_read", {"workspace": workspace, "pane": pane, "lines": 5}, strict=False)
+    except (OSError, http.client.HTTPException, ValueError):
+        return None
+    return value.get("text", "") if isinstance(value, dict) else None
+
+
+def cmd_connect(args):
+    opts, rest = options(
+        args, ["root", "endpoint", "since", "log", "name"], ["root", "endpoint", "since", "log", "name"]
+    )
+    workspace, pane = rest
+    since = int(opts["since"])
+    ms = lambda: round((time.time_ns() - since) / 1e6, 1)
+    if not inside(opts["root"], opts["endpoint"]):
+        die(f"refusing endpoint {opts['endpoint']}: not under the bench's folder {opts['root']}")
+    deadline = time.monotonic() + 120
+    while not os.path.exists(opts["endpoint"]) or os.path.getsize(opts["endpoint"]) == 0:
+        if time.monotonic() > deadline:
+            die("no endpoint after 120 s")
+        time.sleep(0.002)
+    result = {"measure": opts["name"], "endpoint_ms": ms()}
+    control = Control(opts["root"], opts["endpoint"])
+    while True:
+        text = shown(control, workspace, pane)
+        if text is not None and text.strip():
+            result["prompt_ms"] = ms()
+            break
+        if time.monotonic() > deadline:
+            die(f"no text in {pane} after 120 s")
+        time.sleep(0.003)
+    # The connection's steps, as the app logged them (connect.rs `Laps`).
+    with open(opts["log"], encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            if not line.startswith("nodes timing: "):
+                continue
+            fields = dict(f.split("=", 1) for f in line[len("nodes timing: "):].split() if "=" in f)
+            step, at = fields.get("step"), fields.get("at")
+            if not step or not at:
+                continue
+            at_ms = round(int(at) - since / 1e6, 1)
+            if step == "begin":
+                result.setdefault("begin_at_ms", at_ms)
+            elif step == "stream":
+                result.setdefault("stream_at_ms", at_ms)
+            else:
+                result.setdefault(f"{step}_ms", int(fields.get("ms", 0)))
+                if step == "handshake":
+                    result.setdefault("connected_at_ms", at_ms)
+    print(json.dumps(result))
 
 
 def last_line(control, workspace, pane):
@@ -572,6 +634,7 @@ COMMANDS = {
     "desktop-prepare": cmd_desktop_prepare,
     "desktop-echo": cmd_desktop_echo,
     "desktop-flood": cmd_desktop_flood,
+    "connect": cmd_connect,
     "report": cmd_report,
 }
 

@@ -300,6 +300,7 @@ pub async fn follow(
         };
         match connected {
             Some(Ok(mut socket)) => {
+                super::connect::timing_line(&format!("node={node} pane={pane} step=stream ms=0"));
                 wait = backoff.first;
                 let sized = match &size {
                     Some(resize) => socket.send_text(&resize.frame()).await.is_ok(),

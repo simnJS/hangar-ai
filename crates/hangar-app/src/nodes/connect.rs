@@ -10,8 +10,8 @@
 //! package also holds, so quitting can kill it synchronously, without
 //! waiting for the task to be dropped.
 
-use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::state::types::NodeConfig;
 
@@ -27,6 +27,51 @@ pub type TunnelSlot<T> = Arc<Mutex<Option<T>>>;
 
 pub fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poison| poison.into_inner())
+}
+
+/// `HANGAR_NODES_TIMING=1`: each step of a connection timed on stderr, one
+/// line each (`nodes timing: node=<id> step=<step> ms=<its time>
+/// at=<epoch ms>`), which `scripts/node-test/bench.sh` reads.
+pub fn timing_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var("HANGAR_NODES_TIMING").is_ok_and(|value| value == "1"))
+}
+
+/// One timing line, when they are asked for.
+pub fn timing_line(fields: &str) {
+    if timing_on() {
+        let at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |since| since.as_millis());
+        eprintln!("nodes timing: {fields} at={at}");
+    }
+}
+
+/// The steps of one connection, timed.
+struct Laps<'a> {
+    node: &'a str,
+    last: Instant,
+}
+
+impl<'a> Laps<'a> {
+    fn new(node: &'a str) -> Self {
+        timing_line(&format!("node={node} step=begin ms=0"));
+        Laps {
+            node,
+            last: Instant::now(),
+        }
+    }
+
+    /// `step` is over: its time since the last one.
+    fn lap(&mut self, step: &str) {
+        let now = Instant::now();
+        timing_line(&format!(
+            "node={} step={step} ms={}",
+            self.node,
+            (now - self.last).as_millis()
+        ));
+        self.last = now;
+    }
 }
 
 /// The waits of a connection; the tests shorten them.
@@ -103,9 +148,11 @@ pub async fn connect_once<R: Runner>(
     report: &(impl Fn(NodeStatus) + Send + Sync),
 ) -> Result<(NodeInfo, u16, String), Failure> {
     let node = &setup.node;
+    let mut laps = Laps::new(&node.id);
 
     report(NodeStatus::Connecting(Step::Probe));
     let output = run_ok(runner, commands::probe(node), Step::Probe).await?;
+    laps.lap("probe");
     let probe = parse_probe(&output.stdout).map_err(|detail| Failure::Ssh {
         step: Step::Probe,
         detail,
@@ -121,14 +168,17 @@ pub async fn connect_once<R: Runner>(
         if let Decision::Update { .. } = decision {
             stop_older_daemon(runner, setup).await;
         }
+        laps.lap("install");
     }
 
     report(NodeStatus::Connecting(Step::Start));
     run_ok(runner, commands::serve(node), Step::Start).await?;
+    laps.lap("start");
 
     report(NodeStatus::Connecting(Step::Config));
     let output = run_ok(runner, commands::read_node_json(node), Step::Config).await?;
     let json = parse_node_json(&output.stdout).map_err(Failure::NodeJson)?;
+    laps.lap("config");
 
     report(NodeStatus::Connecting(Step::Tunnel));
     let local = runner.free_port().map_err(Failure::Local)?;
@@ -138,6 +188,7 @@ pub async fn connect_once<R: Runner>(
     if let Some(mut old) = locked(slot).replace(tunnel) {
         old.kill();
     }
+    laps.lap("tunnel");
 
     report(NodeStatus::Connecting(Step::Handshake));
     let mut last = String::new();
@@ -154,7 +205,10 @@ pub async fn connect_once<R: Runner>(
             return Err(Failure::Tunnel(why));
         }
         match runner.node_info(local, json.token.clone()).await {
-            Ok(info) => return Ok((info, local, json.token)),
+            Ok(info) => {
+                laps.lap("handshake");
+                return Ok((info, local, json.token));
+            }
             Err(err) => last = err,
         }
     }

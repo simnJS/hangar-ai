@@ -2,6 +2,8 @@
 # Build and start the test node: sshd on 127.0.0.1:<port>, user `hangar`, key auth.
 #   up.sh [--arm64] [--with-claude]
 # Port: HANGAR_NODE_TEST_PORT, else the first free one from 2222.
+# HANGAR_NODE_TEST_NET_ADMIN=1: the container may shape its own link
+# (`tc qdisc ... netem delay`, what bench.sh adds latency with).
 set -euo pipefail
 # shellcheck source=lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -12,7 +14,7 @@ for a in "$@"; do
   case "$a" in
     --arm64) platform="linux/arm64" ;;
     --with-claude) with_claude=1 ;;
-    -h|--help) sed -n '2,4p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,6p' "$0"; exit 0 ;;
     *) echo "unknown argument: $a" >&2; exit 2 ;;
   esac
 done
@@ -51,6 +53,7 @@ fi
 
 run=(docker run -d --name "$CONTAINER" -p "127.0.0.1:$port:22")
 [ -n "$platform" ] && run+=(--platform "$platform")
+[ "${HANGAR_NODE_TEST_NET_ADMIN:-}" = 1 ] && run+=(--cap-add NET_ADMIN)
 "${run[@]}" "$tag" >/dev/null
 
 docker cp "$KEY.pub" "$CONTAINER:/home/hangar/.ssh/authorized_keys"
