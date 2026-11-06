@@ -14,6 +14,7 @@ Every release, with its installers, is on the
 
 - **Chat view (experimental).** Turn it on in Settings › Experiments, then switch any workspace between its panes and a chat with its orchestrator. Claude Code keeps running in the panes behind it; a side panel lists the board's tasks with the progress their agents report, and kits, previews and the 3D view open beside the chat as they do in the grid.
 - Agents can report how far along a task is (`board_report_progress`, over MCP and HTTP): a percentage and a short note, shown with the task. Workers are asked to report at each real step.
+- **Nodes (experimental).** A headless Hangar, `hangar-node`, runs on a Linux machine you reach over SSH: add it in Settings › Nodes and Hangar installs it, starts it and keeps a tunnel to it. A workspace can then live on the node: its terminals, Claude Code and board run there, and the window shows them like a local workspace's, catching up on what happened while it was away. Design in `docs/native/nodes.md`.
 - **Pane scopes (experimental, Linux).** Each pane can run in a systemd scope of its own, so when memory runs out the system stops the pane that uses it (a build, say) rather than Hangar and every agent with it.
 
 ### Fixed
