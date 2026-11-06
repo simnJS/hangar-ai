@@ -265,6 +265,27 @@ What needs a browser engine, a PDF, a web page, a video or an HTML kit tab, open
 `hangar-webview`, a small helper program beside Hangar, in a window of its own; its pane
 holds a card that brings the window forward, and closing the pane closes the window.
 
+### Experiments
+
+Settings › Experiments turns on features that work but may still change. They are off
+until you enable them, and each can be turned off again without losing anything.
+
+- **Chat view.** Switch a workspace between its panes and a chat with its orchestrator.
+  Claude Code keeps running in the panes behind it; a side panel lists the board's tasks
+  with the progress their agents report (`board_report_progress`), and kits, previews and
+  the 3D view open beside the chat as they do in the grid. Claude's questions and
+  permission prompts become cards you answer in the chat.
+- **Nodes.** Run a headless Hangar, `hangar-node`, on a Linux machine you reach over SSH
+  (x86_64 or arm64: a server, a VPS, a GPU box, a Raspberry Pi). Add it in Settings › Nodes
+  with its SSH target: Hangar installs it with your SSH keys, starts it and keeps a tunnel
+  to it, with nothing to open on the server. A workspace can then live on the node: its
+  terminals, Claude Code, board and memory run there, the window shows them like a local
+  workspace's, and it catches up on what happened while your computer was off. Design:
+  [docs/native/nodes.md](docs/native/nodes.md).
+- **Pane scopes** (Linux). Each pane runs in a systemd scope of its own, so when memory runs
+  out the system stops the pane that uses it, a build for instance, rather than Hangar and
+  every agent with it.
+
 ### Also
 
 - **Dictation.** Hold a key, speak, and the text is typed into the focused pane. It runs
