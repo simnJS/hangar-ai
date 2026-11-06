@@ -422,11 +422,9 @@ fn action<'a>(
         container(
             text(call.title.to_string())
                 .size(tokens::font_size::UI)
-                .style(style::text::secondary(t))
-                .wrapping(text::Wrapping::None),
+                .style(style::text::secondary(t)),
         )
-        .width(Length::Fill)
-        .clip(true),
+        .width(Length::Fill),
     ]
     .spacing(tokens::space::MD)
     .align_y(Alignment::Center);

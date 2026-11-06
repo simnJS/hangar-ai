@@ -345,6 +345,32 @@ fn each_kind_of_item_is_drawn() {
 }
 
 #[test]
+fn a_long_action_title_is_drawn_whole_and_wraps() {
+    let long = "A very long task title that would have been cut in the middle of a word by the old single line";
+    let mut m = shop(true);
+    let mut st = State::default();
+    read_into(
+        &mut st,
+        &mut m,
+        page(
+            vec![item(
+                "c1",
+                Body::Action {
+                    tool: "mcp__hangar__board_create_task".into(),
+                    title: "Used board_create_task".into(),
+                    detail: Some(json!({ "title": long }).to_string()),
+                    result: None,
+                    state: CallState::Done,
+                },
+            )],
+            None,
+        ),
+    );
+    let whole = format!("Created task “{long}”");
+    assert_eq!(shown_texts(&st, &m, &[whole.as_str()]), [whole.as_str()]);
+}
+
+#[test]
 fn a_code_block_gets_its_colours_off_the_ui_thread() {
     let mut m = shop(true);
     let mut st = State::default();
