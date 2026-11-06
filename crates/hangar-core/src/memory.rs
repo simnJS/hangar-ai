@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::board::{locked, Stamp};
 use crate::host::{Event, Host};
+use crate::store::{write_atomic, Access};
 
 /// Hard ceilings, enforced with an explicit error rather than by truncating.
 ///
@@ -563,10 +564,11 @@ fn write_memory(dir: &Path, memory: &Memory) -> Result<(), String> {
     fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let path = memory_path(dir);
     let body = serde_json::to_string_pretty(memory).map_err(|e| e.to_string())?;
-    let tmp = path.with_extension("json.tmp");
-    // Write-then-rename, so a crash mid-save cannot truncate the real file.
-    fs::write(&tmp, body).map_err(|e| e.to_string())?;
-    fs::rename(&tmp, &path).map_err(|e| e.to_string())
+    // The same write as board.json: a temporary file with a name of its own
+    // (two writers never share one), flushed to disk, renamed over the real
+    // file, and the folder flushed so the rename survives a power cut too.
+    // A fixed `.tmp` name and no fsync could leave an empty memory.json.
+    write_atomic(&path, body.as_bytes(), Access::AsBefore)
 }
 
 /// Why a store operation failed.
@@ -1120,10 +1122,85 @@ mod tests {
         assert_eq!(reread.entries.len(), 1);
         assert_eq!(reread.entries[0].title, "Persisted");
         assert!(memory_path(&dir).is_file());
-        assert!(
-            !dir.join("memory.json.tmp").exists(),
+        assert_eq!(
+            files_in(&dir),
+            vec!["memory.json".to_string()],
             "the temporary file has to be renamed away, not left behind"
         );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    fn files_in(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// A write goes through the durable path: the file holds the whole
+    /// memory, parses back, and nothing else is left in the folder.
+    #[test]
+    fn a_write_is_complete_and_leaves_no_temporary_file() {
+        let dir = temp_dir("complete");
+        let mut memory = Memory::default();
+        for i in 0..50 {
+            upsert(&mut memory, fact(&format!("fact {i}"), &"x".repeat(500))).unwrap();
+        }
+        write_memory(&dir, &memory).expect("write");
+
+        let raw = fs::read_to_string(memory_path(&dir)).unwrap();
+        assert_eq!(raw, serde_json::to_string_pretty(&memory).unwrap());
+        assert_eq!(files_in(&dir), vec!["memory.json".to_string()]);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Two writers at once (two processes, or a store bypassed by a second
+    /// instance) used to share `memory.json.tmp`: one could rename the
+    /// other's half-written file into place, or fail on a vanished one.
+    /// Each now has its own temporary file, so every write succeeds and the
+    /// file ends as one of them, whole.
+    #[test]
+    fn concurrent_writes_do_not_clobber_each_other_s_temporary_file() {
+        let dir = temp_dir("concurrent");
+        fs::create_dir_all(&dir).unwrap();
+        let bodies: Vec<Memory> = (0..8)
+            .map(|n| {
+                let mut memory = Memory::default();
+                for i in 0..20 {
+                    upsert(
+                        &mut memory,
+                        fact(&format!("writer {n} fact {i}"), &n.to_string().repeat(2000)),
+                    )
+                    .unwrap();
+                }
+                memory
+            })
+            .collect();
+
+        std::thread::scope(|scope| {
+            for memory in &bodies {
+                let dir = &dir;
+                scope.spawn(move || {
+                    for _ in 0..10 {
+                        write_memory(dir, memory).expect("every write has to go through");
+                    }
+                });
+            }
+        });
+
+        let raw = fs::read_to_string(memory_path(&dir)).unwrap();
+        assert!(
+            bodies
+                .iter()
+                .any(|memory| serde_json::to_string_pretty(memory).unwrap() == raw),
+            "the file has to be one writer's memory, whole"
+        );
+        assert_eq!(files_in(&dir), vec!["memory.json".to_string()]);
 
         fs::remove_dir_all(&dir).ok();
     }

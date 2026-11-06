@@ -172,22 +172,32 @@ impl Cost {
 
 /// What one call would have cost at list price; `None` for a model without
 /// a price.
+///
+/// This looks the model up first. A loop over many calls resolves the
+/// `Pricing` once per model with `pricing()` and asks `Pricing::cost`.
 pub fn call_cost(model: &str, tokens: &CallTokens) -> Option<Cost> {
-    let pricing = pricing(model)?;
-    let prompt = tokens.input + tokens.cache_write_5m + tokens.cache_write_1h + tokens.cache_read;
-    let rates = match pricing.long {
-        Some(long) if prompt > long.over => long.rates,
-        _ => pricing.rates,
-    };
-    let speed = if tokens.fast { pricing.fast } else { 1.0 };
-    let per = |count: u64, rate: f64| count as f64 * rate * speed / 1_000_000.0;
-    Some(Cost {
-        input: per(tokens.input, rates.input),
-        output: per(tokens.output, rates.output),
-        cache_write: per(tokens.cache_write_5m, rates.cache_write_5m)
-            + per(tokens.cache_write_1h, rates.cache_write_1h),
-        cache_read: per(tokens.cache_read, rates.cache_read),
-    })
+    pricing(model).map(|pricing| pricing.cost(tokens))
+}
+
+impl Pricing {
+    /// What one call would have cost at these prices.
+    pub fn cost(&self, tokens: &CallTokens) -> Cost {
+        let prompt =
+            tokens.input + tokens.cache_write_5m + tokens.cache_write_1h + tokens.cache_read;
+        let rates = match self.long {
+            Some(long) if prompt > long.over => long.rates,
+            _ => self.rates,
+        };
+        let speed = if tokens.fast { self.fast } else { 1.0 };
+        let per = |count: u64, rate: f64| count as f64 * rate * speed / 1_000_000.0;
+        Cost {
+            input: per(tokens.input, rates.input),
+            output: per(tokens.output, rates.output),
+            cache_write: per(tokens.cache_write_5m, rates.cache_write_5m)
+                + per(tokens.cache_write_1h, rates.cache_write_1h),
+            cache_read: per(tokens.cache_read, rates.cache_read),
+        }
+    }
 }
 
 #[cfg(test)]

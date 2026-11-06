@@ -214,8 +214,10 @@ pub fn aggregate<'a>(
             .extend(digest.stamps.iter().filter(|&&at| seen_stamps.insert(at)));
 
         // The digest's own model numbers, made the answer's once per file
-        // rather than looked up by name once per call.
-        let mut numbered: Vec<Option<i32>> = vec![None; digest.models.len() + 1];
+        // rather than looked up by name once per call — with the model's
+        // price grid, which costs a lowercased copy and a table search.
+        let mut numbered: Vec<Option<(i32, Option<&'static pricing::Pricing>)>> =
+            vec![None; digest.models.len() + 1];
         for call in &digest.calls {
             if call.key != 0 && !seen.insert(call.key) {
                 continue;
@@ -229,11 +231,12 @@ pub fn aggregate<'a>(
                 .get(known)
                 .map(String::as_str)
                 .unwrap_or("unknown");
-            let model_at = *numbered[known].get_or_insert_with(|| {
-                *model_index.entry(model).or_insert_with(|| {
+            let (model_at, price) = *numbered[known].get_or_insert_with(|| {
+                let at = *model_index.entry(model).or_insert_with(|| {
                     models.push(model.to_string());
                     (models.len() - 1) as i32
-                })
+                });
+                (at, pricing::pricing(model))
             });
             let tokens = CallTokens {
                 input: call.input,
@@ -248,7 +251,7 @@ pub fn aggregate<'a>(
             row.output += call.output;
             row.cache_write += call.cache_write_5m + call.cache_write_1h;
             row.cache_read += call.cache_read;
-            let cost = pricing::call_cost(model, &tokens).unwrap_or_default();
+            let cost = price.map(|price| price.cost(&tokens)).unwrap_or_default();
             row.cost += cost.total();
             row.cost_input += cost.input;
             row.cost_output += cost.output;
