@@ -132,11 +132,12 @@ pub fn generate_token() -> String {
     )
 }
 
-#[cfg(test)]
+// Its one test is about Unix permission bits: on Windows the module would be
+// empty and its import unused.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
-    #[cfg(unix)]
     #[test]
     fn the_endpoint_file_and_its_folder_are_the_owner_s_alone() {
         use std::os::unix::fs::PermissionsExt;
