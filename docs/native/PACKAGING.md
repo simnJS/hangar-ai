@@ -214,6 +214,52 @@ release workflow: nobody reads a node's backtrace from its file.) `panic` stays
 AVIF decoders, the 3D loader, kit tabs, dictation and the git consent
 callbacks, and `"abort"` would turn each of those into a crash.
 
+### What is in the executable
+
+`cargo bloat --profile dist -p hangar-app --crates` on the dist build above
+(78.8 MB): 47 MiB of code, of which the app's own crates are about 9 MiB
+(hangar_ai 5.7, hangar_core 1.8, hangar_model3d, hangar_kit_host,
+hangar_kit_ui), Rust's `std` 5.5, Cranelift (the compiler of kit tabs:
+codegen, its x64 assembler, regalloc2, wasmtime's glue) about 5.5, tokio 1.3,
+naga 1.1, the image codecs about 2.5, whisper.cpp 0.9, zbus and zvariant 1.5.
+The symbol table is 13 MB of the file. What is embedded with `include_bytes!`
+and rust-embed is small: Inter (0.9 MB), the kit SDK (0.2 MB), Hangar Mobile's
+`dist-mobile/` (1 MB), bat's syntaxes through two-face (0.9 MB, already
+compressed) and the shaders; no blob is worth compressing.
+
+What was cut, each step measured on a dist build of `hangar-ai` and
+`hangar-node` (not stripped; the release strips hangar-node):
+
+| Change | hangar-ai | hangar-node | Cost at run time |
+| --- | --- | --- | --- |
+| before | 78.8 MB | 10.05 MB | |
+| iced's `image-without-codecs` instead of `image`: the image crate's every codec was on (EXR, TIFF, DDS, HDR, QOI, PNM, ICO, farbfeld and rav1e, an AVIF *encoder*), the app reads PNG, JPEG, GIF, WebP, BMP and decodes AVIF itself; wasmtime without its default features (`wat` and its `wast` parser, the component model, GC, async, the pooling allocator, profiling, coredumps, debugger hooks, addr2line) | −6.5 MB | — | none; a `.tiff` or `.ico` in a kit tab or a Markdown page no longer shows, which the kit API never promised (`image.size` names the five formats) |
+| `opt-level = "s"` for Cranelift, regalloc2, wasmparser, wasmtime-environ, naga, zbus and zvariant (`[profile.dist.package.*]` in `Cargo.toml`) | −3.9 MB | | a kit tab's first compile (no cache entry yet) of a 600 KB module: 33–36 ms → 37–40 ms (one thread: +18%); the renderers' shaders: 1.27 → 1.50 ms at start |
+| the same for glTF and OBJ readers, rustls and ureq, the keychain, notifications, web push, the QR code, the Discord presence, wasmtime's cache and zstd | −1.3 MB | −0.14 MB (ureq, rustls, zbus) | a 36 MB OBJ loads in the same time; the STL reader was left at full speed (a 50 MB STL took a fifth longer at `s`), FBX and PLY with it |
+| **after** | **67.1 MB** (55.4 stripped, from 65.8) | **9.90 MB** | |
+
+What `opt-level` per package does under fat LTO: rustc marks each function
+of the crate `optsize`, which LLVM keeps through the link-time optimisation.
+Nothing the app runs every frame or for every byte of a pane is in the list:
+hangar-term, alacritty_terminal, iced, wgpu, the codecs of the preview, the
+AV1 decoder and whisper.cpp stay at `opt-level = 3`. The feed bench runs none
+of the listed crates; open4's start runs naga (the 0.25 ms above) and a D-Bus
+call or two, well inside its ±30 ms spread.
+
+Looked at and left:
+
+- **Duplicate versions** (`cargo tree -d -e normal`): all come from upstream
+  crates' own pins (iced's tiny-skia renderer on kurbo 0.10 and resvg's gif
+  0.13, cosmic-text's two skrifa, wasmtime's sha2 0.10 next to hangar-core's
+  0.11, auto-launch's dirs 4, web-push's aes 0.8 next to the keychain's 0.9),
+  none of which a version or feature in this workspace can unify.
+- **wgpu's backends**: Vulkan and GLES on Linux; GLES is the fallback of a
+  machine without Vulkan, and stays.
+- **syntect**: `default-fancy` (pure Rust regex) is what iced's highlighter
+  asks for; two-face's syntax set is the one the preview needs.
+- **hangar-node**: 5.8 MiB of code, std, hangar-core, axum, tokio, rustls,
+  regex; nothing unused.
+
 ## 3. Building each bundle by hand
 
 Common to all: `pnpm install && pnpm mobile:build` first (Hangar Mobile's
