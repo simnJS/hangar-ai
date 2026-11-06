@@ -47,8 +47,9 @@ for binary in hangar-ai hangar-webview; do
 done
 
 # hangar-node for Linux x86_64 and arm64, which this Mac uploads to a node:
-# in Contents/MacOS with the rest, through the packager's `binaries`.
-stage_node_binaries "$target_dir" "$universal"
+# checked in target/node, from where the packager's `resources` put them in
+# Contents/Resources (not Contents/MacOS: codesign refuses ELF files there).
+stage_node_binaries "$target_dir"
 
 # cargo-packager looks for the binaries in target/<--target>/<--profile>, and
 # names the disk image after the target: Hangar.AI_<version>_universal.dmg.

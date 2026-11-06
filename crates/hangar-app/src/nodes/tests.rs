@@ -33,8 +33,6 @@ fn line(cmd: &Cmd) -> String {
         .join(" | ")
 }
 
-// ── command lines ─────────────────────────────────────────────────────
-
 const OWN: &str = "/run/user/1000/hangar-ssh/42-ab";
 
 fn own() -> Mux {
@@ -145,8 +143,6 @@ fn the_target_is_trimmed() {
     assert_eq!(commands::ssh(&n, &Mux::Off, "true").args[4], "me@box");
 }
 
-// ── sharing one connection (ControlMaster) ────────────────────────────
-
 #[test]
 fn unix_shares_the_connection_and_windows_does_not() {
     let config = "user me\nhostname box\ncontrolmaster false\ncontrolpersist no\n";
@@ -249,8 +245,6 @@ fn the_control_socket_is_this_process_s_and_short() {
     assert!(name.len() <= 27, "{name}");
     assert_ne!(path, connect::control_path(dir, "another-node"));
 }
-
-// ── what is read back ─────────────────────────────────────────────────
 
 #[test]
 fn the_probe_reads_each_answer() {
@@ -385,6 +379,41 @@ fn the_binary_comes_from_the_override_then_beside_the_executable() {
 }
 
 #[test]
+fn the_binary_is_found_in_a_package_s_resources() {
+    let dir = tempfile::tempdir().unwrap();
+    // macOS: Hangar.AI.app/Contents/{MacOS,Resources}.
+    let contents = dir.path().join("Contents");
+    std::fs::create_dir_all(contents.join("MacOS")).unwrap();
+    std::fs::create_dir_all(contents.join("Resources")).unwrap();
+    let in_resources = contents.join("Resources/hangar-node-aarch64");
+    std::fs::write(&in_resources, b"bin").unwrap();
+    let mac = BinarySource {
+        override_path: None,
+        exe_dir: Some(contents.join("MacOS")),
+    };
+    let found = mac.binary_for("arm64").unwrap();
+    assert_eq!(
+        found.canonicalize().unwrap(),
+        in_resources.canonicalize().unwrap()
+    );
+    // Linux packages: usr/bin beside usr/lib/hangar-ai.
+    let usr = dir.path().join("usr");
+    std::fs::create_dir_all(usr.join("bin")).unwrap();
+    std::fs::create_dir_all(usr.join("lib/hangar-ai")).unwrap();
+    let in_lib = usr.join("lib/hangar-ai/hangar-node-x86_64");
+    std::fs::write(&in_lib, b"bin").unwrap();
+    let linux = BinarySource {
+        override_path: None,
+        exe_dir: Some(usr.join("bin")),
+    };
+    let found = linux.binary_for("x86_64").unwrap();
+    assert_eq!(
+        found.canonicalize().unwrap(),
+        in_lib.canonicalize().unwrap()
+    );
+}
+
+#[test]
 fn a_target_is_one_argument_that_is_not_an_option() {
     assert_eq!(target_problem("me@box"), None);
     assert_eq!(target_problem("box"), None);
@@ -487,8 +516,6 @@ fn http_get_sends_the_token_and_reads_the_answer() {
     assert_eq!(info.hostname, "h");
 }
 
-// ── settings ──────────────────────────────────────────────────────────
-
 #[test]
 fn nodes_are_read_leniently_and_written_only_when_there_are_some() {
     let state = read_state(serde_json::json!({"settings": {"nodes": [
@@ -523,8 +550,6 @@ fn a_reset_of_the_settings_keeps_the_nodes() {
     m.apply(StoreAction::ResetSettings);
     assert_eq!(m.settings().nodes, vec![node(None)]);
 }
-
-// ── status and client ─────────────────────────────────────────────────
 
 #[test]
 fn the_client_is_there_only_while_connected() {
@@ -590,8 +615,6 @@ async fn a_status_from_an_older_connection_is_dropped() {
     );
     assert_eq!(live.status("other"), NodeStatus::Disconnected);
 }
-
-// ── the state machine, against a fake machine ─────────────────────────
 
 /// A machine: the answers to the commands, in order (the link's session
 /// takes one too), and a tunnel the test can end.

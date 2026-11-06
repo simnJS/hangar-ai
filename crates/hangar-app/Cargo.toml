@@ -124,19 +124,23 @@ icons = [
 # executable (hangar_webview::find_helper), and every format puts all of the
 # binaries in the one folder: usr/bin, Contents/MacOS, the install folder.
 #
-# The two `hangar-node-<arch>` files are the headless node daemon built for
-# Linux x86_64 and arm64, which the desktop uploads to a node over SSH
-# (hangar_app::nodes::model::BinarySource looks for them in this same folder).
-# They are not built by this package: the release workflow builds them with
-# `-p hangar-node` and packaging/common.sh's stage_node_binaries puts them in the
-# folder the packager reads, whatever the platform it packages for. On macOS the
-# packager only codesigns files with a Mach-O header, so these ELF files are
-# copied and left alone (docs/native/PACKAGING.md, "hangar-node").
 binaries = [
   { path = "hangar-ai", main = true },
   { path = "hangar-webview" },
-  { path = "hangar-node-x86_64" },
-  { path = "hangar-node-aarch64" },
+]
+# The two `hangar-node-<arch>` files are the headless node daemon built for
+# Linux x86_64 and arm64, which the desktop uploads to a node over SSH. They are
+# resources, not binaries: on macOS everything in Contents/MacOS is signed as
+# nested code, and codesign refuses these ELF files there ("code object is not
+# signed at all"), so they go to Contents/Resources; the .deb and the AppImage put
+# resources in usr/lib/hangar-ai. hangar_app::nodes::model::BinarySource looks in
+# both, and beside the executable (Windows, development). They are not built by
+# this package: the release workflow builds them with `-p hangar-node` and
+# downloads them into target/node, which packaging/common.sh's
+# stage_node_binaries checks (docs/native/PACKAGING.md, "hangar-node").
+resources = [
+  { src = "../../target/node/hangar-node-x86_64", target = "hangar-node-x86_64" },
+  { src = "../../target/node/hangar-node-aarch64", target = "hangar-node-aarch64" },
 ]
 
 [package.metadata.packager.deb]
@@ -202,8 +206,8 @@ require-sh = false
 assets = [
   { source = "target/dist/hangar-ai", dest = "/usr/bin/hangar-ai", mode = "755" },
   { source = "target/dist/hangar-webview", dest = "/usr/bin/hangar-webview", mode = "755" },
-  { source = "target/dist/hangar-node-x86_64", dest = "/usr/bin/hangar-node-x86_64", mode = "755" },
-  { source = "target/dist/hangar-node-aarch64", dest = "/usr/bin/hangar-node-aarch64", mode = "755" },
+  { source = "target/node/hangar-node-x86_64", dest = "/usr/lib/hangar-ai/hangar-node-x86_64", mode = "755" },
+  { source = "target/node/hangar-node-aarch64", dest = "/usr/lib/hangar-ai/hangar-node-aarch64", mode = "755" },
   { source = "crates/hangar-app/packaging/linux/hangar-ai.desktop", dest = "/usr/share/applications/hangar-ai.desktop", mode = "644" },
   { source = "crates/hangar-app/packaging/icons/linux/16x16.png", dest = "/usr/share/icons/hicolor/16x16/apps/hangar-ai.png", mode = "644" },
   { source = "crates/hangar-app/packaging/icons/linux/24x24.png", dest = "/usr/share/icons/hicolor/24x24/apps/hangar-ai.png", mode = "644" },
