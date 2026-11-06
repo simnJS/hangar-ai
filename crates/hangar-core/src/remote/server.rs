@@ -196,11 +196,134 @@ async fn harden(mut response: Response) -> Response {
     response
 }
 
-async fn page(State(remote): State<Arc<Remote>>, method: Method, uri: Uri) -> Response {
+async fn page(
+    State(remote): State<Arc<Remote>>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+) -> Response {
     if !matches!(method, Method::GET | Method::HEAD) {
         return refuse(StatusCode::METHOD_NOT_ALLOWED, "method-not-allowed");
     }
-    assets::respond(remote.assets, uri.path())
+    let response = assets::respond(remote.assets, uri.path());
+    gzip_if_asked(uri.path(), &headers, response).await
+}
+
+/// The web app's text files, gzipped when the phone's `Accept-Encoding`
+/// allows it (a bundle is 374 KB, 116 KB gzipped). Compressed once: the
+/// first request for a file does it, and the result is kept — per path, with
+/// the hash of the bytes it was made from, so a file that changed on disk
+/// (a debug build reads dist-mobile/ as it is asked) is compressed again.
+/// Every answer for such a file says `Vary: Accept-Encoding`, gzipped or not.
+async fn gzip_if_asked(path: &str, request: &HeaderMap, response: Response) -> Response {
+    let compressible = response.status() == StatusCode::OK
+        && !response.headers().contains_key(header::CONTENT_ENCODING)
+        && response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(is_text);
+    if !compressible {
+        return response;
+    }
+    let (mut parts, body) = response.into_parts();
+    parts
+        .headers
+        .append(header::VARY, HeaderValue::from_static("accept-encoding"));
+    if !accepts_gzip(request) {
+        return Response::from_parts(parts, body);
+    }
+    let Ok(bytes) = to_bytes(body, usize::MAX).await else {
+        return refuse(StatusCode::INTERNAL_SERVER_ERROR, "internal");
+    };
+    let key = path.to_owned();
+    let original = bytes.clone();
+    let packed = tokio::task::spawn_blocking(move || gzipped(&key, &original))
+        .await
+        .ok()
+        .flatten();
+    let Some(packed) = packed else {
+        return Response::from_parts(parts, Body::from(bytes));
+    };
+    parts
+        .headers
+        .insert(header::CONTENT_ENCODING, HeaderValue::from_static("gzip"));
+    parts
+        .headers
+        .insert(header::CONTENT_LENGTH, HeaderValue::from(packed.len()));
+    Response::from_parts(parts, Body::from(packed))
+}
+
+/// Types worth compressing; pictures and fonts are packed already.
+fn is_text(content_type: &str) -> bool {
+    let kind = content_type.split(';').next().unwrap_or("").trim();
+    kind.starts_with("text/")
+        || matches!(
+            kind,
+            "application/json"
+                | "application/manifest+json"
+                | "application/xml"
+                | "application/wasm"
+                | "image/svg+xml"
+        )
+}
+
+/// Whether `Accept-Encoding` lists gzip (or `*`) with a quality above zero.
+fn accepts_gzip(request: &HeaderMap) -> bool {
+    let mut allowed = None;
+    for value in request.get_all(header::ACCEPT_ENCODING) {
+        let Ok(value) = value.to_str() else { continue };
+        for item in value.split(',') {
+            let mut fields = item.split(';');
+            let coding = fields.next().unwrap_or("").trim();
+            let quality = fields
+                .find_map(|field| field.trim().strip_prefix("q="))
+                .and_then(|q| q.trim().parse::<f32>().ok())
+                .unwrap_or(1.0);
+            if coding.eq_ignore_ascii_case("gzip") {
+                return quality > 0.0;
+            }
+            if coding == "*" {
+                allowed = Some(quality > 0.0);
+            }
+        }
+    }
+    allowed.unwrap_or(false)
+}
+
+/// path → (hash of the bytes, their gzip).
+type Packed = std::collections::HashMap<String, (u64, axum::body::Bytes)>;
+
+/// The gzip of `bytes`, made once per file; None when it would not be smaller.
+fn gzipped(path: &str, bytes: &[u8]) -> Option<axum::body::Bytes> {
+    use std::hash::{Hash, Hasher};
+    use std::io::Write;
+    use std::sync::{Mutex, OnceLock};
+
+    static CACHE: OnceLock<Mutex<Packed>> = OnceLock::new();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    let hash = hasher.finish();
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some((seen, packed)) = cache.lock().ok()?.get(path) {
+        if *seen == hash {
+            return Some(packed.clone());
+        }
+    }
+    let mut encoder = flate2::write::GzEncoder::new(
+        Vec::with_capacity(bytes.len() / 3),
+        flate2::Compression::best(),
+    );
+    encoder.write_all(bytes).ok()?;
+    let packed = axum::body::Bytes::from(encoder.finish().ok()?);
+    if packed.len() >= bytes.len() {
+        return None;
+    }
+    cache
+        .lock()
+        .ok()?
+        .insert(path.to_owned(), (hash, packed.clone()));
+    Some(packed)
 }
 
 async fn unknown() -> Response {
@@ -697,6 +820,79 @@ mod tests {
     use super::super::assets::tests::{no_app, small_app};
     use super::super::tests::{remote_on, remote_with, test_port, Fake};
     use super::*;
+
+    /// A script big enough to be worth gzipping, and a picture.
+    fn big_app(path: &str) -> Option<std::borrow::Cow<'static, [u8]>> {
+        match path {
+            "assets/big-1a2b.js" => Some(std::borrow::Cow::Owned(
+                "console.log('hangar mobile');\n".repeat(2000).into_bytes(),
+            )),
+            "icon.png" => Some(std::borrow::Cow::Borrowed(b"\x89PNG not text")),
+            _ => None,
+        }
+    }
+
+    async fn fetch(path: &str, encoding: Option<&str>) -> Response {
+        let remote = remote_with(Fake::echo(), big_app);
+        let mut request = HttpRequest::get(path);
+        if let Some(encoding) = encoding {
+            request = request.header(header::ACCEPT_ENCODING, encoding);
+        }
+        router(remote)
+            .oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn the_app_s_text_is_gzipped_when_the_phone_accepts_it() {
+        use std::io::Read;
+        let original = "console.log('hangar mobile');\n".repeat(2000).into_bytes();
+        for encoding in ["gzip", "br, gzip;q=0.8", "*"] {
+            let response = fetch("/assets/big-1a2b.js", Some(encoding)).await;
+            assert_eq!(response.status(), StatusCode::OK, "{encoding}");
+            assert_eq!(response.headers()[header::CONTENT_ENCODING], "gzip");
+            assert_eq!(response.headers()[header::VARY], "accept-encoding");
+            assert_eq!(
+                response.headers()[header::CACHE_CONTROL],
+                "public, max-age=31536000, immutable"
+            );
+            let length: usize = response.headers()[header::CONTENT_LENGTH]
+                .to_str()
+                .unwrap()
+                .parse()
+                .unwrap();
+            let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            assert_eq!(bytes.len(), length);
+            assert!(bytes.len() < original.len() / 4);
+            let mut decoded = Vec::new();
+            flate2::read::GzDecoder::new(&bytes[..])
+                .read_to_end(&mut decoded)
+                .unwrap();
+            assert_eq!(decoded, original, "{encoding}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_app_s_text_is_sent_as_it_is_otherwise() {
+        let original = "console.log('hangar mobile');\n".repeat(2000).into_bytes();
+        for encoding in [None, Some("identity"), Some("br"), Some("gzip;q=0")] {
+            let response = fetch("/assets/big-1a2b.js", encoding).await;
+            assert_eq!(response.status(), StatusCode::OK, "{encoding:?}");
+            assert!(!response.headers().contains_key(header::CONTENT_ENCODING));
+            // Vary still says the answer depends on the request's encoding.
+            assert_eq!(response.headers()[header::VARY], "accept-encoding");
+            let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            assert_eq!(bytes.to_vec(), original, "{encoding:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_picture_is_never_gzipped() {
+        let response = fetch("/icon.png", Some("gzip")).await;
+        assert!(!response.headers().contains_key(header::CONTENT_ENCODING));
+        assert!(!response.headers().contains_key(header::VARY));
+    }
 
     struct Answer {
         status: StatusCode,

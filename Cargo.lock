@@ -3175,6 +3175,7 @@ dependencies = [
  "discord-rich-presence",
  "dunce",
  "ece-native",
+ "flate2",
  "http",
  "hyper",
  "hyper-util",

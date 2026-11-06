@@ -28,6 +28,7 @@ desktop = [
   "dep:auto-launch",
   "dep:cpal",
   "dep:discord-rich-presence",
+  "dep:flate2",
   "dep:hyper",
   "dep:hyper-util",
   "dep:keyring",
@@ -135,6 +136,9 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 rust-embed = { version = "8.13", optional = true }
 qrcode = { version = "0.14", default-features = false, features = ["svg"], optional = true }
 sha2 = "0.11"
+# The web app's text files, gzipped once and kept (remote/server.rs). Already
+# compiled underneath other crates; the default backend is miniz_oxide, pure Rust.
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"], optional = true }
 # The rule a kit's declared command gives each value (kits/manifest.rs). Already
 # in the tree underneath other crates; matches in linear time, whatever a kit
 # writes.
@@ -170,6 +174,7 @@ hyper-util = { version = "0.1", features = ["tokio"], optional = true }
 [dev-dependencies]
 # Scratch folders the tests make, removed when the test ends (panic included).
 tempfile = "3"
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 tower = { version = "0.5", features = ["util"] }
 # The push's encryption checked byte for byte against RFC 8291's example.
 # Already compiled for web-push-native, which encrypts with it.
