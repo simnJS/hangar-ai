@@ -18,9 +18,10 @@ use super::types::{Pane, Workspace};
 /// order so existing panes keep theirs.
 pub const PANE_NAMES: [&str; 48] = [
     "Ava", "Max", "Leo", "Mia", "Sam", "Zoe", "Eli", "Nora", "Finn", "Ivy", "Theo", "Luna", "Jude",
-    "Cleo", "Rex", "Wren", "Ada", "Ben", "Cora", "Dex", "Emma", "Gus", "Hugo", "Iris", "Jack",
-    "Kai", "Lola", "Milo", "Otto", "Quinn", "Rosa", "Seth", "Tara", "Vera", "Will", "Yara", "Zack",
-    "Bram", "Ezra", "Faye", "Hana", "Juno", "Kit", "Lars", "Omar", "Ruby", "Tess", "Vic",
+    "Cleo", "Rex", "Wren", "Vadim", "Samuel", "Lenny", "Sasha", "Gabriel", "Simon", "Soren",
+    "Phileas", "Ada", "Ben", "Cora", "Emma", "Hugo", "Iris", "Jack", "Kai", "Lola", "Milo",
+    "Quinn", "Rosa", "Tara", "Vera", "Will", "Yara", "Zack", "Ezra", "Faye", "Hana", "Juno",
+    "Omar", "Ruby", "Tess",
 ];
 
 /// The first free name; "Ava 2" and on once the list runs out
