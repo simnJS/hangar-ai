@@ -318,6 +318,140 @@ pub enum Key {
     BroadcastWhenFree,
     /// `broadcast.whenFreeHint`
     BroadcastWhenFreeHint,
+    /// `chatConv.action.failed`
+    ChatConvActionFailed,
+    /// `chatConv.action.result`
+    ChatConvActionResult,
+    /// `chatConv.action.running`
+    ChatConvActionRunning,
+    /// `chatConv.busy`
+    ChatConvBusy,
+    /// `chatConv.disabled.answering`
+    ChatConvDisabledAnswering,
+    /// `chatConv.disabled.loading`
+    ChatConvDisabledLoading,
+    /// `chatConv.disabled.notClaude`
+    ChatConvDisabledNotClaude,
+    /// `chatConv.disabled.permission`
+    ChatConvDisabledPermission,
+    /// `chatConv.disabled.question`
+    ChatConvDisabledQuestion,
+    /// `chatConv.disabled.resuming`
+    ChatConvDisabledResuming,
+    /// `chatConv.empty.body`
+    ChatConvEmptyBody,
+    /// `chatConv.empty.cannot`
+    ChatConvEmptyCannot,
+    /// `chatConv.empty.start`
+    ChatConvEmptyStart,
+    /// `chatConv.empty.title`
+    ChatConvEmptyTitle,
+    /// `chatConv.hangar`
+    ChatConvHangar,
+    /// `chatConv.images`
+    ChatConvImages,
+    /// `chatConv.inputHint`
+    ChatConvInputHint,
+    /// `chatConv.loading`
+    ChatConvLoading,
+    /// `chatConv.notSent`
+    ChatConvNotSent,
+    /// `chatConv.older`
+    ChatConvOlder,
+    /// `chatConv.olderLoading`
+    ChatConvOlderLoading,
+    /// `chatConv.permission.allow`
+    ChatConvPermissionAllow,
+    /// `chatConv.permission.deny`
+    ChatConvPermissionDeny,
+    /// `chatConv.permission.title`
+    ChatConvPermissionTitle,
+    /// `chatConv.placeholder`
+    ChatConvPlaceholder,
+    /// `chatConv.question.asked`
+    ChatConvQuestionAsked,
+    /// `chatConv.question.multi`
+    ChatConvQuestionMulti,
+    /// `chatConv.question.noAnswer`
+    ChatConvQuestionNoAnswer,
+    /// `chatConv.question.other`
+    ChatConvQuestionOther,
+    /// `chatConv.question.otherPlaceholder`
+    ChatConvQuestionOtherPlaceholder,
+    /// `chatConv.question.submit`
+    ChatConvQuestionSubmit,
+    /// `chatConv.question.title`
+    ChatConvQuestionTitle,
+    /// `chatConv.queued`
+    ChatConvQueued,
+    /// `chatConv.readFailed`
+    ChatConvReadFailed,
+    /// `chatConv.reason.noSession`
+    ChatConvReasonNoSession,
+    /// `chatConv.reason.noTranscript`
+    ChatConvReasonNoTranscript,
+    /// `chatConv.reason.notClaude`
+    ChatConvReasonNotClaude,
+    /// `chatConv.refused`
+    ChatConvRefused,
+    /// `chatConv.send`
+    ChatConvSend,
+    /// `chatConv.sending`
+    ChatConvSending,
+    /// `chatConv.showLess`
+    ChatConvShowLess,
+    /// `chatConv.showMore`
+    ChatConvShowMore,
+    /// `chatConv.tool.blockTask`
+    ChatConvToolBlockTask,
+    /// `chatConv.tool.claimTask`
+    ChatConvToolClaimTask,
+    /// `chatConv.tool.commentTask`
+    ChatConvToolCommentTask,
+    /// `chatConv.tool.createAnyPane`
+    ChatConvToolCreateAnyPane,
+    /// `chatConv.tool.createPane`
+    ChatConvToolCreatePane,
+    /// `chatConv.tool.createTask`
+    ChatConvToolCreateTask,
+    /// `chatConv.tool.deleteTask`
+    ChatConvToolDeleteTask,
+    /// `chatConv.tool.deliveryStatus`
+    ChatConvToolDeliveryStatus,
+    /// `chatConv.tool.listTasks`
+    ChatConvToolListTasks,
+    /// `chatConv.tool.listWorkers`
+    ChatConvToolListWorkers,
+    /// `chatConv.tool.moveTask`
+    ChatConvToolMoveTask,
+    /// `chatConv.tool.nextTask`
+    ChatConvToolNextTask,
+    /// `chatConv.tool.progressTask`
+    ChatConvToolProgressTask,
+    /// `chatConv.tool.readMemory`
+    ChatConvToolReadMemory,
+    /// `chatConv.tool.readPane`
+    ChatConvToolReadPane,
+    /// `chatConv.tool.searchMemory`
+    ChatConvToolSearchMemory,
+    /// `chatConv.tool.sendPane`
+    ChatConvToolSendPane,
+    /// `chatConv.tool.showPreview`
+    ChatConvToolShowPreview,
+    /// `chatConv.tool.spawnAnyWorker`
+    ChatConvToolSpawnAnyWorker,
+    /// `chatConv.tool.spawnWorker`
+    ChatConvToolSpawnWorker,
+    /// `chatConv.tool.stopWorker`
+    ChatConvToolStopWorker,
+    /// `chatConv.tool.submitDelivery`
+    ChatConvToolSubmitDelivery,
+    /// `chatConv.tool.unblockTask`
+    ChatConvToolUnblockTask,
+    /// `chatConv.tool.updateTask`
+    ChatConvToolUpdateTask,
+    /// `chatConv.tool.writeMemory`
+    ChatConvToolWriteMemory,
     /// `chatView.chat`
     ChatViewChat,
     /// `chatView.comingSoon`
@@ -3585,7 +3719,7 @@ pub enum Key {
 }
 
 /// How many keys there are.
-pub const KEY_COUNT: usize = 1784;
+pub const KEY_COUNT: usize = 1851;
 
 impl Key {
     /// Every key, in the order of their ids.
@@ -3742,6 +3876,73 @@ impl Key {
         Key::BroadcastSend,
         Key::BroadcastWhenFree,
         Key::BroadcastWhenFreeHint,
+        Key::ChatConvActionFailed,
+        Key::ChatConvActionResult,
+        Key::ChatConvActionRunning,
+        Key::ChatConvBusy,
+        Key::ChatConvDisabledAnswering,
+        Key::ChatConvDisabledLoading,
+        Key::ChatConvDisabledNotClaude,
+        Key::ChatConvDisabledPermission,
+        Key::ChatConvDisabledQuestion,
+        Key::ChatConvDisabledResuming,
+        Key::ChatConvEmptyBody,
+        Key::ChatConvEmptyCannot,
+        Key::ChatConvEmptyStart,
+        Key::ChatConvEmptyTitle,
+        Key::ChatConvHangar,
+        Key::ChatConvImages,
+        Key::ChatConvInputHint,
+        Key::ChatConvLoading,
+        Key::ChatConvNotSent,
+        Key::ChatConvOlder,
+        Key::ChatConvOlderLoading,
+        Key::ChatConvPermissionAllow,
+        Key::ChatConvPermissionDeny,
+        Key::ChatConvPermissionTitle,
+        Key::ChatConvPlaceholder,
+        Key::ChatConvQuestionAsked,
+        Key::ChatConvQuestionMulti,
+        Key::ChatConvQuestionNoAnswer,
+        Key::ChatConvQuestionOther,
+        Key::ChatConvQuestionOtherPlaceholder,
+        Key::ChatConvQuestionSubmit,
+        Key::ChatConvQuestionTitle,
+        Key::ChatConvQueued,
+        Key::ChatConvReadFailed,
+        Key::ChatConvReasonNoSession,
+        Key::ChatConvReasonNoTranscript,
+        Key::ChatConvReasonNotClaude,
+        Key::ChatConvRefused,
+        Key::ChatConvSend,
+        Key::ChatConvSending,
+        Key::ChatConvShowLess,
+        Key::ChatConvShowMore,
+        Key::ChatConvToolBlockTask,
+        Key::ChatConvToolClaimTask,
+        Key::ChatConvToolCommentTask,
+        Key::ChatConvToolCreateAnyPane,
+        Key::ChatConvToolCreatePane,
+        Key::ChatConvToolCreateTask,
+        Key::ChatConvToolDeleteTask,
+        Key::ChatConvToolDeliveryStatus,
+        Key::ChatConvToolListTasks,
+        Key::ChatConvToolListWorkers,
+        Key::ChatConvToolMoveTask,
+        Key::ChatConvToolNextTask,
+        Key::ChatConvToolProgressTask,
+        Key::ChatConvToolReadMemory,
+        Key::ChatConvToolReadPane,
+        Key::ChatConvToolSearchMemory,
+        Key::ChatConvToolSendPane,
+        Key::ChatConvToolShowPreview,
+        Key::ChatConvToolSpawnAnyWorker,
+        Key::ChatConvToolSpawnWorker,
+        Key::ChatConvToolStopWorker,
+        Key::ChatConvToolSubmitDelivery,
+        Key::ChatConvToolUnblockTask,
+        Key::ChatConvToolUpdateTask,
+        Key::ChatConvToolWriteMemory,
         Key::ChatViewChat,
         Key::ChatViewComingSoon,
         Key::ChatViewConversation,
@@ -5531,6 +5732,73 @@ pub(crate) static MESSAGES: [Message; KEY_COUNT] = [
     Message { id: "broadcast.send", en: Text::plain("Broadcast"), fr: Text::plain("Diffuser") },
     Message { id: "broadcast.whenFree", en: Text::plain("When free"), fr: Text::plain("Quand libre") },
     Message { id: "broadcast.whenFreeHint", en: Text::plural("Hold the instruction until each agent is done with what it is doing (Alt+Enter). {n} pane's Claude Code can hold it; the others get it typed right away.", "Hold the instruction until each agent is done with what it is doing (Alt+Enter). {n} panes' Claude Code can hold it; the others get it typed right away."), fr: Text::plural("Garder l'instruction jusqu'à ce que chaque agent ait fini ce qu'il fait (Alt+Entrée). {n} panneau a un Claude Code capable de la garder\u{202f}; les autres la reçoivent tout de suite.", "Garder l'instruction jusqu'à ce que chaque agent ait fini ce qu'il fait (Alt+Entrée). {n} panneaux ont un Claude Code capable de la garder\u{202f}; les autres la reçoivent tout de suite.") },
+    Message { id: "chatConv.action.failed", en: Text::plain("Failed"), fr: Text::plain("Échec") },
+    Message { id: "chatConv.action.result", en: Text::plain("Result"), fr: Text::plain("Résultat") },
+    Message { id: "chatConv.action.running", en: Text::plain("Running"), fr: Text::plain("En cours") },
+    Message { id: "chatConv.busy", en: Text::plain("Typing your answer…"), fr: Text::plain("Saisie de votre réponse…") },
+    Message { id: "chatConv.disabled.answering", en: Text::plain("An answer is being typed into {name}: wait for it."), fr: Text::plain("Une réponse est en cours de saisie dans {name}\u{202f}: attendez qu’elle finisse.") },
+    Message { id: "chatConv.disabled.loading", en: Text::plain("Hangar is starting: wait a moment."), fr: Text::plain("Hangar démarre\u{202f}: patientez un instant.") },
+    Message { id: "chatConv.disabled.notClaude", en: Text::plain("{name} is not a Claude Code pane."), fr: Text::plain("{name} n’est pas un panneau Claude Code.") },
+    Message { id: "chatConv.disabled.permission", en: Text::plain("Allow or deny the request above first."), fr: Text::plain("Autorisez ou refusez d’abord la demande ci-dessus.") },
+    Message { id: "chatConv.disabled.question", en: Text::plain("Answer the question above first."), fr: Text::plain("Répondez d’abord à la question ci-dessus.") },
+    Message { id: "chatConv.disabled.resuming", en: Text::plain("{name} is resuming: wait for Claude Code to start."), fr: Text::plain("{name} reprend\u{202f}: attendez que Claude Code démarre.") },
+    Message { id: "chatConv.empty.body", en: Text::plain("The orchestrator is the Claude Code pane that plans the work on the board, starts the workers and lands what they deliver. Your conversation with it shows here."), fr: Text::plain("L’orchestrateur est le panneau Claude Code qui planifie le travail sur le tableau, lance les workers et intègre ce qu’ils livrent. Votre conversation avec lui s’affiche ici.") },
+    Message { id: "chatConv.empty.cannot", en: Text::plain("This workspace cannot have an orchestrator."), fr: Text::plain("Cet espace ne peut pas avoir d’orchestrateur.") },
+    Message { id: "chatConv.empty.start", en: Text::plain("Start the orchestrator"), fr: Text::plain("Lancer l’orchestrateur") },
+    Message { id: "chatConv.empty.title", en: Text::plain("No orchestrator in this workspace"), fr: Text::plain("Pas d’orchestrateur dans cet espace") },
+    Message { id: "chatConv.hangar", en: Text::plain("Hangar"), fr: Text::plain("Hangar") },
+    Message { id: "chatConv.images", en: Text::plural("{n} image", "{n} images"), fr: Text::plural("{n} image", "{n} images") },
+    Message { id: "chatConv.inputHint", en: Text::plain("Enter to send, Shift+Enter for a new line"), fr: Text::plain("Entrée pour envoyer, Maj+Entrée pour aller à la ligne") },
+    Message { id: "chatConv.loading", en: Text::plain("Loading the conversation…"), fr: Text::plain("Chargement de la conversation…") },
+    Message { id: "chatConv.notSent", en: Text::plain("Not sent: {error}"), fr: Text::plain("Non envoyé\u{202f}: {error}") },
+    Message { id: "chatConv.older", en: Text::plain("Show earlier messages"), fr: Text::plain("Afficher les messages précédents") },
+    Message { id: "chatConv.olderLoading", en: Text::plain("Loading earlier messages…"), fr: Text::plain("Chargement des messages précédents…") },
+    Message { id: "chatConv.permission.allow", en: Text::plain("Allow"), fr: Text::plain("Autoriser") },
+    Message { id: "chatConv.permission.deny", en: Text::plain("Deny"), fr: Text::plain("Refuser") },
+    Message { id: "chatConv.permission.title", en: Text::plain("{name} asks to use {tool}"), fr: Text::plain("{name} demande à utiliser {tool}") },
+    Message { id: "chatConv.placeholder", en: Text::plain("Message {name}…"), fr: Text::plain("Message à {name}…") },
+    Message { id: "chatConv.question.asked", en: Text::plain("Asked: {question}"), fr: Text::plain("Question\u{202f}: {question}") },
+    Message { id: "chatConv.question.multi", en: Text::plain("Pick any that apply"), fr: Text::plain("Choisissez tout ce qui convient") },
+    Message { id: "chatConv.question.noAnswer", en: Text::plain("No answer"), fr: Text::plain("Sans réponse") },
+    Message { id: "chatConv.question.other", en: Text::plain("Other"), fr: Text::plain("Autre") },
+    Message { id: "chatConv.question.otherPlaceholder", en: Text::plain("Your own words"), fr: Text::plain("Vos propres mots") },
+    Message { id: "chatConv.question.submit", en: Text::plain("Send the answer"), fr: Text::plain("Envoyer la réponse") },
+    Message { id: "chatConv.question.title", en: Text::plain("{name} asks"), fr: Text::plain("{name} demande") },
+    Message { id: "chatConv.queued", en: Text::plain("Queued: {name} gets it once Claude Code is up"), fr: Text::plain("En file\u{202f}: {name} le recevra dès que Claude Code sera prêt") },
+    Message { id: "chatConv.readFailed", en: Text::plain("Could not read the conversation: {error}"), fr: Text::plain("Impossible de lire la conversation\u{202f}: {error}") },
+    Message { id: "chatConv.reason.noSession", en: Text::plain("No conversation with {name} yet. Write below to start one."), fr: Text::plain("Pas encore de conversation avec {name}. Écrivez ci-dessous pour en commencer une.") },
+    Message { id: "chatConv.reason.noTranscript", en: Text::plain("{name}’s conversation has not been written yet."), fr: Text::plain("La conversation de {name} n’est pas encore écrite.") },
+    Message { id: "chatConv.reason.notClaude", en: Text::plain("{name} is not a Claude Code pane: it has no conversation to show."), fr: Text::plain("{name} n’est pas un panneau Claude Code\u{202f}: il n’a pas de conversation à afficher.") },
+    Message { id: "chatConv.refused", en: Text::plain("Not done: {error}"), fr: Text::plain("Non fait\u{202f}: {error}") },
+    Message { id: "chatConv.send", en: Text::plain("Send"), fr: Text::plain("Envoyer") },
+    Message { id: "chatConv.sending", en: Text::plain("Sending…"), fr: Text::plain("Envoi…") },
+    Message { id: "chatConv.showLess", en: Text::plain("Show less"), fr: Text::plain("Réduire") },
+    Message { id: "chatConv.showMore", en: Text::plain("Show all"), fr: Text::plain("Tout afficher") },
+    Message { id: "chatConv.tool.blockTask", en: Text::plain("Put “{task}” on hold"), fr: Text::plain("«\u{202f}{task}\u{202f}» mise en attente") },
+    Message { id: "chatConv.tool.claimTask", en: Text::plain("Claimed “{task}”"), fr: Text::plain("«\u{202f}{task}\u{202f}» prise en charge") },
+    Message { id: "chatConv.tool.commentTask", en: Text::plain("Commented on “{task}”"), fr: Text::plain("Commentaire sur «\u{202f}{task}\u{202f}»") },
+    Message { id: "chatConv.tool.createAnyPane", en: Text::plain("Opened a pane"), fr: Text::plain("Panneau ouvert") },
+    Message { id: "chatConv.tool.createPane", en: Text::plain("Opened pane {name}"), fr: Text::plain("Panneau {name} ouvert") },
+    Message { id: "chatConv.tool.createTask", en: Text::plain("Created task “{task}”"), fr: Text::plain("Tâche «\u{202f}{task}\u{202f}» créée") },
+    Message { id: "chatConv.tool.deleteTask", en: Text::plain("Deleted task “{task}”"), fr: Text::plain("Tâche «\u{202f}{task}\u{202f}» supprimée") },
+    Message { id: "chatConv.tool.deliveryStatus", en: Text::plain("Checked the deliveries"), fr: Text::plain("Livraisons consultées") },
+    Message { id: "chatConv.tool.listTasks", en: Text::plain("Read the board"), fr: Text::plain("Tableau lu") },
+    Message { id: "chatConv.tool.listWorkers", en: Text::plain("Listed the workers"), fr: Text::plain("Workers listés") },
+    Message { id: "chatConv.tool.moveTask", en: Text::plain("Moved “{task}” to {column}"), fr: Text::plain("«\u{202f}{task}\u{202f}» déplacée vers {column}") },
+    Message { id: "chatConv.tool.nextTask", en: Text::plain("Looked for the next task"), fr: Text::plain("Recherche de la tâche suivante") },
+    Message { id: "chatConv.tool.progressTask", en: Text::plain("Reported progress on “{task}”"), fr: Text::plain("Avancement signalé sur «\u{202f}{task}\u{202f}»") },
+    Message { id: "chatConv.tool.readMemory", en: Text::plain("Read the memory"), fr: Text::plain("Mémoire lue") },
+    Message { id: "chatConv.tool.readPane", en: Text::plain("Read {name}’s screen"), fr: Text::plain("Écran de {name} lu") },
+    Message { id: "chatConv.tool.searchMemory", en: Text::plain("Searched the memory for “{query}”"), fr: Text::plain("Recherche «\u{202f}{query}\u{202f}» dans la mémoire") },
+    Message { id: "chatConv.tool.sendPane", en: Text::plain("Sent a message to {name}"), fr: Text::plain("Message envoyé à {name}") },
+    Message { id: "chatConv.tool.showPreview", en: Text::plain("Showed a preview"), fr: Text::plain("Aperçu affiché") },
+    Message { id: "chatConv.tool.spawnAnyWorker", en: Text::plain("Started a worker on “{task}”"), fr: Text::plain("Worker lancé sur «\u{202f}{task}\u{202f}»") },
+    Message { id: "chatConv.tool.spawnWorker", en: Text::plain("Started worker {name} on “{task}”"), fr: Text::plain("Worker {name} lancé sur «\u{202f}{task}\u{202f}»") },
+    Message { id: "chatConv.tool.stopWorker", en: Text::plain("Stopped worker {name}"), fr: Text::plain("Worker {name} arrêté") },
+    Message { id: "chatConv.tool.submitDelivery", en: Text::plain("Handed in the work"), fr: Text::plain("Travail livré") },
+    Message { id: "chatConv.tool.unblockTask", en: Text::plain("Took “{task}” off hold"), fr: Text::plain("«\u{202f}{task}\u{202f}» sortie de l’attente") },
+    Message { id: "chatConv.tool.updateTask", en: Text::plain("Updated “{task}”"), fr: Text::plain("«\u{202f}{task}\u{202f}» modifiée") },
+    Message { id: "chatConv.tool.writeMemory", en: Text::plain("Saved to the memory"), fr: Text::plain("Enregistré dans la mémoire") },
     Message { id: "chatView.chat", en: Text::plain("Chat"), fr: Text::plain("Chat") },
     Message { id: "chatView.comingSoon", en: Text::plain("Coming soon."), fr: Text::plain("Bientôt disponible.") },
     Message { id: "chatView.conversation", en: Text::plain("Conversation"), fr: Text::plain("Conversation") },

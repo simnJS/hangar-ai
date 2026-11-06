@@ -16,8 +16,9 @@
 //! view panes are drawn by the panes' own widget (`panes::view_tools`), so
 //! the previews and the kits do not know where they are shown.
 //!
-//! The conversation and the tasks are their own modules, placeholders for
-//! now, each with its State and Msg routed through this package.
+//! The conversation and the tasks are their own modules, each with its
+//! State and Msg routed through this package; the conversation also hears
+//! the core's events and has a tick of its own (`conversation`).
 
 pub mod conversation;
 pub mod tasks;
@@ -70,8 +71,12 @@ pub fn shown(m: &Model, ws: &Workspace) -> bool {
 pub fn update(st: &mut State, m: &mut Model, sv: &Services, msg: Msg) -> Task<Message> {
     match msg {
         Msg::SetShown(ws, on) => {
-            m.apply(StoreAction::SetChatView { ws, on });
-            Task::none()
+            m.apply(StoreAction::SetChatView { ws: ws.clone(), on });
+            if on {
+                conversation::on_shown(&mut st.conversation, m, &ws)
+            } else {
+                Task::none()
+            }
         }
         Msg::Conversation(msg) => conversation::update(&mut st.conversation, m, sv, msg),
         Msg::Tasks(msg) => tasks::update(&mut st.tasks, m, msg),
