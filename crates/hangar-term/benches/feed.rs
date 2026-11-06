@@ -1,8 +1,9 @@
 //! What parsing a pane's output costs: `cargo bench -p hangar-term --bench feed`.
 //!
 //! It feeds recorded output to a [`Terminal`] of 200x50 with 10 000 lines of
-//! scrollback, the way a pane's reader thread does (chunks of at most 8 KiB,
-//! the size core's reader reads the PTY with), and reports MB/s per sample:
+//! scrollback, the way a pane's reader thread does (chunks of 8 KiB by
+//! default; core's reader now hands out what the PTY holds, up to 64 KiB,
+//! which `--chunk 65536` matches), and reports MB/s per sample:
 //!
 //! - `ls`: `ls --color=always -la /usr/bin` as a PTY delivers it (`\r\n`
 //!   line ends), from `benches/fixtures/ls-usr-bin.txt`; the "16 busy
