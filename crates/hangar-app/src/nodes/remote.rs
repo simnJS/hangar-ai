@@ -63,6 +63,27 @@ pub fn publish(node: &str, client: Option<NodeClient>) {
     PUBLISHED.send_modify(|count| *count = count.wrapping_add(1));
 }
 
+/// The client of node `node` once it is connected: at once when it is,
+/// else as soon as it is published, `None` after `timeout`. What a remote
+/// pane's start waits on rather than looking again every so often.
+#[allow(dead_code)] // For `panes::controller::start_remote`, which switches to it next.
+pub async fn wait_for(node: &str, timeout: Duration) -> Option<NodeClient> {
+    let waited = tokio::time::timeout(timeout, async {
+        loop {
+            // Before the look: a publish between the two is not missed.
+            let mut published = PUBLISHED.subscribe();
+            if let Some(client) = directory(node) {
+                return client;
+            }
+            if published.changed().await.is_err() {
+                // The sender is a static: never dropped.
+                std::future::pending::<()>().await;
+            }
+        }
+    });
+    waited.await.ok()
+}
+
 /// How long to wait between two attempts at a node that does not answer.
 #[derive(Debug, Clone, Copy)]
 pub struct Backoff {

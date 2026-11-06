@@ -416,6 +416,46 @@ async fn a_waiting_stream_follows_its_node_once_it_is_published() {
     assert_eq!(*events.lock().unwrap(), vec![StreamEvent::Exit]);
 }
 
+/// `wait_for`: a node already connected answers at once; one that is not
+/// answers as soon as it is published (another node's publish does not
+/// count); one that never comes gives up after the timeout.
+#[tokio::test]
+async fn wait_for_returns_once_the_node_is_published() {
+    let node = format!("wait-{}", std::process::id());
+    let client = NodeClient {
+        base_url: "http://127.0.0.1:21006".into(),
+        token: "tok".into(),
+    };
+    assert_eq!(
+        remote::wait_for(&node, Duration::from_millis(30)).await,
+        None,
+        "not connected: gives up after the timeout"
+    );
+
+    let waiting = {
+        let node = node.clone();
+        tokio::spawn(async move { remote::wait_for(&node, Duration::from_secs(30)).await })
+    };
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    remote::publish(&format!("{node}-other"), Some(client.clone()));
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert!(
+        !waiting.is_finished(),
+        "another node's publish is not this one"
+    );
+    remote::publish(&node, Some(client.clone()));
+    let found = tokio::time::timeout(Duration::from_secs(2), waiting)
+        .await
+        .expect("published: it answers at once, not after its timeout")
+        .unwrap();
+    assert_eq!(found, Some(client.clone()));
+
+    // Already there: at once, even with no time to wait.
+    assert_eq!(remote::wait_for(&node, Duration::ZERO).await, Some(client));
+    remote::publish(&node, None);
+    remote::publish(&format!("{node}-other"), None);
+}
+
 /// A shell still running under the pane's id is followed, not spawned
 /// again; one that is not is spawned, with the MCP file the node wrote.
 #[tokio::test]
