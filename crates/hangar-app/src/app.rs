@@ -12,6 +12,7 @@
 //! `shell.rs` next to this file: what each intent does to the frame, the
 //! windows, the drawers and the focus.
 
+mod gpu;
 mod hooks;
 mod shell;
 
@@ -142,6 +143,7 @@ packages!(define_packages);
 
 /// Runs the app until its main window closes.
 pub fn run() -> iced::Result {
+    gpu::prefer_vulkan();
     iced::daemon(App::boot, App::update, App::view)
         .title(App::title)
         .theme(App::theme)
