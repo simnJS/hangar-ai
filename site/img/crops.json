@@ -1,10 +1,8 @@
 {
   "$comment": [
-    "What scripts/site-crops.mjs cuts out of the captures, and how. Run it with --sources <folder>.",
-    "The captures are real sessions of the app, 2560 x 1440 px: a 1280 x 720 window at scale 2 (HANGAR_DEV_CAPTURE_DIR, see shell/dev_screenshot.rs).",
-    "rect: [x, y, width, height] in capture pixels (scale 1: one capture pixel per unit),",
-    "or { \"ref\": \"path/in/the/rects/index\" } with optional pad and x/y/w/h overrides.",
-    "In a list of the index, a path step is a position or an entry's name: stills/en/hero/rects/workers/Zoe/box.",
+    "What scripts/site-crops.mjs cuts out of the captures, and how. Run it with --sources <folder of captures>.",
+    "The captures are Hangar 2.2 (debug build, HANGAR_DEV_CAPTURE_DIR) on demo states: a 1440 x 900 window at scale 2, so 2880 x 1800 px.",
+    "rect: [x, y, width, height] in capture pixels (scale 1: one capture pixel per unit).",
     "widths: the files written, img/<name>-<width>.avif and .webp; the page's srcset follows them.",
     "fade: pixels over which an edge the crop cuts through fades to that edge's own colour.",
     "Names ending in -m are the phone crops: one panel, drawn near its real size on a phone.",
@@ -27,269 +25,180 @@
   },
   "images": {
     "hero": {
-      "src": "alt/hero.png",
+      "src": "chat.png",
       "rect": [
         0,
         0,
-        2560,
-        1440
+        2880,
+        1800
       ],
       "widths": [
         1280,
         1920,
         2560
-      ],
-      "marks": [
-        [
-          12,
-          140,
-          484,
-          200
-        ],
-        [
-          524,
-          98,
-          208,
-          44
-        ],
-        [
-          1324,
-          98,
-          452,
-          44
-        ],
-        [
-          1324,
-          738,
-          452,
-          44
-        ],
-        [
-          1584,
-          22,
-          90,
-          50
-        ],
-        [
-          1968,
-          96,
-          584,
-          770
-        ]
       ]
     },
-    "pin": {
-      "src": "pin.png",
+    "hero-light": {
+      "src": "light.png",
       "rect": [
-        1850,
-        90,
-        690,
-        390
+        0,
+        0,
+        2880,
+        1800
       ],
       "widths": [
-        448,
-        690
+        1280,
+        1920,
+        2560
+      ]
+    },
+    "hero-m": {
+      "src": "chatm.png",
+      "rect": [
+        0,
+        92,
+        918,
+        1250
+      ],
+      "widths": [
+        400,
+        800
+      ]
+    },
+    "hero-light-m": {
+      "src": "chatml.png",
+      "rect": [
+        0,
+        92,
+        918,
+        1250
+      ],
+      "widths": [
+        400,
+        800
+      ]
+    },
+    "tasks": {
+      "src": "chat.png",
+      "rect": [
+        1690,
+        100,
+        580,
+        1400
+      ],
+      "fade": {
+        "bottom": 48
+      },
+      "widths": [
+        340,
+        580
+      ]
+    },
+    "panes": {
+      "src": "panes.png",
+      "rect": [
+        508,
+        92,
+        2372,
+        1630
+      ],
+      "widths": [
+        1186,
+        2372
+      ]
+    },
+    "panes-m": {
+      "src": "panes.png",
+      "rect": [
+        1696,
+        910,
+        1184,
+        812
+      ],
+      "widths": [
+        400,
+        800
       ]
     },
     "board": {
-      "src": "alt/board-inspector.png",
+      "src": "board.png",
       "rect": [
-        508,
-        90,
-        1458,
-        812
+        520,
+        185,
+        1160,
+        650
       ],
       "fade": {
-        "bottom": 64
+        "bottom": 40
       },
       "widths": [
-        729,
-        1458
+        560,
+        1120
       ]
     },
-    "workers": {
-      "src": "alt/hero.png",
+    "board-m": {
+      "src": "board.png",
       "rect": [
-        508,
-        90,
-        1458,
-        1262
+        520,
+        185,
+        1160,
+        650
       ],
       "widths": [
-        729,
-        1458
-      ]
-    },
-    "needs": {
-      "src": "alt/needs.png",
-      "rect": [
-        800,
-        80,
-        884,
-        910
-      ],
-      "widths": [
-        442,
-        884
-      ]
-    },
-    "orch": {
-      "src": "orch.png",
-      "rect": [
-        640,
-        512,
-        1280,
-        1176
-      ],
-      "widths": [
-        640,
-        1280
-      ]
-    },
-    "palette": {
-      "src": "alt/palette-open.png",
-      "rect": [
-        640,
-        202,
-        1280,
-        506
-      ],
-      "widths": [
-        640,
-        1280
-      ]
-    },
-    "stats": {
-      "src": "stats.png",
-      "rect": [
-        508,
-        90,
-        1452,
-        730
-      ],
-      "widths": [
-        726,
-        1452
+        400,
+        800
       ]
     },
     "model": {
       "src": "model.png",
       "rect": [
         508,
-        88,
-        2052,
-        920
+        92,
+        2372,
+        1630
       ],
       "widths": [
-        1180,
-        2052
-      ]
-    },
-    "hero-m": {
-      "src": "alt/hero.png",
-      "rect": [
-        508,
-        90,
-        1128,
-        760
-      ],
-      "widths": [
-        400,
-        732
-      ]
-    },
-    "pin-m": {
-      "src": "pin.png",
-      "rect": [
-        1850,
-        90,
-        690,
-        390
-      ],
-      "widths": [
-        400,
-        690
-      ]
-    },
-    "board-m": {
-      "src": "alt/board-inspector.png",
-      "rect": [
-        1240,
-        190,
-        720,
-        700
-      ],
-      "fade": {
-        "bottom": 64
-      },
-      "widths": [
-        400,
-        720
-      ]
-    },
-    "workers-m": {
-      "src": "alt/hero.png",
-      "rect": [
-        1316,
-        90,
-        650,
-        640
-      ],
-      "widths": [
-        400,
-        650
-      ]
-    },
-    "needs-m": {
-      "src": "alt/needs.png",
-      "rect": [
-        800,
-        80,
-        884,
-        910
-      ],
-      "widths": [
-        400,
-        800
-      ]
-    },
-    "orch-m": {
-      "src": "orch.png",
-      "rect": [
-        672,
-        1310,
-        1216,
-        250
-      ],
-      "widths": [
-        400,
-        800
-      ]
-    },
-    "stats-m": {
-      "src": "stats.png",
-      "rect": [
-        548,
-        212,
-        676,
-        596
-      ],
-      "widths": [
-        400,
-        676
+        1186,
+        2372
       ]
     },
     "model-m": {
       "src": "model.png",
       "rect": [
-        1536,
-        88,
-        1024,
-        920
+        1696,
+        92,
+        1184,
+        1630
       ],
       "widths": [
         400,
-        685
+        800
+      ]
+    },
+    "nodes": {
+      "src": "nodes.png",
+      "rect": [
+        1000,
+        330,
+        1290,
+        420
+      ],
+      "widths": [
+        560,
+        1120
+      ]
+    },
+    "nodes-m": {
+      "src": "nodes.png",
+      "rect": [
+        1000,
+        470,
+        850,
+        260
+      ],
+      "widths": [
+        400,
+        800
       ]
     },
     "mobile-for-you": {
