@@ -3,7 +3,7 @@
 
    Small jobs around a static page; the page reads fine without them.
 
-     1. themes: repaint the page
+     1. themes: repaint the page, and show the hero in the matching scheme
      2. the section bar, which marks where you are
      3. the download for the system you are on
      4. the delivery, which plays its four stages once
@@ -40,7 +40,10 @@
     segTrack: '--seg-track', segThumb: '--seg-thumb', shadow: '--shadow'
   };
 
-  var currentTheme = 'graphite';
+  // Until a visitor picks one, the page follows the system: Graphite, or
+  // GitHub Light on a light system (styles.css, data-theme="auto").
+  var prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+  var currentTheme = prefersLight ? 'github-light' : 'graphite';
 
   function applyTheme(theme) {
     Object.keys(TOKENS).forEach(function (key) {
@@ -48,9 +51,12 @@
     });
     root.style.colorScheme = theme.light ? 'light' : 'dark';
     root.dataset.theme = theme.id;
+    // The hero has a capture of the app in each scheme.
+    root.dataset.scheme = theme.light ? 'light' : 'dark';
     currentTheme = theme.id;
-    var meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute('content', theme.bar);
+    Array.prototype.forEach.call(document.querySelectorAll('meta[name="theme-color"]'), function (meta) {
+      meta.setAttribute('content', theme.bar);
+    });
   }
 
   (function swatches() {

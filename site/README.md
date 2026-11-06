@@ -8,6 +8,7 @@ loaded from another origin.
 index.html            the page
 styles.css            every colour is a token; Graphite unless main.js swaps them
 main.js               themes, section bar, download per OS, the delivery, folds
+assets/mobile.css     the Hangar Mobile section: the phones drawn around their screens
 img/                  crops of captures of the app, AVIF + WebP, cut as img/crops.json says
 fonts/                Inter (latin, variable, with optical sizes) and its OFL licence
 og.png                the 1200×630 share image for X, Open Graph and the rest
@@ -28,40 +29,56 @@ the demo went with the React sources (it is at tag `v1.12.1`, under `demo/`).
 
 ## The page
 
-One story, in order: what Hangar.AI is (hero), what 2.0 being native changes (the
-measures of 1.12.1 against 2.0, which come from `docs/native/BENCHMARK.md`), the
-orchestrator in four steps, Hangar Mobile, everything else, downloads, questions.
-Hangar runs Claude Code only since 2.0, and the page names no other agent.
+One story, short, in order: what Hangar.AI is (hero: one line, a download for
+the visitor's system and one link per OS, the chat view), the chat view, the
+orchestrator with its workers and deliveries, Hangar Mobile, kits and
+previews, the experiments (nodes, pane scopes), performance, "Also in the
+box", downloads, questions. Hangar runs Claude Code only since 2.0, and the
+page names no other agent.
 
-Every claim on it comes from the code. When a feature changes, check the copy
-against `crates/hangar-i18n/dict/en.json` (the English strings say what the app
-does in plain words) and against the file the claim names:
-`crates/hangar-app/src/state/types.rs` for the orchestration defaults (3
-workers, 2 attempts, merge by itself, Opus plans, Sonnet works and reviews),
+Every claim on it comes from the code, `CHANGELOG.md` or the English strings.
+When a feature changes, check the copy against `crates/hangar-i18n/dict/en.json`
+(the English strings say what the app does in plain words) and against the
+file the claim names: `crates/hangar-app/src/state/types.rs` for the defaults
+(Opus plans, Sonnet works and reviews; idle workspaces sleep after 10 minutes),
 `crates/hangar-core/src/delivery.rs` for the delivery stages,
-`crates/hangar-app/src/orchestration/brief.rs` for what the orchestrator is told.
+`crates/hangar-app/src/settings/experiments.rs` for the experiments.
+
+The performance figures are measures only: the 2.2 row is the changelog's
+(`[Unreleased]` until 2.2.0 is cut: CPU with eight agents printing, the wave
+of resumed sessions, the chat view's start, the executable's size), the 2.0
+row is `docs/native/BENCHMARK.md`'s, 1.12.1 against 2.0. Add a figure only
+with the measure it comes from.
 
 On a phone (below 600 px) the page keeps every point and drops detail: the
 words wrapped in `.wide-only` are left out there, so read them with the rest
-when the copy changes. The facts under the orchestrator and the list under
-"Everything else" are `<details class="fold">`, written open; `main.js` folds
-them to their titles on a phone.
+when the copy changes. The short facts (under the orchestrator and the kits,
+and "Also in the box") are `<details class="fold">`, written open; `main.js`
+folds them to their titles on a phone, and above 600 px they simply stay open.
 
-The delivery card in step 4 is HTML, not a capture. It is written in its final
-state; `main.js` resets it and plays the four stages once when it scrolls into
-view, unless the visitor asked for reduced motion. It is the only thing on the
-page that moves by itself, and it says it is an illustration.
+The delivery card is HTML, not a capture. It is written in its final state;
+`main.js` resets it and plays the four stages once when it scrolls into view,
+unless the visitor asked for reduced motion. It is the only thing on the page
+that moves by itself, and it says it is an illustration.
 
 ## Design
 
 The page wears the app's own chrome tokens. `styles.css` holds Graphite, the
-default theme, exactly as `crates/hangar-theme` has it; `main.js` holds the same
-tokens for seven more themes, two of them light, and the swatches in "An
-interface built like an IDE" repaint the page.
+default theme, exactly as `crates/hangar-theme` has it, and GitHub Light for
+a visitor whose system is light (`data-theme="auto"` on `<html>`, a
+`prefers-color-scheme` block). `main.js` holds the same tokens for eight
+themes, two of them light, and the swatches under "Kits & previews" repaint
+the page; picking one sets `data-theme` to its id and `data-scheme` to light
+or dark.
+
+The hero has a capture in each scheme (`hero`, `hero-light`): the page shows
+the one that matches the theme on screen, and the other, `loading="lazy"`
+under `display: none`, is never fetched.
 
 Graphite keeps colour for meaning, and so does the page: green is an agent at
-work, amber one waiting on you, cyan your turn, blue the focus and the thing to
-click. Radii follow the app: 4 to 6 px for controls, 8 for cards, 10 for
+work, amber one waiting on you, cyan your turn, blue the focus and the thing
+to click. The one decoration is a soft pool of the theme's accent behind the
+hero. Radii follow the app: 4 to 6 px for controls, 8 for cards, 10 for
 floating panels and windows. Type is Inter, as in the app, with its optical
 sizes doing the display cut of the headlines; monospace is only for what a
 terminal would print.
@@ -79,28 +96,40 @@ then map the `--*` names to the keys `TOKENS` lists in `main.js`.
 
 ## Captures
 
-Everything in `img/` but the phone screens is the real app: Hangar.AI 2.0 on
-Linux, with real Claude Code agents (the orchestrator on Opus, workers and
-reviewer on Sonnet) orchestrating **checkout-v2**, a small sample repository in
-`/work`, over one night. A debug build takes them on demand
-(`HANGAR_DEV_CAPTURE_DIR`, then `kill -USR1` the app; `dev_command` on the
-control API switches views, see `crates/hangar-app/src/shell/dev_screenshot.rs`). The captures are lossless PNGs of the window's client area:
+Everything in `img/` but the phone screens is the real app: a debug build of
+Hangar.AI 2.2 on Linux, on demo states written for the site, with no path,
+account or project of the person taking them. The scripts live outside the
+repository, in `~/dev/bench/site-shots/`:
 
-- window 1280 × 720 at scale 2, so each capture is 2560 × 1440 px;
-- Graphite, the interface in English, permissions in Auto mode;
-- a run of its own (another data folder, another identifier), so no other
-  project or path of the person taking them appears;
-- the hero is round 2: Iris, the orchestrator, reads Zoe's delivery on the
-  coupon task while Eli writes the order receipt; the board, Needs you and the
-  orchestration settings are the same minutes; the grid of four panes is round
-  4, with Ava, Max and Leo at work;
-- the pane menu, the palette filtered on "orchestrat" and the 3D preview are
-  Eve's pane in storefront; the statistics are filtered on checkout-v2, the only
-  project on screen.
+- `demo.py` writes a root that a bwrap sandbox mounts at `/home/dev` (HOME,
+  projects, data folder, endpoint file): a **Recipes** repository with
+  worktrees for its workers, a board with tasks at every stage (progress
+  reported, one blocked on a question for you, one ready to land), Iris's
+  conversation as a Claude Code transcript, a **landing-pad** repository with
+  a GLB model, and one data folder per state;
+- `fake_claude.py` stands in for Claude Code in every pane: it prints a
+  handcrafted screen (`screens/<pane>.ans`) and tells Hangar through the
+  bridge what a real session would (hello, context use, a turn under way, a
+  permission waiting, a `model_show` call), so states, the navigator and the
+  inspector read as with real agents;
+- `shoot.py` starts the debug build per state inside the sandbox
+  (`HANGAR_DEV_CAPTURE_DIR`, `kill -USR1` for each capture, `dev_command` to
+  switch to the board; `HANGAR_DEV_SETTINGS=nodes` and
+  `HANGAR_DEV_NODES_CONNECT=1` for the nodes page, against an sshd container
+  of its own on a port of the worker's range).
 
-Before a capture goes public, check it frame by frame: no `C:\Users\…` or
-`%APPDATA%` path (a worker's launch line shows one for a second or two), no
-e-mail address, no other project, and no "bypass permissions" banner.
+The captures are lossless PNGs of the window's client area, Graphite unless
+named, English, permissions in Auto mode:
+
+- `chat`, `light` (GitHub Light), `panes`, `board`, `model`, `nodes`: a window
+  1440 × 900 at scale 2, so 2880 × 1800 px;
+- `chatm`, `chatml`: the chat alone (navigator and inspector closed) in a
+  window 760 × 900, for the phone's hero, where the wide one would be too small
+  to read.
+
+Before a capture goes public, check it frame by frame: no `/home/<you>` or
+`C:\Users\…` path, no e-mail address, no other project, and no "bypass
+permissions" banner.
 
 `img/crops.json` says what is cut out of the captures, and
 `scripts/site-crops.mjs` cuts it:
@@ -110,63 +139,54 @@ node scripts/site-crops.mjs --sources <folder of captures>          # every imag
 node scripts/site-crops.mjs --sources <folder> --only hero,board     # some of them
 ```
 
+The pixels are Pillow's, through Python, and it must write AVIF (Pillow 11.2
+or later from pip; a distribution's Pillow may lack it): point `PYTHON` at
+one that does, such as a virtual environment's.
+
 For each image, `crops.json` gives the capture it comes from, a rectangle in the
-capture (`[x, y, width, height]`, in units of `scale` capture pixels: 1 for
-these captures, so plain capture pixels), the widths to write, and optionally a
-fade over an edge the crop cuts through. The first width sets the `width` and
-`height` the page reserves, and an image is never drawn wider than that, so it
-must be at least the width the layout gives the image. Every width becomes
-`img/<name>-<width>.avif` (quality 62) and `.webp` (quality 82), encoded by
-Pillow through Python (`pip install pillow`), and widths an image no longer has
-are deleted. The script then writes into `index.html` the `srcset`, `src`,
-`width` and `height` of each `<source>` and `<img>` marked `data-crop="<name>"`,
-and places the hero's numbered outlines (`<span class="mark" data-of="hero">`,
-in the order of the hero's `marks`) in percent of its crop. It warns when a
-width asks for more pixels than the capture has there, or a rectangle runs off
-it.
+capture (`[x, y, width, height]`, in capture pixels), the widths to write, and
+optionally a fade over an edge the crop cuts through. The first width sets the
+`width` and `height` the page reserves, and an image is never drawn wider than
+that, so it must be at least the width the layout gives the image. Every width
+becomes `img/<name>-<width>.avif` (quality 62) and `.webp` (quality 82), and
+widths an image no longer has are deleted. The script then writes into
+`index.html` the `srcset`, `src`, `width` and `height` of each `<source>` and
+`<img>` marked `data-crop="<name>"`. It can also place numbered outlines over
+an image (`marks`, `<span class="mark" data-of="…">`); the page uses none now.
+It warns when a width asks for more pixels than the capture has there, or a
+rectangle runs off it.
 
 Every URL it writes carries `?v=` and the start of the file's hash, and so do
-`styles.css`, `main.js` and the share image `og.png`. The site sends images,
-styles and scripts with a four-hour browser cache, so without it a visitor who
-came before an update would get the new page with the old images under it,
-the hero's outlines landing on the wrong panes. After changing `styles.css`,
-`main.js` or `og.png` by hand, run the script again (`--html-only` is enough)
-so their stamps follow.
-
-A rectangle can also point into the index of element rectangles that comes
-with the captures (`rects`, a path from the captures folder; here
-`../../index.json`, in capture pixels): `{ "ref":
-"stills/en/s-grid/rects/workers/Max/box" }`, where a step through a list is a
-position or an entry's `name`, with an optional `pad` and `x`, `y`, `w` or `h`
-to override, or `{ "union": [...] }` over several.
+`styles.css`, `main.js`, `assets/mobile.css` and the share image `og.png`. The
+site sends images, styles and scripts with a four-hour browser cache, so
+without it a visitor who came before an update would get the new page with the
+old images under it. After changing `styles.css`, `main.js` or `og.png` by
+hand, run the script again (`--html-only` is enough) so their stamps follow.
 
 The full-window captures are not kept in the repository; `--sources` names the
 folder that holds them. To swap them, put the new ones in a folder, set each
-image's `src` and `rect` (or `rects` and the refs) and `scale`, and run the
-script. Nothing in the page is edited by hand.
+image's `src` and `rect`, and run the script. Nothing in the page is edited by
+hand.
 
 Below 600 px each `<picture>` switches, through a `media` source, to the `-m`
-crop of the same image: the orchestrator's pane, two board columns, one
-worker, the Needs you popover, the pane menu, two statistics cards, the 3D
-preview, drawn close to the size the app draws them so their text reads on a
-phone. There the hero's outlines give way to the one line of its legend
-that matches its crop, and the palette capture is left out. Everything below
-the hero is `loading="lazy"`.
+crop of the same image, drawn close to the size the app draws it so its text
+reads on a phone: the narrow chat, one pane (Eva's permission), two board
+columns, the 3D preview, the node's card. Everything below the hero is
+`loading="lazy"`.
 
-The README's images (`../.github/assets`) are cut from the same captures, at
-full capture size: the hero without the navigator, so the panes read at the
-width of a README, then the Needs you popover, the orchestration settings, the
-board and the statistics cards. `../.github/social-preview.png` (1280 × 640) is
-rendered the way `og.png` is, with the hero capture.
+The phone screens (`mobile-*`) are Hangar Mobile in its mock mode, unchanged
+since 2.0; `crops.json` keeps their entries, so cut them with `--only` naming
+the others when their sources are not at hand.
 
-`og.png` is an HTML page rendered at 1200 × 630: the brand, the headline, one
-line on the orchestrator, and the hero capture bleeding off the bottom.
+`og.png` is an HTML page rendered at 1200 × 630 with a headless Chrome: the
+brand, the headline, one line on the orchestrator, and the hero capture
+bleeding off the bottom (`~/dev/bench/site-shots/og/og.html`).
 
 ## Releasing a new version
 
 The version is written into `index.html` by hand, so the download buttons point
-straight at the files. Replace the version (`2.0.0` now) everywhere in the page
-(the brand, the download heading, the five asset links and the JSON-LD). The
+straight at the files. Replace the version (`2.2.0` now) everywhere in the page
+(the brand, the download heading, the hero's three links, the five asset links and the JSON-LD). The
 asset names are the ones the release workflow uploads, kept from the Tauri
 builds (`docs/native/PACKAGING.md`):
 
