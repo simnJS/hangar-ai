@@ -93,7 +93,46 @@ struct Gathering {
     stamps: Vec<i64>,
 }
 
-type Buckets = HashMap<(u32, i64, i32), Bucket>;
+/// A hasher for the integers this sums over — message keys (FNV digests
+/// already), times, bucket coordinates — hundreds of thousands per answer on
+/// months of history. std's SipHash guards a map against keys chosen to
+/// collide, which these are not, and costs several times as much.
+#[derive(Default, Clone, Copy)]
+struct Mix(u64);
+
+impl std::hash::Hasher for Mix {
+    fn finish(&self) -> u64 {
+        // Folds the high bits down: hashbrown picks buckets from the low ones
+        // and its control bytes from the high ones.
+        self.0 ^ (self.0 >> 29)
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for &byte in bytes {
+            self.write_u64(byte as u64);
+        }
+    }
+
+    fn write_u64(&mut self, value: u64) {
+        self.0 = (self.0.rotate_left(5) ^ value).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
+
+    fn write_u32(&mut self, value: u32) {
+        self.write_u64(value as u64);
+    }
+
+    fn write_i32(&mut self, value: i32) {
+        self.write_u64(value as u32 as u64);
+    }
+
+    fn write_i64(&mut self, value: i64) {
+        self.write_u64(value as u64);
+    }
+}
+
+type Fast = std::hash::BuildHasherDefault<Mix>;
+
+type Buckets = HashMap<(u32, i64, i32), Bucket, Fast>;
 
 fn bucket(buckets: &mut Buckets, session: usize, at: i64, model: i32) -> &mut Bucket {
     buckets
@@ -136,10 +175,10 @@ pub fn aggregate<'a>(
     let mut gathered: Vec<Gathering> = Vec::new();
     let mut models: Vec<String> = Vec::new();
     let mut model_index: HashMap<&str, i32> = HashMap::new();
-    let mut buckets: Buckets = HashMap::new();
-    let mut seen: HashSet<u64> = HashSet::new();
-    let mut seen_prompts: HashSet<u64> = HashSet::new();
-    let mut seen_stamps: HashSet<i64> = HashSet::new();
+    let mut buckets: Buckets = HashMap::default();
+    let mut seen: HashSet<u64, Fast> = HashSet::default();
+    let mut seen_prompts: HashSet<u64, Fast> = HashSet::default();
+    let mut seen_stamps: HashSet<i64, Fast> = HashSet::default();
 
     for digest in &digests {
         let at = *index.entry(digest.session.as_str()).or_insert_with(|| {
@@ -174,6 +213,9 @@ pub fn aggregate<'a>(
             .stamps
             .extend(digest.stamps.iter().filter(|&&at| seen_stamps.insert(at)));
 
+        // The digest's own model numbers, made the answer's once per file
+        // rather than looked up by name once per call.
+        let mut numbered: Vec<Option<i32>> = vec![None; digest.models.len() + 1];
         for call in &digest.calls {
             if call.key != 0 && !seen.insert(call.key) {
                 continue;
@@ -181,14 +223,17 @@ pub fn aggregate<'a>(
             if !window.contains(call.at) {
                 continue;
             }
+            let known = (call.model as usize).min(digest.models.len());
             let model = digest
                 .models
-                .get(call.model as usize)
+                .get(known)
                 .map(String::as_str)
                 .unwrap_or("unknown");
-            let model_at = *model_index.entry(model).or_insert_with(|| {
-                models.push(model.to_string());
-                (models.len() - 1) as i32
+            let model_at = *numbered[known].get_or_insert_with(|| {
+                *model_index.entry(model).or_insert_with(|| {
+                    models.push(model.to_string());
+                    (models.len() - 1) as i32
+                })
             });
             let tokens = CallTokens {
                 input: call.input,
@@ -271,6 +316,9 @@ pub fn aggregate<'a>(
         buckets: rows,
     }
 }
+
+#[cfg(test)]
+mod bench;
 
 #[cfg(test)]
 mod tests {

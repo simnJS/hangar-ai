@@ -2234,18 +2234,41 @@ pub struct FileDiff {
     pub truncated: bool,
 }
 
-/// Reads `diff --name-status -z`: a status token, then one path — two for a
-/// rename or a copy, the source first. The score glued to R and C ("R087") is
-/// dropped; the letter is what the list shows.
-fn parse_name_status(output: &str) -> Vec<ChangedFile> {
-    let mut tokens = output.split('\0').filter(|token| !token.is_empty());
-    let mut files = Vec::new();
+/// The next NUL-terminated token of `rest`, which moves past it.
+fn next_token<'a>(rest: &mut &'a str) -> Option<&'a str> {
+    let (token, after) = rest.split_once('\0')?;
+    *rest = after;
+    Some(token)
+}
 
-    while let Some(status) = tokens.next() {
-        let letter: String = status.chars().take(1).collect();
-        let Some(first) = tokens.next() else { break };
+/// Reads `diff --raw --numstat -z`: one diff for both lists, where two calls
+/// each walked the whole working tree again.
+///
+/// The raw records come first, each opening with ':' (the modes and shas,
+/// then the status), followed by one path — two for a rename or a copy, the
+/// source first. The score glued to R and C ("R087") is dropped; the letter is
+/// what the list shows. What follows the last of them is `--numstat`'s.
+fn parse_raw_numstat(output: &str) -> (Vec<ChangedFile>, NumStat) {
+    let mut rest = output;
+    let mut files = Vec::new();
+    while rest.starts_with(':') {
+        let Some(header) = next_token(&mut rest) else {
+            break;
+        };
+        let letter: String = header
+            .rsplit(' ')
+            .next()
+            .unwrap_or_default()
+            .chars()
+            .take(1)
+            .collect();
+        let Some(first) = next_token(&mut rest) else {
+            break;
+        };
         let (old_path, path) = if letter == "R" || letter == "C" {
-            let Some(second) = tokens.next() else { break };
+            let Some(second) = next_token(&mut rest) else {
+                break;
+            };
             (Some(first.to_string()), second.to_string())
         } else {
             (None, first.to_string())
@@ -2257,15 +2280,18 @@ fn parse_name_status(output: &str) -> Vec<ChangedFile> {
             ..ChangedFile::default()
         });
     }
-    files
+    (files, parse_numstat(rest))
 }
+
+/// Lines added and deleted per path; None for a binary file.
+type NumStat = HashMap<String, (Option<u32>, Option<u32>)>;
 
 /// Reads `diff --numstat -z`, keyed by the path a file has now.
 ///
 /// A plain record is "added<TAB>deleted<TAB>path"; a rename leaves the path
 /// empty and puts the source and the destination in the next two tokens. A
 /// binary file counts "-" for both, which parses as None.
-fn parse_numstat(output: &str) -> HashMap<String, (Option<u32>, Option<u32>)> {
+fn parse_numstat(output: &str) -> NumStat {
     let mut tokens = output.split('\0');
     let mut stats = HashMap::new();
 
@@ -2463,24 +2489,32 @@ fn diff_from(root: &Path, base: Option<&str>) -> Result<DiffFrom, GitError> {
 fn changes(dir: &Path, base: Option<&str>) -> Result<Changes, GitError> {
     let root = work_root(dir)?;
     let DiffFrom { rev: from, unborn } = diff_from(&root, base)?;
-    let diff = |format: &'static str| {
-        run_git(
+    // The diff and the untracked files side by side: each walks the whole
+    // working tree, which on a big repository is most of the time this takes.
+    let (diff, untracked) = std::thread::scope(|scope| {
+        let untracked =
+            scope.spawn(|| run_git(&root, &["ls-files", "--others", "--exclude-standard", "-z"]));
+        let diff = run_git(
             &root,
             &[
                 "diff",
                 "--no-ext-diff",
                 "--no-color",
                 "-M",
-                format,
+                "--raw",
+                "--numstat",
                 "-z",
                 &from,
                 "--",
             ],
-        )
-    };
+        );
+        let untracked = untracked
+            .join()
+            .unwrap_or_else(|_| Err(GitError::Failed("git ls-files stopped".to_string())));
+        (diff, untracked)
+    });
 
-    let mut files = parse_name_status(&diff("--name-status")?);
-    let stats = parse_numstat(&diff("--numstat")?);
+    let (mut files, stats) = parse_raw_numstat(&diff?);
     for file in &mut files {
         if let Some((added, deleted)) = stats.get(&file.path) {
             file.additions = *added;
@@ -2489,9 +2523,8 @@ fn changes(dir: &Path, base: Option<&str>) -> Result<Changes, GitError> {
         }
     }
 
-    let untracked = run_git(&root, &["ls-files", "--others", "--exclude-standard", "-z"])?;
     files.extend(
-        parse_ls_files(&untracked)
+        parse_ls_files(&untracked?)
             .into_iter()
             .map(|path| ChangedFile {
                 path,
@@ -2677,6 +2710,51 @@ pub(crate) fn exclude_locally(root: &Path, dir: &str, probe: &str) {
         let _ = std::fs::create_dir_all(parent);
     }
     let _ = std::fs::write(&exclude, body);
+}
+
+/// What the git view costs on a big repository: the looks the inspector,
+/// the pane headers and the git view take, on a repository named by
+/// `HANGAR_BENCH_REPO` (the audit used nodejs/node: 49k commits, 57k files,
+/// 300 files edited, 50 untracked, 20 worktrees).
+///
+/// ```text
+/// HANGAR_BENCH_REPO=~/dev/bench/big-node cargo test --release -p hangar-core \
+///     --lib git::bench -- --ignored --nocapture
+/// ```
+#[cfg(test)]
+mod bench {
+    use super::*;
+    use crate::board::bench::{timed, Latencies};
+
+    #[test]
+    #[ignore = "a benchmark: run it in release with --ignored --nocapture"]
+    fn git_view_on_a_big_repository() {
+        let Some(repo) = std::env::var_os("HANGAR_BENCH_REPO") else {
+            println!("HANGAR_BENCH_REPO is not set: nothing to measure");
+            return;
+        };
+        let repo = PathBuf::from(repo);
+        let (mut info, mut looks, mut big, mut listed) =
+            (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        let biggest = std::env::var("HANGAR_BENCH_FILE").unwrap_or_default();
+        for _ in 0..7 {
+            timed(&mut info, || repo_info(&repo));
+            let found = timed(&mut looks, || changes(&repo, None).unwrap());
+            assert!(!found.files.is_empty());
+            if !biggest.is_empty() {
+                timed(&mut big, || {
+                    file_diff(&repo, &biggest, None, false, None).unwrap()
+                });
+            }
+            timed(&mut listed, || list_worktrees(&repo).unwrap());
+        }
+        println!("{}", Latencies(info).line("git_repo_info"));
+        println!("{}", Latencies(looks).line("git_changes"));
+        if !big.is_empty() {
+            println!("{}", Latencies(big).line("git_file_diff (big file)"));
+        }
+        println!("{}", Latencies(listed).line("git_worktree_list"));
+    }
 }
 
 #[cfg(test)]
@@ -3296,8 +3374,17 @@ mod tests {
     }
 
     #[test]
-    fn name_status_reads_renames_as_two_paths_and_drops_the_score() {
-        let files = parse_name_status("M\0src/a b.rs\0R087\0old/x.rs\0new/x.rs\0D\0gone.txt\0");
+    fn raw_records_read_renames_as_two_paths_and_drop_the_score() {
+        // As git 2.x prints `diff -M --raw --numstat -z`, a path that starts
+        // with ':' included: it is a path, not the next record.
+        let (files, stats) = parse_raw_numstat(concat!(
+            ":100644 100644 bf30bca 0000000 M\0src/a b.rs\0",
+            ":100644 100644 9405325 0fdf397 R087\0old/x.rs\0new/x.rs\0",
+            ":100644 000000 b68fde2 0000000 D\0:gone.txt\0",
+            "3\t1\tsrc/a b.rs\0",
+            "0\t2\t\0old/x.rs\0new/x.rs\0",
+            "0\t1\t:gone.txt\0",
+        ));
 
         assert_eq!(files.len(), 3);
         assert_eq!(files[0].status, "M");
@@ -3307,6 +3394,11 @@ mod tests {
         assert_eq!(files[1].old_path.as_deref(), Some("old/x.rs"));
         assert_eq!(files[1].path, "new/x.rs");
         assert_eq!(files[2].status, "D");
+        assert_eq!(files[2].path, ":gone.txt");
+        assert_eq!(stats.get("src/a b.rs"), Some(&(Some(3), Some(1))));
+        assert_eq!(stats.get("new/x.rs"), Some(&(Some(0), Some(2))));
+        assert_eq!(stats.get(":gone.txt"), Some(&(Some(0), Some(1))));
+        assert_eq!(parse_raw_numstat("").0.len(), 0);
     }
 
     #[test]
